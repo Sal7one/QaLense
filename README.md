@@ -12,7 +12,7 @@ QA uses it without Android Studio. Developers integrate it once. Engineers stop 
 
 > **New here?** Read [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — a comprehensive guide for QA testers,
 > app developers, and library contributors. Integrating into your own app? Follow
-> [`integration_llm.md`](integration.md) — a copy-paste guide precise enough for an AI agent.
+> [`integration.md`](integration.md) — a copy-paste guide precise enough for an AI agent.
 > History: [`CHANGELOG.md`](CHANGELOG.md).
 
 > Release builds are a **no-op** with the identical public API — zero overlay, zero sensors, zero
