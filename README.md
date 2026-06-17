@@ -1,4 +1,4 @@
-# QaLens — Mobile Release Evidence SDK (debug-only)
+# QaLens — Mobile Release Evidence SDK (debug-only set of libraries)
 
 QaLens is a **debug-only release evidence SDK** for Android Jetpack Compose apps. It automatically
 captures *what happened, where, and why it may have happened*, then produces a clean, redacted,
