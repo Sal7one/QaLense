@@ -1,0 +1,58 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Opt-in MediaProjection video recording (debug tool). Only used when the app calls
+         QaLens.startRecording(video = true); the default frame recorder needs none of these. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Floating REC/stop chip while recording (granted by QA via the Control Room; optional). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Webhook upload of .sal recordings to the QA/AI-analysis backend (Control Room). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application>
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="com.qalens.QaLensStartupInitializer"
+                android:value="androidx.startup" />
+        </provider>
+
+        <activity
+            android:name="com.qalens.QaLensProjectionActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:exported="false" />
+
+        <service
+            android:name="com.qalens.QaLensProjectionService"
+            android:foregroundServiceType="mediaProjection"
+            android:exported="false" />
+
+        <!-- Command service: handles notification / Control Room actions for the whole process
+             lifetime (replaces the old activity-bound receiver whose Stop action could go dead). -->
+        <service
+            android:name="com.qalens.QaLensControlService"
+            android:exported="false" />
+
+        <!-- Control Room: QA command & control in its OWN task so its launcher icon never collides
+             with (or resumes) the host app's task — and it stays reachable when the overlay breaks. -->
+        <activity
+            android:name="com.qalens.QaLensControlActivity"
+            android:label="QaLens Control"
+            android:icon="@drawable/qalens_control_icon"
+            android:roundIcon="@drawable/qalens_control_icon"
+            android:exported="true"
+            android:taskAffinity="${applicationId}.qalens.control"
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.Material.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

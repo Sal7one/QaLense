@@ -1,0 +1,17 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+        <!-- FileProvider used exclusively by QaLens screenshot sharing.
+             Subclassed to avoid authority conflicts with the host app's own FileProvider. -->
+        <provider
+            android:name="com.qalens.android.QaLensFileProvider"
+            android:authorities="${applicationId}.qalens.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/qalens_file_paths" />
+        </provider>
+    </application>
+</manifest>

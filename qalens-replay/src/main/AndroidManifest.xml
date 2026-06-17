@@ -1,0 +1,20 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Debug-only QA tool. No LAUNCHER icon of its own anymore (the Control Room is the single
+             QA entry point and opens recordings here). Own taskAffinity + singleTask so opening a
+             shared .sal NEVER hijacks the host app's task — previously the player ended up inside
+             the app's task and both launcher icons then resumed it showing the player. -->
+        <activity
+            android:name="com.qalens.replay.QaLensPlayerActivity"
+            android:label="QaLens Player"
+            android:exported="true"
+            android:taskAffinity="${applicationId}.qalens.player"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="application/octet-stream" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -1,0 +1,74 @@
+{
+  "format": "qalens-appsal/1",
+  "package": "com.qalens.sample",
+  "name": "QaLens Sample — payments team QA config",
+  "exportedAt": 1781280000000,
+  "ui": {
+    "panelMode": "minimal",
+    "overlayAlpha": 0.95,
+    "dockBottom": false
+  },
+  "webhook": {
+    "url": "https://qa.example.com/api/sal-intake",
+    "headerName": "Authorization",
+    "headerValue": "•••",
+    "params": "team=payments&pipeline=nightly",
+    "includeMeta": true
+  },
+  "queries": [
+    {
+      "name": "Pending transactions",
+      "db": "sample.db",
+      "sql": "SELECT id, merchant, amount FROM transactions WHERE pending = 1 ORDER BY id DESC"
+    },
+    {
+      "name": "Balance per account",
+      "db": "sample.db",
+      "sql": "SELECT a.name, a.balance, COUNT(t.id) AS tx FROM accounts a LEFT JOIN transactions t ON t.account_id = a.id GROUP BY a.id"
+    },
+    {
+      "name": "Reset pending flag (repro cleanup)",
+      "db": "sample.db",
+      "sql": "UPDATE transactions SET pending = 0 WHERE pending = 1"
+    }
+  ],
+  "macros": [
+    {
+      "name": "Smoke: accounts + transfer",
+      "steps": [
+        "deeplink qalenssample://accounts",
+        "wait 1200",
+        "screenshot",
+        "deeplink qalenssample://account/2",
+        "wait 1200",
+        "mark transfer entry point reached"
+      ]
+    },
+    {
+      "name": "Record the failing transfer",
+      "steps": [
+        "record",
+        "deeplink qalenssample://account/2",
+        "wait 1500",
+        "mark about to confirm transfer",
+        "wait 4000",
+        "stop"
+      ]
+    },
+    {
+      "name": "Auto transfer 1,500 (hands-free)",
+      "steps": [
+        "deeplink qalenssample://account/2",
+        "tap Transfer",
+        "type transfer.amount.field 1500",
+        "tap transfer.confirm",
+        "wait 2000",
+        "mark transfer submitted by macro",
+        "screenshot"
+      ]
+    }
+  ],
+  "data": {
+    "watchPrefs": ["sample_settings", "qalens_prefs"]
+  }
+}
