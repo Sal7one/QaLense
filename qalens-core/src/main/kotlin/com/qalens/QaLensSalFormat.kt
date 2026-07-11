@@ -144,7 +144,10 @@ object SalTracks {
                 "latencyMs" to it.latencyMs,
                 "requestBytes" to it.requestBodyBytes,
                 "responseBytes" to it.responseBodyBytes,
-                "error" to it.error
+                "error" to it.error,
+                "connectivity" to it.connectivity?.let { c ->
+                    mapOf("type" to c.type.name, "strengthBars" to c.strengthBars, "hasVpn" to c.hasVpn, "isMetered" to c.isMetered)
+                }
             )
         })
 
@@ -189,6 +192,66 @@ object SalTracks {
                 "route" to s.route?.let(config::redact),
                 "featureFlags" to s.featureFlags,
                 "dataSources" to s.dataSources.mapValues { (_, kv) -> kv.mapValues { config.redact(it.value) } }
+            )
+        })
+
+    fun crashes(crashes: List<QaLensCrash>, config: QaLensConfig): String =
+        SalJson.encode(crashes.map { c ->
+            mapOf(
+                "ts" to c.timestampMillis,
+                "type" to c.type.name,
+                "thread" to config.redact(c.thread),
+                "throwable" to c.throwable?.let(config::redact),
+                "stackTrace" to c.stackTrace,
+                "screen" to c.screen?.let(config::redact),
+                "route" to c.route?.let(config::redact),
+                "lastNetworkSummary" to c.lastNetworkSummary?.let(config::redact)
+            )
+        })
+
+    fun performance(samples: List<FrameMetricsSample>, config: QaLensConfig): String =
+        SalJson.encode(samples.map { s ->
+            mapOf(
+                "ts" to s.timestampMillis,
+                "totalMs" to s.totalMs,
+                "layoutMs" to s.layoutMs,
+                "drawMs" to s.drawMs,
+                "gpuMs" to s.gpuMs,
+                "jank" to s.jank,
+                "frozen" to s.frozen
+            )
+        })
+
+    fun connectivity(transitions: List<ConnectivitySnapshot>): String =
+        SalJson.encode(transitions.map { c ->
+            mapOf(
+                "ts" to c.timestampMillis,
+                "type" to c.type.name,
+                "strengthBars" to c.strengthBars,
+                "hasVpn" to c.hasVpn,
+                "isMetered" to c.isMetered
+            )
+        })
+
+    fun memory(samples: List<MemorySample>): String =
+        SalJson.encode(samples.map { m ->
+            mapOf(
+                "ts" to m.timestampMillis,
+                "totalKb" to m.totalKb,
+                "freeKb" to m.freeKb,
+                "nativeKb" to m.nativeKb,
+                "trimLevel" to m.trimLevel
+            )
+        })
+
+    /** C9: QA bookmarks / annotations. */
+    fun marks(bookmarks: List<Bookmark>): String =
+        SalJson.encode(bookmarks.map { b ->
+            mapOf(
+                "id" to b.id,
+                "ts" to b.timestampMillis,
+                "label" to b.label,
+                "severity" to b.severity.name.lowercase()
             )
         })
 }

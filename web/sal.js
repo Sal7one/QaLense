@@ -98,6 +98,11 @@
   // Parse the extracted files into a structured session.
   function parse(files) {
     const manifest = jsonOf(files, "manifest.json", {});
+    // C15: Validate formatVersion for forward-compatibility.
+    const fv = manifest.formatVersion;
+    if (fv !== undefined && typeof fv === "number" && fv > 1) {
+      console.warn(`QaLens: .sal formatVersion ${fv} is newer than supported (1). Some features may not render correctly.`);
+    }
     const start = manifest.startMillis || 0;
     const end = manifest.endMillis || start + 1;
 
@@ -126,6 +131,7 @@
       network: jsonOf(files, "network.json", []),
       logs: jsonOf(files, "logs.json", []),
       state: jsonOf(files, "state.json", []),
+      marks: jsonOf(files, "marks.json", []),
       report: textOf(files, "report.txt"),
     };
   }

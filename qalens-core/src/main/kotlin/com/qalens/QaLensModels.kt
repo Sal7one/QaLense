@@ -105,6 +105,118 @@ data class QaEvent(
 
 enum class QaEventType { LOG, EVENT, BREADCRUMB }
 
+/**
+ * A surfaced failure (recording, screenshot, export, webhook, navigation, data source, …).
+ * Replaces the old pattern of swallowing exceptions into the event log where QA never saw them.
+ * The panel renders a dismissible banner when [errors] is non-empty; each may carry a [retry] lambda.
+ */
+data class QaLensError(
+    val id: String,
+    val kind: ErrorKind,
+    val message: String,
+    val timestampMillis: Long = System.currentTimeMillis(),
+    /** If non-null, the banner shows a ↻ Retry button that invokes this. */
+    val retry: (() -> Unit)? = null
+)
+
+enum class ErrorKind {
+    RECORDING,
+    SCREENSHOT,
+    EXPORT,
+    WEBHOOK,
+    NAVIGATION,
+    DATA_SOURCE,
+    OTHER
+}
+
+/**
+ * A captured crash or ANR. Stored in `QaLensUiState.crashes` (capped, in-memory ring buffer) and
+ * serialized as `crashes.json` inside the `.sal`. The stack trace is captured at throw time; the
+ * screen/route/network summary is the *context that led to the crash* — QaLens's unique angle.
+ */
+data class QaLensCrash(
+    val timestampMillis: Long = System.currentTimeMillis(),
+    val type: CrashType,
+    val thread: String,
+    val throwable: String?,
+    val stackTrace: String,
+    val screen: String? = null,
+    val route: String? = null,
+    val lastNetworkSummary: String? = null
+)
+
+enum class CrashType { CRASH, ANR, COROUTINE_EXCEPTION }
+
+/** Human label for reports and analysis.json anomalies. */
+val CrashType.display: String get() = when (this) {
+    CrashType.CRASH -> "Crash"
+    CrashType.ANR -> "ANR"
+    CrashType.COROUTINE_EXCEPTION -> "Coroutine exception"
+}
+
+/**
+ * C9: A QA bookmark / annotation dropped during a session to flag a notable moment.
+ * Stored in `QaLensUiState.bookmarks` and the `.sal` `marks.json` track.
+ */
+data class Bookmark(
+    val id: String = java.util.UUID.randomUUID().toString().take(8),
+    val timestampMillis: Long = System.currentTimeMillis(),
+    val label: String,
+    val severity: BookmarkSeverity = BookmarkSeverity.INFO
+)
+
+enum class BookmarkSeverity { INFO, WARNING, BUG }
+
+/**
+ * One frame's render timing, captured via `Window.OnFrameMetricsAvailableListener` (API 24+).
+ * Jank = a frame slower than the platform's refresh deadline (~16ms on 60Hz); frozen = >700ms.
+ * Stored in `QaLensUiState.frameMetrics` (capped ring buffer) and the `.sal` `performance.json` track.
+ */
+data class FrameMetricsSample(
+    val timestampMillis: Long = System.currentTimeMillis(),
+    val totalMs: Long,
+    val layoutMs: Long = 0,
+    val drawMs: Long = 0,
+    val gpuMs: Long = 0,
+    val jank: Boolean = false,
+    val frozen: Boolean = false
+) {
+    companion object {
+        /** A frame taking longer than this (ms) misses a 60Hz vsync → visible jank. */
+        const val JANK_THRESHOLD_MS = 16L
+        /** A frame taking longer than this (ms) means the app appeared frozen to the user. */
+        const val FROZEN_THRESHOLD_MS = 700L
+    }
+}
+
+/**
+ * A point-in-time snapshot of the device's network connectivity. Captured by
+ * `QaLensConnectivity` (via `ConnectivityManager.NetworkCallback`) and stamped onto each
+ * [NetworkEvent] at request time, so a failed request can be distinguished as "server 500" vs
+ * "device lost connection mid-request" — feeding the [BugClassifier].
+ */
+data class ConnectivitySnapshot(
+    val timestampMillis: Long = System.currentTimeMillis(),
+    val type: ConnectivityType,
+    val strengthBars: Int = 0,
+    val hasVpn: Boolean = false,
+    val isMetered: Boolean = false
+)
+
+enum class ConnectivityType { WIFI, CELLULAR, ETHERNET, OFFLINE, UNKNOWN }
+
+/**
+ * One memory-usage sample, captured during a recording (or on a trim event). Feeds the
+ * `.sal` `memory.json` track and the "Memory" card in the Device tab. B8.
+ */
+data class MemorySample(
+    val timestampMillis: Long = System.currentTimeMillis(),
+    val totalKb: Long,
+    val freeKb: Long,
+    val nativeKb: Long = 0,
+    val trimLevel: String? = null
+)
+
 data class InspectionSnapshot(
     val screen: ScreenSnapshot,
     val device: DeviceSnapshot,
@@ -141,7 +253,9 @@ data class NetworkEvent(
     val latencyMs: Long = 0,
     val requestBodyBytes: Long = 0,
     val responseBodyBytes: Long = 0,
-    val error: String? = null
+    val error: String? = null,
+    /** Connectivity at request time — distinguishes "server 500" from "device lost WiFi". B5. */
+    val connectivity: ConnectivitySnapshot? = null
 ) {
     val isError: Boolean get() = error != null || status in 400..599
     val statusLabel: String get() = if (error != null) "ERR" else if (status == 0) "…" else "$status"
@@ -149,6 +263,8 @@ data class NetworkEvent(
         val u = java.net.URL(url); (u.path.takeIf { it.isNotBlank() } ?: url)
     } catch (_: Exception) { url }
     val latencyLabel: String get() = if (latencyMs < 1000) "${latencyMs}ms" else "${"%.1f".format(latencyMs / 1000.0)}s"
+    /** True if this request failed while the device was offline/losing connectivity. */
+    val failedDueToConnectivity: Boolean get() = isError && connectivity?.type == ConnectivityType.OFFLINE
 }
 
 data class QaLensUiState(
@@ -188,6 +304,20 @@ data class QaLensUiState(
     val contractResult: ContractResult? = null,
     // App-provided read-only snapshots (DataStore prefs, Room counts, …), keyed by source name.
     val dataSources: Map<String, Map<String, String>> = emptyMap(),
+    /** Surfaced failures — shown as a dismissible banner in the panel header. Capped at 20. */
+    val errors: List<QaLensError> = emptyList(),
+    /** Captured crashes/ANRs (in-memory, capped at 10) — the latest is surfaced in the Overview tab. */
+    val crashes: List<QaLensCrash> = emptyList(),
+    /** Per-frame render timings (capped at 1000) — feeds the jank score + the Performance `.sal` track. */
+    val frameMetrics: List<FrameMetricsSample> = emptyList(),
+    /** Current connectivity snapshot (shown as a chip in the Network tab). B5. */
+    val connectivity: ConnectivitySnapshot? = null,
+    /** Connectivity transitions this session (capped at 100) — timeline events + `.sal` track. B5. */
+    val connectivityTransitions: List<ConnectivitySnapshot> = emptyList(),
+    /** Memory samples (capped at 200) — feeds the `.sal` `memory.json` track. B8. */
+    val memorySamples: List<MemorySample> = emptyList(),
+    /** C9: QA bookmarks / annotations dropped during a session. */
+    val bookmarks: List<Bookmark> = emptyList(),
     val recordings: List<RecordingInfo> = emptyList()
 ) {
     /** Total bytes of all saved recordings — for the storage line in the Recordings manager. */

@@ -23,6 +23,9 @@ class QaLensOkHttpInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val req = chain.request()
         val start = System.currentTimeMillis()
+        // B5: stamp the connectivity at request time so the classifier can tell a server 500
+        // from a device-that-lost-WiFi. currentConnectivity() is a cheap volatile read.
+        val connectivity = QaLens.currentConnectivity()
         return try {
             val resp = chain.proceed(req)
             QaLens.logNetwork(
@@ -33,7 +36,8 @@ class QaLensOkHttpInterceptor : Interceptor {
                     status = resp.code,
                     latencyMs = System.currentTimeMillis() - start,
                     requestBodyBytes = req.body?.contentLength()?.coerceAtLeast(0) ?: 0,
-                    responseBodyBytes = resp.body?.contentLength()?.coerceAtLeast(0) ?: 0
+                    responseBodyBytes = resp.body?.contentLength()?.coerceAtLeast(0) ?: 0,
+                    connectivity = connectivity
                 )
             )
             resp
@@ -44,7 +48,8 @@ class QaLensOkHttpInterceptor : Interceptor {
                     method = req.method,
                     url = req.url.toString(),
                     latencyMs = System.currentTimeMillis() - start,
-                    error = e.javaClass.simpleName
+                    error = e.javaClass.simpleName,
+                    connectivity = connectivity
                 )
             )
             throw e

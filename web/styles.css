@@ -477,6 +477,8 @@ body.compact .row { padding: 4px 9px; }
 .row-future { opacity: 0.4; }
 .row-future:hover { opacity: 0.85; }
 .row-err .row-main { color: var(--err); }
+.row-bookmark { background: color-mix(in srgb, var(--ok) 8%, transparent); border-left: 3px solid var(--ok); }
+.row-bookmark .row-main { color: var(--ok); font-weight: 600; }
 .row-time { color: var(--muted); font-size: 11px; min-width: 44px; font-variant-numeric: tabular-nums; padding-top: 2px; font-family: var(--mono); }
 .row-body { flex: 1; min-width: 0; }
 .row-main { font-size: 12.5px; display: flex; gap: 7px; align-items: baseline; flex-wrap: wrap; word-break: break-word; font-weight: 550; }
@@ -651,3 +653,60 @@ kbd {
   animation: toast-in 0.18s ease;
 }
 @keyframes toast-in { from { transform: translate(-50%, 8px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+
+/* ── C8: Keyboard help overlay ───────────────────────────────── */
+.help-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn 0.12s ease;
+}
+.help-card {
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: 14px; padding: 24px 32px; min-width: 320px;
+  box-shadow: var(--shadow);
+}
+.help-title {
+  font-size: 16px; font-weight: 700; margin-bottom: 16px; text-align: center;
+}
+.help-grid { display: flex; flex-direction: column; gap: 6px; }
+.help-row {
+  display: flex; align-items: center; gap: 12px; font-size: 13px;
+}
+.help-row kbd {
+  background: var(--surface2); border: 1px solid var(--line);
+  border-bottom-width: 2px; border-radius: 5px; padding: 2px 8px;
+  font-size: 11px; min-width: 28px; text-align: center;
+}
+.help-row span { color: var(--text); }
+.help-dismiss {
+  margin-top: 16px; text-align: center; font-size: 11px; color: var(--muted);
+}
+/* C11: Endpoint chips in network substats */
+.sub-endpoints { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.sub-endpoints span {
+  background: var(--surface2); border-radius: 6px; padding: 2px 8px; font-size: 10px;
+  color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;
+}
+.sub-endpoints span.err { color: var(--err); background: color-mix(in srgb, var(--err) 10%, transparent); }
+.sub-endpoints span.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── C13: Diff view ─────────────────────────────────────────── */
+.diff-view { padding: 16px; }
+.diff-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.diff-banner { padding: 8px 14px; border-radius: 8px; font-weight: 600; font-size: 13px; margin-bottom: 12px; }
+.diff-banner.err { background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err); }
+.diff-banner.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.diff-apps { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+.diff-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 16px; }
+.diff-table th { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font-weight: 600; }
+.diff-table td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.diff-table td.err { color: var(--err); font-weight: 600; }
+.diff-section { margin-bottom: 14px; }
+.diff-section h4 { font-size: 12px; margin-bottom: 6px; color: var(--text); }
+.diff-section ul { list-style: none; padding: 0; }
+.diff-section li { padding: 3px 0; font-size: 12px; font-family: var(--mono); }
+.diff-section li.err { color: var(--err); }
+.diff-section li.ok { color: var(--ok); }
+.diff-section li.warn { color: var(--warn); }

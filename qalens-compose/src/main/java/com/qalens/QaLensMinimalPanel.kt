@@ -91,6 +91,11 @@ internal fun QaLensMinimalPanel(
                 if (state.warnings.isEmpty()) "0 warnings" else "${state.warnings.size} warnings →",
                 if (state.warnings.isEmpty()) MGreen1 else MAmber1
             ) { if (state.warnings.isNotEmpty()) QaLens.setPanelMinimal(false) }
+            if (state.errors.isNotEmpty()) {
+                StatusChip("⚠ ${state.errors.size} issue${if (state.errors.size > 1) "s" else ""} →", MRed1) {
+                    QaLens.setPanelMinimal(false)
+                }
+            }
         }
 
         Spacer(Modifier.height(14.dp))

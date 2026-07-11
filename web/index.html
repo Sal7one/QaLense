@@ -43,15 +43,19 @@
     <div class="topbar-actions">
       <button id="exportBtn" class="btn btn-ghost" title="Copy session summary (markdown)" hidden>
         <svg width="14" height="14"><use href="#i-copy"/></svg> Export</button>
+      <button id="compareBtn" class="btn btn-ghost" title="Compare with another .sal (B11)" hidden>
+        <svg width="14" height="14"><use href="#i-pulse"/></svg> Compare</button>
       <button id="closeSessionBtn" class="btn btn-ghost" title="Back to sessions" hidden>
         <svg width="14" height="14"><use href="#i-back"/></svg> Sessions</button>
       <button id="openBtn" class="btn btn-accent">Open .sal</button>
+      <button id="exportSalBtn" class="btn btn-accent" style="background:var(--ok);color:#000" hidden title="Download current .sal">Export .sal</button>
       <button id="settingsBtn" class="btn btn-ghost btn-icon" title="Settings">
         <svg width="16" height="16"><use href="#i-gear"/></svg></button>
       <button id="themeBtn" class="btn btn-ghost btn-icon" title="Toggle theme">
         <svg width="15" height="15"><use href="#i-theme"/></svg></button>
     </div>
     <input id="fileInput" type="file" accept=".sal,.appsal,.zip,application/zip,application/json" hidden />
+    <input id="compareInput" type="file" accept=".sal,.zip,application/zip" hidden />
   </header>
 
   <!-- ============ Landing / dropzone ============ -->

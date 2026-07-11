@@ -27,6 +27,7 @@ internal object QaLensSessionRecorder {
     private const val MAX_FRAMES = 600          // ~5 min at 2fps
     private const val MAX_FRAME_WIDTH = 720
     private const val MAX_SAVED_SAL = 5
+    private const val WATCHDOG_TIMEOUT_MS = 10_000L // A5: auto-cancel if no frame for 10s
     private val intervalMs = 1000L / FPS
 
     private val handler = Handler(Looper.getMainLooper())
@@ -39,6 +40,7 @@ internal object QaLensSessionRecorder {
     // each frame capture hides the overlay for that single PixelCopy so frames stay clean.
     private var systemChipMode = false
     private var startMs = 0L
+    private var lastFrameTimestamp = 0L
 
     /** True while a recording uses the floating system-window chip (overlay stays fully hidden). */
     val usesSystemChip: Boolean get() = systemChipMode
@@ -47,6 +49,20 @@ internal object QaLensSessionRecorder {
     private val stateSamples = mutableListOf<StateSample>()
     private var sessionDir: File? = null
     private var videoFile: File? = null
+
+    // A5: Watchdog — auto-cancel recording if no frame arrives for WATCHDOG_TIMEOUT_MS.
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (!recording) return
+            if (lastFrameTimestamp > 0 && System.currentTimeMillis() - lastFrameTimestamp > WATCHDOG_TIMEOUT_MS) {
+                QaLens.log("Recording watchdog: no frame for ${WATCHDOG_TIMEOUT_MS / 1000}s — auto-stopping.")
+                QaLens.pushError(ErrorKind.RECORDING, "Recording auto-stopped: frame capture stalled for ${WATCHDOG_TIMEOUT_MS / 1000}s")
+                stop()
+                return
+            }
+            handler.postDelayed(this, WATCHDOG_TIMEOUT_MS)
+        }
+    }
 
     private val tick = object : Runnable {
         override fun run() {
@@ -72,6 +88,7 @@ internal object QaLensSessionRecorder {
         recording = true
         videoMode = useVideo
         startMs = System.currentTimeMillis()
+        lastFrameTimestamp = System.currentTimeMillis()
         frameCounter = 0
         frameIndex.clear()
         stateSamples.clear()
@@ -108,12 +125,14 @@ internal object QaLensSessionRecorder {
         if (systemChipMode) QaLensSystemChip.show(activity) else QaLensSystemChip.showInApp(activity)
         QaLens.setRecording(true)
         handler.post(tick)
+        handler.postDelayed(watchdog, WATCHDOG_TIMEOUT_MS) // A5: start watchdog
     }
 
     fun stop() {
         if (!recording) return
         recording = false
         handler.removeCallbacks(tick)
+        handler.removeCallbacks(watchdog) // A5: stop watchdog
         QaLensSystemChip.hide()
         restoreOverlay()
         QaLens.setRecording(false)
@@ -239,6 +258,7 @@ internal object QaLensSessionRecorder {
                     frameIndex[ts] = name
                     if (scaled !== bmp) scaled.recycle()
                     bmp.recycle()
+                    lastFrameTimestamp = System.currentTimeMillis() // A5: update watchdog
                 }
             } catch (e: Exception) {
                 QaLens.log("Frame capture failed: ${e.message}")
@@ -311,6 +331,9 @@ internal object QaLensSessionRecorder {
         )
 
         // Machine-readable digest + self-describing guide → every .sal is AI-ready on arrival.
+        val sessionCrashes = s.crashes
+        val sessionFrameMetrics = s.frameMetrics
+        val sessionConnectivity = s.connectivityTransitions
         val analysisJson = QaLensAnalysis.digest(
             coverage = QaLensAnalysis.Coverage(
                 hasFrames = !usingVideo && frameIndex.isNotEmpty(),
@@ -318,7 +341,10 @@ internal object QaLensSessionRecorder {
                 networkInterceptorInstalled = s.networkAvailable,
                 networkCount = windowNetwork.size,
                 logCount = windowEvents.size,
-                stateCount = stateSamples.size
+                stateCount = stateSamples.size,
+                crashCount = sessionCrashes.size,
+                frameMetricsCount = sessionFrameMetrics.size,
+                connectivityCount = sessionConnectivity.size
             ),
             startMillis = startMs,
             endMillis = endMs,
@@ -327,7 +353,10 @@ internal object QaLensSessionRecorder {
             timeline = timeline,
             stateSamples = stateSamples,
             classification = classification,
-            config = cfg
+            config = cfg,
+            crashes = sessionCrashes,
+            frameMetrics = sessionFrameMetrics,
+            connectivityTransitions = sessionConnectivity
         )
 
         val texts = mapOf(
@@ -337,6 +366,11 @@ internal object QaLensSessionRecorder {
             "network.json" to SalTracks.network(windowNetwork, cfg),
             "logs.json" to SalTracks.logs(windowEvents, cfg),
             "state.json" to SalTracks.state(stateSamples, cfg),
+            "crashes.json" to SalTracks.crashes(sessionCrashes, cfg),
+            "performance.json" to SalTracks.performance(sessionFrameMetrics, cfg),
+            "connectivity.json" to SalTracks.connectivity(sessionConnectivity),
+            "memory.json" to SalTracks.memory(s.memorySamples),
+            "marks.json" to SalTracks.marks(s.bookmarks),
             "analysis.json" to analysisJson,
             "for_ai.md" to QaLensAnalysis.aiGuide(),
             "report.txt" to QaLens.buildFullReport()
@@ -355,7 +389,7 @@ internal object QaLensSessionRecorder {
             QaLens.refreshRecordings()
             if (activity != null) shareFile(activity, target)
         } catch (e: Exception) {
-            QaLens.log("Failed to write .sal: ${e.message}")
+            QaLens.pushError(ErrorKind.RECORDING, "Failed to write .sal: ${e.message}")
         }
     }
 

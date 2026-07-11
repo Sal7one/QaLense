@@ -51,6 +51,16 @@ object BugClassifier {
         val transport = failed.firstOrNull { it.error != null }
         val slow = network.firstOrNull { it.latencyMs >= slowThresholdMs && !it.isError }
 
+        // B5: a transport failure while the device was offline/losing connectivity is an
+        // environment issue, not a backend bug. Reclassify before the generic transport rule.
+        val connectivityFailure = failed.firstOrNull { it.failedDueToConnectivity }
+        if (connectivityFailure != null) {
+            candidates += Candidate(
+                BugCategory.CONFIGURATION_ENVIRONMENT, Confidence.HIGH,
+                "${connectivityFailure.method} ${connectivityFailure.shortUrl} failed while the device was offline — likely a connectivity drop, not a server bug."
+            )
+        }
+
         if (server5xx != null) {
             candidates += Candidate(
                 BugCategory.BACKEND_API, Confidence.HIGH,
@@ -63,7 +73,9 @@ object BugClassifier {
                 "${client4xx.method} ${client4xx.shortUrl} returned ${client4xx.status} (auth/validation/contract)."
             )
         }
-        if (transport != null) {
+        // Transport failures NOT caused by offline connectivity stay Backend/API (could be DNS,
+        // TLS, server unreachable). Connectivity-caused ones are already classified above.
+        if (transport != null && connectivityFailure == null) {
             candidates += Candidate(
                 BugCategory.BACKEND_API, Confidence.MEDIUM,
                 "${transport.method} ${transport.shortUrl} failed with ${transport.error}."
@@ -125,7 +137,7 @@ object BugClassifier {
         if (candidates.isEmpty()) return BugClassification.UNKNOWN
 
         // Pick the strongest candidate; group reasons of the winning category.
-        val winner = candidates.maxByOrNull { it.confidence.ordinal }!!
+        val winner = requireNotNull(candidates.maxByOrNull { it.confidence.ordinal }) { "No candidates to classify" }
         val reasons = candidates.filter { it.category == winner.category }.map { it.reason } +
             candidates.filter { it.category != winner.category }.map { "Also: ${it.reason}" }
 

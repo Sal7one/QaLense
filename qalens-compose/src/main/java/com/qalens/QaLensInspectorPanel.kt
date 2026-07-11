@@ -42,6 +42,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -92,7 +93,11 @@ internal fun QaLensInspectorPanel(
     onSelectNode: (InspectNode?) -> Unit
 ) {
     var tab by remember { mutableStateOf(lastInspectorTab) }
-    fun select(t: InspectorTab) { tab = t; lastInspectorTab = t }
+    var customTabTitle by remember { mutableStateOf<String?>(null) }
+    var globalSearch by remember { mutableStateOf("") }
+    fun select(t: InspectorTab) { tab = t; lastInspectorTab = t; customTabTitle = null }
+    val customTabs = remember { QaLens.registeredTabs() }
+    fun selectCustom(title: String) { customTabTitle = title }
     val context = LocalContext.current
 
     Column(
@@ -192,13 +197,94 @@ internal fun QaLensInspectorPanel(
 
         Spacer(Modifier.height(8.dp))
 
+        // ── Error banner (surfaced failures: recording/screenshot/export/…) ──────
+        if (state.errors.isNotEmpty()) {
+            var expanded by remember { mutableStateOf(false) }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(PanelError.copy(alpha = 0.12f), MaterialTheme.shapes.extraSmall)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("⚠", color = PanelError, fontSize = 12.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "${state.errors.size} issue${if (state.errors.size > 1) "s" else ""}",
+                            color = PanelError, fontWeight = FontWeight.SemiBold, fontSize = 12.sp
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            state.errors.lastOrNull()?.let { it.kind.name.lowercase() + ": " + it.message } ?: "",
+                            color = PanelMuted, fontSize = 10.sp, maxLines = 1
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (expanded) "▲" else "▼", color = PanelMuted, fontSize = 10.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Clear", color = PanelMuted, fontSize = 10.sp,
+                            modifier = Modifier.clickable { QaLens.clearErrors() })
+                    }
+                }
+                if (expanded) {
+                    Spacer(Modifier.height(4.dp))
+                        state.errors.forEach { err ->
+                            val retry = err.retry
+                            Row(
+                                Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("${err.kind.name}", color = PanelError, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text(err.message, color = PanelText, fontSize = 10.sp)
+                                }
+                                Row {
+                                    if (retry != null) {
+                                        Text("↻", color = PanelAccent, fontSize = 13.sp,
+                                            modifier = Modifier.clickable { retry.invoke() })
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text("✕", color = PanelMuted, fontSize = 11.sp,
+                                        modifier = Modifier.clickable { QaLens.dismissError(err.id) })
+                                }
+                            }
+                        }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+
+        // ── B14: Global search — searches events, network, logs, and nodes at once ──
+        BasicTextField(
+            value = globalSearch,
+            onValueChange = { globalSearch = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.White.copy(alpha = 0.06f), MaterialTheme.shapes.extraSmall)
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            singleLine = true,
+            textStyle = TextStyle(color = PanelText, fontSize = 12.sp),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(PanelAccent),
+            decorationBox = { inner ->
+                if (globalSearch.isEmpty()) Text("🔍 Search all tracks…", color = PanelMuted, fontSize = 11.sp)
+                inner()
+            }
+        )
+        Spacer(Modifier.height(6.dp))
+
         // ── Tab strip ────────────────────────────────────────────────────
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             InspectorTab.entries.forEach { item ->
-                val active = tab == item
+                val active = tab == item && customTabTitle == null
                 Text(
                     text = item.label,
                     color = if (active) PanelAccent else PanelMuted,
@@ -213,6 +299,23 @@ internal fun QaLensInspectorPanel(
                         .padding(horizontal = 9.dp, vertical = 4.dp)
                 )
             }
+            // B3: registered custom tabs appear after the built-ins.
+            customTabs.forEach { provider ->
+                val active = customTabTitle == provider.title
+                Text(
+                    text = provider.title,
+                    color = if (active) PanelAccent else PanelMuted,
+                    fontSize = 12.sp,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier = Modifier
+                        .clickable { selectCustom(provider.title) }
+                        .background(
+                            if (active) PanelAccent.copy(alpha = 0.14f) else Color.Transparent,
+                            CircleShape
+                        )
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                )
+            }
         }
 
         HorizontalDivider(color = PanelLine, thickness = 1.dp)
@@ -220,19 +323,28 @@ internal fun QaLensInspectorPanel(
 
         // ── Content area – Nav/Network/Repro own their scroll, others share one ─
         Box(Modifier.weight(1f)) {
-            when (tab) {
-                InspectorTab.OVERVIEW      -> ScrollContent { OverviewTab(state, context) { select(it) } }
-                InspectorTab.BUNDLE        -> ScrollContent { BugBundleTab(state, context) }
-                InspectorTab.REPRO         -> ReproTab(state, context)
-                InspectorTab.SCREEN_HEALTH -> ScrollContent { ScreenHealthTab(state, context) }
-                InspectorTab.NAV           -> NavTab(state)
-                InspectorTab.INSPECT       -> ScrollContent { InspectTab(state, onSelectNode) }
-                InspectorTab.ACCESS        -> ScrollContent { WarningsTab(state) }
-                InspectorTab.TAGS          -> ScrollContent { TestTagsTab(state, context) }
-                InspectorTab.DEVICE        -> ScrollContent { DeviceTab(state) }
-                InspectorTab.LOGS          -> ScrollContent { LogsTab(state, context) }
-                InspectorTab.NETWORK       -> NetworkTab(state)
-                InspectorTab.TOOLS         -> ScrollContent { ToolsTab(state, context) }
+            val q = globalSearch.trim()
+            if (q.isNotEmpty()) {
+                // B14: global search — unified results across all tracks.
+                GlobalSearchResults(state, q, onSelectNode)
+            } else {
+                val activeCustom = customTabs.firstOrNull { it.title == customTabTitle }
+                if (activeCustom != null) {
+                    ScrollContent { activeCustom.Content(state, QaLens.config.value) }
+                } else when (tab) {
+                    InspectorTab.OVERVIEW      -> ScrollContent { OverviewTab(state, context) { select(it) } }
+                    InspectorTab.BUNDLE        -> ScrollContent { BugBundleTab(state, context) }
+                    InspectorTab.REPRO         -> ReproTab(state, context)
+                    InspectorTab.SCREEN_HEALTH -> ScrollContent { ScreenHealthTab(state, context) }
+                    InspectorTab.NAV           -> NavTab(state)
+                    InspectorTab.INSPECT       -> ScrollContent { InspectTab(state, onSelectNode) }
+                    InspectorTab.ACCESS        -> ScrollContent { WarningsTab(state) }
+                    InspectorTab.TAGS          -> ScrollContent { TestTagsTab(state, context) }
+                    InspectorTab.DEVICE        -> ScrollContent { DeviceTab(state) }
+                    InspectorTab.LOGS          -> ScrollContent { LogsTab(state, context) }
+                    InspectorTab.NETWORK       -> NetworkTab(state)
+                    InspectorTab.TOOLS         -> ScrollContent { ToolsTab(state, context) }
+                }
             }
         }
     }
@@ -550,6 +662,28 @@ private fun DeviceTab(state: QaLensUiState) {
                 }
         }
 
+        // ── Frame-timing / jank (B2) ──────────────────────────────────────────
+        if (state.frameMetrics.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text("Frame Timing / Jank", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            Spacer(Modifier.height(4.dp))
+            val digest = remember(state.frameMetrics) { com.qalens.JankAnalyzer.analyze(state.frameMetrics) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f)) {
+                    PanelKV("Samples", "${digest.sampleCount}")
+                    PanelKV("p95", "${digest.p95TotalMs}ms")
+                    PanelKV("p99", "${digest.p99TotalMs}ms")
+                }
+                Column(Modifier.weight(1f)) {
+                    val jankColor = if (digest.jankRate > 0.3f) PanelError else if (digest.jankCount > 0) PanelWarn else PanelGreen
+                    PanelKV("Jank", "${digest.jankCount} (${(digest.jankRate * 100).toInt()}%)")
+                    Text("jank", color = jankColor, fontSize = 9.sp)
+                    PanelKV("Frozen", "${digest.frozenCount}")
+                    PanelKV("Worst", "${digest.worstFrameMs}ms")
+                }
+            }
+        }
+
         // App-provided data sources (DataStore prefs / Room snapshots)
         if (state.dataSources.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
@@ -686,7 +820,24 @@ private fun NetworkTab(state: QaLensUiState) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("${state.networkEvents.size} requests", color = PanelMuted, fontSize = 11.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${state.networkEvents.size} requests", color = PanelMuted, fontSize = 11.sp)
+                // B5: connectivity chip — shows the current network type + bars.
+                state.connectivity?.let { conn ->
+                    Spacer(Modifier.width(8.dp))
+                    val connColor = if (conn.type == com.qalens.ConnectivityType.OFFLINE) PanelError else PanelGreen
+                    val connLabel = when (conn.type) {
+                        com.qalens.ConnectivityType.OFFLINE -> "offline"
+                        com.qalens.ConnectivityType.WIFI -> "wifi"
+                        com.qalens.ConnectivityType.CELLULAR -> "cell"
+                        com.qalens.ConnectivityType.ETHERNET -> "eth"
+                        com.qalens.ConnectivityType.UNKNOWN -> "?"
+                    } + (if (conn.strengthBars > 0) " ${conn.strengthBars}▮" else "")
+                    Text(connLabel, color = connColor, fontSize = 10.sp,
+                        modifier = Modifier.background(connColor.copy(alpha = 0.12f), MaterialTheme.shapes.extraSmall)
+                            .padding(horizontal = 5.dp, vertical = 1.dp))
+                }
+            }
             Text("Clear", color = PanelAccent, fontSize = 11.sp,
                 modifier = Modifier.clickable { QaLens.clearNetworkLog() }.padding(4.dp))
         }
@@ -774,8 +925,67 @@ private fun NetworkEventRow(event: NetworkEvent) {
 @Composable
 private fun ToolsTab(state: QaLensUiState, context: Context) {
     var deepLink by remember { mutableStateOf("") }
+    var bookmarkText by remember { mutableStateOf("") }
+    var bookmarkSeverity by remember { mutableStateOf(BookmarkSeverity.INFO) }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        // ── C9: Bookmarks ──────────────────────────────────────────────
+        Text("Bookmarks", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(BookmarkSeverity.INFO, BookmarkSeverity.WARNING, BookmarkSeverity.BUG).forEach { sev ->
+                val active = bookmarkSeverity == sev
+                val tint = when (sev) { BookmarkSeverity.BUG -> PanelError; BookmarkSeverity.WARNING -> PanelWarn; else -> PanelAccent }
+                Text(sev.name.lowercase(), color = if (active) tint else PanelMuted, fontSize = 10.sp,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier
+                        .clickable { bookmarkSeverity = sev }
+                        .background(if (active) tint.copy(alpha = 0.15f) else Color.Transparent, CircleShape)
+                        .padding(horizontal = 8.dp, vertical = 3.dp))
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            BasicTextField(
+                value = bookmarkText,
+                onValueChange = { bookmarkText = it },
+                textStyle = TextStyle(color = PanelText, fontSize = 12.sp),
+                singleLine = true,
+                modifier = Modifier
+                    .weight(1f)
+                    .background(Color.White.copy(alpha = 0.06f), MaterialTheme.shapes.extraSmall)
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                decorationBox = { inner ->
+                    if (bookmarkText.isEmpty()) Text("Bookmark note…", color = PanelMuted, fontSize = 11.sp)
+                    inner()
+                }
+            )
+            PanelButton("★ Add", tint = PanelAccent) {
+                if (bookmarkText.isNotBlank()) {
+                    QaLens.addBookmark(bookmarkText.trim(), bookmarkSeverity)
+                    bookmarkText = ""
+                }
+            }
+        }
+        if (state.bookmarks.isNotEmpty()) {
+            state.bookmarks.reversed().forEach { b ->
+                val sevColor = when (b.severity) { BookmarkSeverity.BUG -> PanelError; BookmarkSeverity.WARNING -> PanelWarn; else -> PanelAccent }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text("★", color = sevColor, fontSize = 10.sp, modifier = Modifier.padding(end = 6.dp))
+                    Text(b.label, color = PanelText, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                    Text(b.severity.name.lowercase(), color = sevColor, fontSize = 9.sp,
+                        modifier = Modifier
+                            .background(sevColor.copy(alpha = 0.12f), CircleShape)
+                            .padding(horizontal = 5.dp, vertical = 1.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("✕", color = PanelMuted, fontSize = 11.sp,
+                        modifier = Modifier.clickable { QaLens.removeBookmark(b.id) })
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text("Clear all", color = PanelAccent, fontSize = 11.sp,
+                modifier = Modifier.clickable { QaLens.clearBookmarks() })
+            HorizontalDivider(color = PanelLine, modifier = Modifier.padding(top = 4.dp))
+        }
+
         // ── Deep link scenarios ─────────────────────────────────────────
         if (state.deepLinkScenarios.isNotEmpty()) {
             Text("Deep Link Scenarios", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
@@ -1098,6 +1308,9 @@ private fun BugBundleTab(state: QaLensUiState, context: Context) {
         PanelButton("📷  Share Annotated Screenshot", tint = PanelAccent) { QaLens.takeScreenshot() }
         PanelButton("Copy Jira Bug") { copy(context, "QaLens Jira Bug", QaLens.buildJiraReport()) }
         PanelButton("Copy Slack Summary") { copy(context, "QaLens Slack Summary", QaLens.buildSlackSummary()) }
+        PanelButton("Copy GitHub Issue") { copy(context, "QaLens GitHub Issue", QaLens.buildGitHubIssue()) }
+        PanelButton("Copy Linear Issue") { copy(context, "QaLens Linear Issue", QaLens.buildLinearIssue()) }
+        PanelButton("Copy Markdown Report") { copy(context, "QaLens Markdown", QaLens.buildMarkdownReport()) }
         PanelButton("Copy Repro Steps") { copy(context, "QaLens Repro Steps", QaLens.buildReproSteps()) }
         PanelButton("Copy Full QA Report") { copy(context, "QaLens Full Report", QaLens.buildFullReport()) }
     }
@@ -1290,5 +1503,90 @@ private fun openControlRoom(context: Context) {
             android.content.Intent(context, QaLensControlActivity::class.java)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         )
-    }.onFailure { QaLens.log("Could not open Control Room: ${it.message}") }
+    }
+}
+
+/** B14: Unified search across all tracks — events, network, logs, and nodes. */
+@Composable
+private fun GlobalSearchResults(
+    state: QaLensUiState,
+    query: String,
+    onSelectNode: ((InspectNode) -> Unit)? = null
+) {
+    val q = query.lowercase()
+    data class SearchResult(val kind: String, val label: String, val detail: String, val ts: Long)
+
+    val results = remember(state, q) {
+        val list = mutableListOf<SearchResult>()
+        state.events.forEach { ev ->
+            if (ev.message.lowercase().contains(q) || (ev.tag?.lowercase()?.contains(q) == true)) {
+                list.add(SearchResult(
+                    if (ev.type == QaEventType.LOG) "log" else "event",
+                    ev.tag ?: ev.type.name,
+                    ev.message,
+                    ev.timestampMillis
+                ))
+            }
+        }
+        state.networkEvents.forEach { ne ->
+            if (ne.url.lowercase().contains(q) || ne.method.lowercase().contains(q)) {
+                list.add(SearchResult("network", ne.method, ne.shortUrl, ne.timestampMillis))
+            }
+        }
+        state.nodes.forEach { node ->
+            if (node.label.lowercase().contains(q) || (node.testTag?.lowercase()?.contains(q) == true)) {
+                list.add(SearchResult("node", node.label, "<${node.testTag ?: node.role ?: "?"}>", 0L))
+            }
+        }
+        list.sortedBy { it.ts }
+    }
+
+    ScrollContent {
+        if (results.isEmpty()) {
+            Text("No matches for \"$query\"", color = PanelMuted, fontSize = 12.sp,
+                modifier = Modifier.padding(16.dp))
+        } else {
+            Text("${results.size} result${if (results.size != 1) "s" else ""} across all tracks",
+                color = PanelMuted, fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 6.dp))
+            results.forEach { r ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (r.kind == "node") PanelAccent.copy(alpha = 0.08f)
+                            else Color.White.copy(alpha = 0.04f),
+                            MaterialTheme.shapes.extraSmall
+                        )
+                        .clickable(enabled = r.kind == "node" && onSelectNode != null) {
+                            if (r.kind == "node") {
+                                val node = state.nodes.firstOrNull { it.label == r.label }
+                                if (node != null) onSelectNode?.invoke(node)
+                            }
+                        }
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val chipColor = when (r.kind) {
+                        "event" -> PanelAccent
+                        "network" -> if (r.detail.contains("err", ignoreCase = true)) PanelError else PanelGreen
+                        "log" -> PanelWarn
+                        else -> PanelMuted
+                    }
+                    Text(r.kind.uppercase(), color = chipColor, fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .background(chipColor.copy(alpha = 0.12f), CircleShape)
+                            .padding(horizontal = 6.dp, vertical = 2.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(r.label, color = PanelText, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        Text(r.detail, color = PanelMuted, fontSize = 10.sp, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Spacer(Modifier.height(3.dp))
+            }
+        }
+    }
 }
