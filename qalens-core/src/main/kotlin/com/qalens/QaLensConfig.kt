@@ -24,7 +24,36 @@ data class QaLensConfig(
     val requireTestTagsForClickable: Boolean = true,
     val nonDescriptiveLabels: Set<String> = defaultWeakLabels,
     val enableSemanticsReflection: Boolean = true,
-    val enableAutoInstall: Boolean = true
+    val enableAutoInstall: Boolean = true,
+    /**
+     * R8: opt-in network body capture. Off by default. When enabled, the OkHttp interceptor
+     * captures request/response body *previews* (text-ish content types only — JSON/XML/forms),
+     * truncated to 64&nbsp;KB, then folded through [QaLensRedactor] before storage (and re-redacted
+     * again at `.sal` encode time). Binary bodies get a `<binary N bytes>` placeholder instead.
+     */
+    val captureNetworkBodies: Boolean = false,
+    /**
+     * Master switch for QaLens network capture. When false, QaLensOkHttpInterceptor becomes a
+     * pure pass-through (zero metadata, zero body reads) and the Network tab / the .sal network
+     * track stay empty — analysis.json.coverage says so explicitly.
+     */
+    val captureNetwork: Boolean = true,
+    /**
+     * Master switch for automatic log capture via [QaLensTimberTree]. When false, the Timber
+     * tree drops every line; explicit QaLens.event()/log()/breadcrumb() calls (the app's own
+     * opt-in) still work. analysis.json.coverage distinguishes "disabled by config" from
+     * "no logs captured".
+     */
+    val captureLogs: Boolean = true,
+    /**
+     * Use Chucker as the network source instead of QaLensOkHttpInterceptor. When true (and
+     * Chucker is on the debug classpath), QaLens registers a Chucker TransactionListener via
+     * reflection and converts every collected transaction into a NetworkEvent — no QaLens
+     * interceptor needed (it becomes a pass-through). If Chucker is missing, QaLens logs a
+     * warning and falls back to the QaLens interceptor. Teams already running Chucker get the
+     * full evidence pipeline (Network tab, classifier, .sal) from ONE inspector.
+     */
+    val networkFromChucker: Boolean = false
 ) {
     class Builder(seed: QaLensConfig = QaLensConfig()) {
         var enabled: Boolean = seed.enabled
@@ -45,6 +74,10 @@ data class QaLensConfig(
         var nonDescriptiveLabels: Set<String> = seed.nonDescriptiveLabels
         var enableSemanticsReflection: Boolean = seed.enableSemanticsReflection
         var enableAutoInstall: Boolean = seed.enableAutoInstall
+        var captureNetworkBodies: Boolean = seed.captureNetworkBodies
+        var captureNetwork: Boolean = seed.captureNetwork
+        var captureLogs: Boolean = seed.captureLogs
+        var networkFromChucker: Boolean = seed.networkFromChucker
 
         /** Add a custom redaction rule on top of the defaults. */
         fun addRedaction(pattern: String, replacement: String = "[REDACTED]") {
@@ -69,7 +102,11 @@ data class QaLensConfig(
             requireTestTagsForClickable = requireTestTagsForClickable,
             nonDescriptiveLabels = nonDescriptiveLabels,
             enableSemanticsReflection = enableSemanticsReflection,
-            enableAutoInstall = enableAutoInstall
+            enableAutoInstall = enableAutoInstall,
+            captureNetworkBodies = captureNetworkBodies,
+            captureNetwork = captureNetwork,
+            captureLogs = captureLogs,
+            networkFromChucker = networkFromChucker
         )
     }
 
@@ -147,3 +184,13 @@ data class RedactionRule(
 
 fun QaLensConfig.redact(value: String): String =
     QaLensRedactor.redact(value, redactionRules)
+
+/** Network-body capture cap in bytes (R8): bodies longer than this are truncated with a marker. */
+const val BODY_CAPTURE_CAP: Int = 65_536
+
+/**
+ * Truncate a captured body string to [cap] characters, appending a `…[truncated]` marker when cut.
+ * Pure and testable so the truncation contract is pinned independently of the OkHttp interceptor.
+ */
+fun truncateCapturedBody(text: String, cap: Int = BODY_CAPTURE_CAP): String =
+    if (text.length <= cap) text else text.take(cap) + "…[truncated]"

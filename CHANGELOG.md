@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — post-0.9.0
+
+### Backlog completion, hooks & mock backend
+- **Backlog completion.** Phases 2–5 shipped: B3 (pluggable tabs), B4 (GitHub/Linear/Markdown
+  exports), B5 (connectivity + Chucker coexistence), B7 (coroutine exception handler), B8 (memory
+  samples), B15 (macro assertions), B16 (per-source redaction), C8–C16 (keyboard help, ⭐ marks,
+  mobile/touch layout, analysis.stats/endpoints, AI Brief, compare/diff, sal_report exit code,
+  formatVersion validation, filmstrip precision), A6 (DataSourceObserver), A7 (NoopParityCheck);
+  A3 (AnalysisEngine extraction) landed in part. See `next.md`.
+- **Web player makeover.** AI Brief tab (`for_ai.md`, key `7`), ⭐ mark moments (key `m`, scrubber
+  stars + `marks.json`), opt-in **Backend URL** + **⇪ Send to backend** hook, responsive
+  mobile/touch layout.
+- **Mock backend.** Stdlib-only `backend/server.py` (webhook + ingest + dashboard + uploads store +
+  deterministic mock AI verdict) + `backend/tests/test_backend.py` (11 e2e tests) +
+  `backend/README.md`.
+- **Review.** `docs/CODE_REVIEW.md` added — a frank engineering review of core/compose/web/backend.
+
 ## 0.9.0 — 2026-06
 
 ### Reliability overhaul (service-first)

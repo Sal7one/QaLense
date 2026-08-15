@@ -21,6 +21,8 @@ android {
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     api(project(":qalens-core"))
+    // A7: the parity check is also EXECUTED (not only compiled) — exerciseAll() must run.
+    testImplementation("junit:junit:4.13.2")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.runtime:runtime")

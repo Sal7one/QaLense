@@ -45,11 +45,21 @@ Rules consumers must follow:
 - **R4** retention/storage management, recordings manager ✅
 - **R5** opt-in MediaProjection H.264 video + `videoStartMillis` alignment ✅
 - **R6** analysis layer: `analysis.json` + `for_ai.md` + richer manifest + webhook upload ✅
+- **R7** full: bounded webhook pool, 3-attempt retry, chunked/resumable uploads (start/status/chunk/finalize, CRC32, idempotent) + offline retry queue, backend protocol + 4 tests ✅
+- **R8** opt-in body capture (`captureNetworkBodies`): buffered-request + non-consuming response peek, text-ish only, 64KB cap, redacted twice ✅
+- **R9** `formatVersion: 2`: gzip JSON tracks + per-entry CRC32 (`files[]` objects), v1+v2 readers (Android/web/CLI), warn-and-continue CRC verify, >v2 refused; WebP deferred ✅
+- **R10** crash auto-finalize: uncaught handler saves the in-flight `.sal` before delegating ✅
+- **R11** compare: web player diff view + `sal_report.js --compare` (exit 1 on regression) ✅
+
 
 ## Open backlog (next)
 
-- **R7** chunked/resumable webhook uploads + retry queue for flaky QA-lab Wi-Fi.
-- **R8** optional request/response **body capture with strict redaction + size caps** (today: none, by design).
-- **R9** `formatVersion: 2` umbrella: gzip JSON tracks, frame WebP, per-entry checksums.
-- **R10** crash-handler integration → a `.sal` automatically finalized on crash.
-- **R11** web player: side-by-side compare of two `.sal`s (before/after a fix).
+- **R12** R9-WebP: frame WebP encoding in the v2 writer (everything else in R9 shipped).
+- **R13** on-device validation of A5 watchdog / R10 crash-finalize edge cases (consent-dialog
+  timing, OS-killed projection service) on real hardware — the code paths are in place and
+  compile-verified.
+
+Everything else on the original list has shipped (see history below): R7 (full: bounded pool +
+retry + chunked/resumable + offline queue), R8 (opt-in body capture), R9 (v2 gzip tracks + CRC32;
+WebP deferred), R10 (crash auto-finalize), R11 (web + CLI compare).
+

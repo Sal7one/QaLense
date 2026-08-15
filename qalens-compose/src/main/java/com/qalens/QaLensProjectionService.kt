@@ -142,9 +142,19 @@ class QaLensProjectionService : Service() {
         if (file != null) QaLensSessionRecorder.onVideoComplete(file, videoOk)
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // A5: the task was swiped away (or removed) — the app can no longer drive the stop UI. Stop
+        // the projection cleanly so the recorder finalizes (or falls back to frames) and isRecording
+        // never strands true.
+        if (recorder != null || projection != null) runCatching { stopRecording() }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        if (recorder != null) runCatching { stopRecording() }
+        // A5: service torn down while the projection is still active (system reclaim / task removal)
+        // — stop and hand the result back to the recorder so isRecording flips false.
+        if (recorder != null || projection != null) runCatching { stopRecording() }
     }
 
     private fun startForegroundCompat() {

@@ -52,6 +52,20 @@ object QaLens {
     fun toggleWatchMode() = Unit
     fun selectNode(node: InspectNode?) = Unit
 
+    fun pushError(kind: ErrorKind, message: String, retry: (() -> Unit)? = null) = Unit
+    fun dismissError(id: String) = Unit
+    fun clearErrors() = Unit
+    fun addBookmark(label: String, severity: BookmarkSeverity = BookmarkSeverity.INFO) = Unit
+    fun removeBookmark(id: String) = Unit
+    fun clearBookmarks() = Unit
+
+    fun bridgeCrashes(bridge: QaLensCrashBridge) = Unit
+    fun lastCrash(): QaLensCrash? = null
+    fun currentConnectivity(): ConnectivitySnapshot? = null
+
+    fun coroutineExceptionHandler(): kotlinx.coroutines.CoroutineExceptionHandler =
+        kotlinx.coroutines.CoroutineExceptionHandler { _, _ -> }
+
     fun registerDeepLinkScenario(
         name: String,
         uri: String,
@@ -60,9 +74,21 @@ object QaLens {
     ) = Unit
     fun runScenario(scenario: DeepLinkScenario) = Unit
     fun contract(screen: String, block: ScreenContractBuilder.() -> Unit) = Unit
-    fun registerDataSource(name: String, provider: () -> Map<String, String>) = Unit
+    fun registerTab(provider: QaLensTabProvider) = Unit
+    fun unregisterTab(title: String) = Unit
+    fun registerDataSource(
+        name: String,
+        redactKeys: List<String> = emptyList(),
+        redactPatterns: List<Regex> = emptyList(),
+        redactAll: Boolean = false,
+        provider: () -> Map<String, String>
+    ) = Unit
     fun observeRoom(db: RoomDatabase, vararg tables: String) = Unit
     fun <T> observeDataStore(name: String, flow: Flow<T>, describe: (T) -> String = { "updated" }) = Unit
+    fun registerDataSourceObserver(observer: DataSourceObserver) = Unit
+    fun unregisterDataSourceObserver(observer: DataSourceObserver) = Unit
+    fun notifyDataChange(source: String, tableName: String, changeType: ChangeType) = Unit
+    fun notifyDataError(source: String, error: String) = Unit
 
     fun markNetworkAvailable() = Unit
     fun logNetwork(event: NetworkEvent) = Unit
@@ -104,7 +130,14 @@ object QaLens {
     fun buildReproSteps(): String = DISABLED
     fun buildFullReport(): String = DISABLED
     fun buildSessionSummary(): String = DISABLED
+    fun buildGitHubIssue(): String = DISABLED
+    fun buildLinearIssue(): String = DISABLED
+    fun buildMarkdownReport(): String = DISABLED
     fun buildReport(): String = DISABLED
+
+    fun runMacro(steps: List<MacroStep>): MacroResult = MacroResult(
+        allPassed = false, steps = steps.map { StepResult(it, false, "noop") }, errorCount = steps.size
+    )
 }
 
 @Composable

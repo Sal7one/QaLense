@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QaLens — mobile release evidence, end to end</title>
+<style>
+:root { --bg:#06090f; --surface:#0c1220; --surface2:#141d31; --line:rgba(151,178,226,.14);
+  --text:#eef2fb; --muted:#8b99b5; --accent:#7ba7ff; --accent2:#9b8bff;
+  --ok:#3fe08a; --warn:#fbc447; --err:#ff7d7d; }
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body { margin:0; color:var(--text);
+  font:15px/1.6 "Inter",-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:
+    radial-gradient(1200px 560px at 82% -14%, rgba(84,128,255,.20), transparent 62%),
+    radial-gradient(900px 480px at -12% 112%, rgba(56,96,214,.16), transparent 58%),
+    radial-gradient(640px 420px at 50% 130%, rgba(139,123,255,.10), transparent 60%),
+    var(--bg);
+  -webkit-font-smoothing:antialiased; }
+code, kbd { font-family:ui-monospace,"JetBrains Mono",Menlo,monospace; font-size:.86em; }
+.wrap { max-width:1120px; margin:0 auto; padding:0 24px; }
+
+/* nav */
+nav { position:sticky; top:0; z-index:50; backdrop-filter:blur(16px) saturate(1.3);
+  background:rgba(6,9,15,.78); border-bottom:1px solid var(--line); }
+nav .wrap { display:flex; align-items:center; gap:16px; padding-top:12px; padding-bottom:12px; }
+.brand { display:flex; align-items:center; gap:9px; font-weight:800; font-size:16px; letter-spacing:-.2px; }
+.brand-mark { width:26px; height:26px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; box-shadow:0 0 22px rgba(123,167,255,.45); }
+.nav-links { margin-left:auto; display:flex; gap:4px; flex-wrap:wrap; }
+.nav-links a { color:var(--muted); text-decoration:none; font-size:13px; font-weight:600; padding:6px 12px; border-radius:9px; }
+.nav-links a:hover { color:var(--text); background:var(--surface2); }
+
+/* hero */
+header.hero { padding:96px 0 72px; text-align:center; }
+.eyebrow { display:inline-flex; gap:7px; align-items:center; border:1px solid rgba(63,224,138,.35);
+  color:var(--ok); background:rgba(63,224,138,.08); font-size:12px; font-weight:700;
+  border-radius:20px; padding:5px 14px; margin-bottom:22px; }
+.eyebrow::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--ok); box-shadow:0 0 10px var(--ok); }
+h1 { font-size:56px; line-height:1.08; letter-spacing:-2px; font-weight:850; margin:0 0 18px; }
+h1 em { font-style:normal; background:linear-gradient(115deg,var(--accent) 10%,var(--accent2) 90%);
+  -webkit-background-clip:text; background-clip:text; color:transparent; }
+.lede { color:var(--muted); font-size:18px; max-width:720px; margin:0 auto 34px; }
+.cta-row { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+.btn { border:1px solid var(--line); background:var(--surface); color:var(--text); border-radius:11px;
+  padding:11px 22px; font-size:14px; font-weight:650; text-decoration:none; display:inline-flex; gap:8px;
+  align-items:center; transition:transform .1s, border-color .15s, box-shadow .15s; }
+.btn:hover { border-color:var(--accent); transform:translateY(-1px); box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.btn-primary { background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; color:#fff;
+  box-shadow:0 6px 22px rgba(90,120,240,.45); }
+.btn-code { font-family:ui-monospace,Menlo,monospace; }
+
+/* stat strip */
+.stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:54px 0 0; }
+.stat { background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:18px;
+  box-shadow:0 12px 30px rgba(0,0,0,.35); }
+.stat b { display:block; font-size:26px; letter-spacing:-.6px; }
+.stat span { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.7px; font-weight:700; }
+
+/* pillars */
+section { padding:64px 0 20px; }
+h2 { font-size:30px; letter-spacing:-1px; margin:0 0 8px; }
+h2 .tag { font-size:11px; vertical-align:middle; text-transform:uppercase; letter-spacing:1px; color:var(--accent);
+  border:1px solid rgba(123,167,255,.35); border-radius:7px; padding:2px 8px; margin-left:10px; }
+.sub { color:var(--muted); max-width:760px; margin-bottom:26px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; }
+.card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:20px 22px;
+  box-shadow:0 12px 30px rgba(0,0,0,.35); transition:transform .15s, border-color .15s; }
+.card:hover { transform:translateY(-3px); border-color:rgba(123,167,255,.4); }
+.card h3 { margin:0 0 6px; font-size:17px; letter-spacing:-.2px; }
+.card p { margin:0; color:var(--muted); font-size:13.5px; }
+.card .kbd { display:inline-block; margin-top:10px; }
+kbd { background:var(--surface2); border:1px solid var(--line); border-bottom-width:2px; border-radius:5px;
+  padding:1px 7px; font-size:11px; color:var(--text); }
+.icon { width:34px; height:34px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+  font-size:17px; margin-bottom:12px; }
+.icon.frontend { background:rgba(123,167,255,.14); color:var(--accent); }
+.icon.mobile { background:rgba(63,224,138,.13); color:var(--ok); }
+.icon.backend { background:rgba(251,196,71,.13); color:var(--warn); }
+
+/* hooks diagram */
+.flow { display:flex; flex-wrap:wrap; gap:12px; align-items:stretch; justify-content:center; margin:20px 0 8px; }
+.flow-node { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 18px;
+  min-width:190px; text-align:center; }
+.flow-node b { display:block; font-size:14px; }
+.flow-node span { color:var(--muted); font-size:12px; }
+.flow-arrow { align-self:center; color:var(--accent); font-size:20px; }
+.flow-node.endpoint { border-color:rgba(63,224,138,.4); }
+.flow-node.endpoint code { color:var(--ok); }
+
+/* one command */
+.terminal { background:#05070d; border:1px solid var(--line); border-radius:16px; padding:20px 24px;
+  font-family:ui-monospace,Menlo,monospace; font-size:13.5px; line-height:1.9; overflow-x:auto; }
+.terminal .p { color:var(--ok); }
+.terminal .c { color:var(--accent); }
+.terminal .o { color:var(--muted); }
+
+/* tables */
+table { width:100%; border-collapse:collapse; font-size:13.5px; }
+th { text-align:left; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.8px;
+  padding:8px 10px; border-bottom:1px solid var(--line); }
+td { padding:9px 10px; border-bottom:1px solid var(--line); }
+td code { color:var(--accent); }
+
+footer { margin-top:70px; border-top:1px solid var(--line); padding:26px 0 50px; color:var(--muted); font-size:13px; }
+footer .wrap { display:flex; gap:18px; flex-wrap:wrap; justify-content:space-between; }
+footer a { color:var(--accent); text-decoration:none; }
+
+@media (max-width:800px) {
+  h1 { font-size:38px; letter-spacing:-1.2px; }
+  .stats { grid-template-columns:repeat(2,1fr); }
+  header.hero { padding:64px 0 44px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <span class="brand"><span class="brand-mark">◉</span>QaLens</span>
+    <span class="nav-links">
+      <a href="#frontend">Web player</a>
+      <a href="#mobile">Mobile SDK</a>
+      <a href="#backend">Backend</a>
+      <a href="#hooks">Hooks</a>
+      <a href="integration.html">Integrate</a>
+      <a href="#quickstart">Quick start</a>
+    </span>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow">debug-only · redacted by default · nothing leaves the device unless you say so</span>
+    <h1>Mobile release evidence,<br/><em>end to end</em></h1>
+    <p class="lede">QaLens observes a QA session, turns it into a redacted bug bundle and a replayable <code>.sal</code> recording, and ships it to your analysis backend — through a web player, an Android SDK, and a mock backend you can stand up in ten seconds.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="index.html?sample&t=24.6">▶ Open the web player — right on the failing transfer</a>
+      <a class="btn" href="http://127.0.0.1:8000/" target="_blank" rel="noopener">Open the mock backend dashboard</a>
+      <a class="btn btn-code" href="../DEMO.md" target="_blank" rel="noopener">Read the demo tour</a>
+      <a class="btn" href="integration.html">⚙ Integration guide</a>
+    </div>
+    <div class="stats">
+      <div class="stat"><b>0 code</b><span>to get Level-0 evidence</span></div>
+      <div class="stat"><b>7 tracks</b><span>synced to one playhead</span></div>
+      <div class="stat"><b>3 hooks</b><span>mobile · web · backend</span></div>
+      <div class="stat"><b>158 tests</b><span>core · web · backend · parity</span></div>
+    </div>
+  </div>
+</header>
+
+<section id="frontend">
+  <div class="wrap">
+    <h2>Frontend — Mission Control<span class="tag">web player</span></h2>
+    <p class="sub">A zero-dependency, offline-first <code>.sal</code> viewer. Drop a recording, and the screen, timeline, network, logs, state and auto-insights all scrub on one playhead.</p>
+    <div class="grid">
+      <div class="card"><div class="icon frontend">▶</div><h3>Synced replay</h3><p>Frames or H.264 video locked to every track; every row seeks the video — forward too.</p><p class="kbd"><kbd>space</kbd> <kbd>←</kbd><kbd>→</kbd> <kbd>e</kbd> <kbd>s</kbd> <kbd>t</kbd> <kbd>x</kbd></p></div>
+      <div class="card"><div class="icon frontend">✦</div><h3>AI Brief &amp; insights</h3><p>The recording explains itself: <code>for_ai.md</code> tab, on-device anomalies, score donut, likely owner with reasons.</p><p class="kbd"><kbd>7</kbd></p></div>
+      <div class="card"><div class="icon frontend">★</div><h3>Marks &amp; compare</h3><p>Star moments on the scrubber, export bookmarks, and diff two sessions — did that fix actually change anything?</p><p class="kbd"><kbd>m</kbd></p></div>
+      <div class="card"><div class="icon frontend">⇪</div><h3>Send to backend</h3><p>One click ships the session to your Mission Control backend — same wire contract as the mobile app.</p></div>
+      <div class="card"><div class="icon frontend">⚙</div><h3>.appsal editor</h3><p>Build per-app QA configs (panel style, webhook, saved SQL, macros) in the browser and import them on-device.</p></div>
+      <div class="card"><div class="icon frontend">⌨</div><h3>CLI &amp; CI</h3><p><code>sal_report.js</code> prints a Jira-ready report, <code>--json</code> for machines, exits 1 on failures — a ready-made pipeline gate.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="mobile">
+  <div class="wrap">
+    <h2>Mobile — the evidence SDK<span class="tag">android</span></h2>
+    <p class="sub">Debug-only Jetpack Compose SDK. Release builds link a no-op with the identical API — it costs nothing in production.</p>
+    <div class="grid">
+      <div class="card"><div class="icon mobile">🫧</div><h3>Floating QA panel</h3><p>Overview, Bug Bundle, Repro, Screen Health, Network, Navigation, Accessibility, Tags, Device, Tools, Inspect, Logs — one tap from the bubble, a shake, or the notification.</p></div>
+      <div class="card"><div class="icon mobile">📋</div><h3>One-tap exports</h3><p>Jira · Slack · Repro · Full report · GitHub · Linear · Markdown — all redacted, all clipboard-ready.</p></div>
+      <div class="card"><div class="icon mobile">🎬</div><h3>Session recording</h3><p>Frames (no permission) or HD video → <code>.sal</code> with precomputed <code>analysis.json</code> + <code>for_ai.md</code> — share, replay, or webhook it.</p></div>
+      <div class="card"><div class="icon mobile">💥</div><h3>Crash, ANR &amp; jank</h3><p>Crash handler with screen/route/network context, ANR watchdog, coroutine bridge, frame-timing jank — all feeding the score and the <code>.sal</code>.</p></div>
+      <div class="card"><div class="icon mobile">🤖</div><h3>Macros &amp; assertions</h3><p>Drive the real UI: <code>tap</code>, <code>type</code>, <code>deeplink</code>, plus <code>assert exists / route / network</code> and <code>if … else</code> — a login completes itself.</p></div>
+      <div class="card"><div class="icon mobile">🛰</div><h3>Control Room</h3><p>Own-task command center: recordings manager, panic restore, webhook config with Test endpoint, QA profiles, <code>.appsal</code> import.</p></div>
+    </div>
+    <p class="sub" style="margin-top:20px">Try it: <code>./demo.sh android</code> builds and installs the banking sample — its Settings screen has a <b>QaLens Demos</b> section that fires a failing transfer, bookmarks, recordings, coroutine crashes, an ANR, and a real crash on demand.</p>
+  </div>
+</section>
+
+<section id="backend">
+  <div class="wrap">
+    <h2>Backend — the mock webhook<span class="tag">python · stdlib only</span></h2>
+    <p class="sub">A zero-dependency local server that stands in for your AI-analysis backend: receives every hook, parses each <code>.sal</code>, and returns a deterministic mock AI verdict. Swap one function for your real LLM call.</p>
+    <div class="grid">
+      <div class="card"><div class="icon backend">📡</div><h3>Both hooks, one endpoint</h3><p><code>POST /webhook</code> takes the mobile multipart upload and the web player upload; <code>POST /api/ingest</code> takes JSON summaries.</p></div>
+      <div class="card"><div class="icon backend">🧠</div><h3>Mock AI verdict</h3><p>Severity, likely owner, confidence, and evidence — derived from the recording's own <code>analysis.json</code>. The verdict body is what the Control Room shows under each recording.</p></div>
+      <div class="card"><div class="icon backend">🧩</div><h3>Chunked &amp; resumable</h3><p>Large recordings stream in 1 MB chunks with CRC32 and resume — flaky QA-lab Wi-Fi is fine.</p></div>
+      <div class="card"><div class="icon backend">🖥</div><h3>Live dashboard</h3><p>Uploads arrive live with score, owner, and verdict; click a card for the full digest, download the <code>.sal</code>, delete it.</p></div>
+    </div>
+    <div class="terminal" style="margin-top:18px">
+      <div class="p">$ python3 backend/server.py</div>
+      <div class="o">dashboard:  http://127.0.0.1:8000/</div>
+      <div class="o">webhook:    http://127.0.0.1:8000/webhook</div>
+      <div class="o">15 end-to-end tests: python3 backend/tests/test_backend.py</div>
+    </div>
+  </div>
+</section>
+
+<section id="hooks">
+  <div class="wrap">
+    <h2>The hooks — same backend, three clients<span class="tag">wired end to end</span></h2>
+    <div class="flow">
+      <div class="flow-node"><b>Android Control Room</b><span>multipart .sal + X-QaLens-* headers</span></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node endpoint"><b>POST <code>/webhook</code></b><span>parse · store · mock AI verdict</span></div>
+      <div class="flow-arrow">←</div>
+      <div class="flow-node"><b>Response body</b><span>shown under the recording</span></div>
+    </div>
+    <div class="flow">
+      <div class="flow-node"><b>Web player</b><span>⇪ Send to backend</span></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node endpoint"><b>POST <code>/webhook</code> · <code>/api/ingest</code></b><span>same contracts, CORS-ready</span></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node"><b>Dashboard</b><span>live uploads + verdicts</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="wrap">
+    <h2>One command to see it all<span class="tag">quick start</span></h2>
+    <p class="sub">From the repo root — no Android, no installs beyond python3 and a browser.</p>
+    <div class="terminal">
+      <div class="p">$ ./demo.sh</div>
+      <div class="o">✓ mock backend up ....... http://127.0.0.1:8000/</div>
+      <div class="o">✓ web player up ......... http://127.0.0.1:8100/?sample&t=24.6  ← the failing transfer</div>
+      <div class="o">✓ this landing page ...... http://127.0.0.1:8100/landing.html</div>
+      <div class="p">$ ./demo.sh curl      # drive every hook from the terminal</div>
+      <div class="p">$ ./demo.sh android   # build + install the sample app, script the wow flow</div>
+      <div class="p">$ ./demo.sh test      # every test suite, as CI would run it</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>QaLens · debug-only release-evidence SDK · MIT · demo tour in <a href="../DEMO.md">DEMO.md</a> · review in <a href="../docs/CODE_REVIEW.md">docs/CODE_REVIEW.md</a></span>
+    <span><a href="index.html">Mission Control</a> · <a href="http://127.0.0.1:8000/" target="_blank" rel="noopener">Backend dashboard</a> · <a href="../README.md">README</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

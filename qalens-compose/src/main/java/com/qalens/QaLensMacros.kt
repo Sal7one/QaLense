@@ -13,6 +13,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** B15: outcome of the most recent run of a macro, keyed by macro name (in-memory only). */
+internal data class MacroRunResult(val passed: Boolean, val assertionFailures: Int)
+
 /**
  * Runs QA macros — named step lists from the `.appsal` config, fired with one tap from the
  * minimal panel or the Control Room. Step DSL (one step per line, case-insensitive):
@@ -38,17 +41,50 @@ internal object QaLensMacros {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     @Volatile private var running = false
 
+    /** In-memory record of each macro's most recent run (no persistence). */
+    private val lastRun = mutableMapOf<String, MacroRunResult>()
+
+    internal fun lastRunResult(name: String): MacroRunResult? = lastRun[name]
+
     fun run(macro: AppSalMacro) {
         if (running) { QaLens.log("Macro already running"); return }
         running = true
         QaLens.appContext?.let { QaLensAppSal.recordMacroUse(it, macro.name) }
         QaLens.breadcrumb("▶ Macro started: ${macro.name}")
         scope.launch {
+            var assertionFailures = 0
+            var stoppedStep: String? = null
             try {
-                for (raw in macro.steps) {
+                loop@ for (raw in macro.steps) {
                     val step = raw.trim()
                     if (step.isBlank()) continue
                     val verb = step.substringBefore(' ').lowercase()
+
+                    // ── B15: assertion line — evaluated against the live snapshot ──
+                    if (verb == "assert" || verb == "if") {
+                        val parsed = parseMacroLine(step)
+                        if (parsed == null) {
+                            QaLens.log("Macro '${macro.name}': unknown assertion '$step' (skipped)")
+                            continue
+                        }
+                        val result = MacroEngine.execute(listOf(parsed), QaLens.state.value, QaLens.config.value)
+                        val stepResult = result.steps.firstOrNull()
+                        val detail = stepResult?.message?.takeIf { it.isNotBlank() }
+                        if (stepResult?.passed == true) {
+                            QaLens.event("assertion", "assertion ✓ ${describe(parsed)}")
+                        } else {
+                            assertionFailures++
+                            stoppedStep = step
+                            QaLens.event("assertion", "assertion ✕ ${describe(parsed)}" + (detail?.let { " — $it" } ?: ""))
+                            QaLens.breadcrumb("✕ Macro '${macro.name}' stopped at: $step")
+                            break@loop
+                        }
+                        // Small breather so navigation/recomposition can settle.
+                        delay(150)
+                        continue
+                    }
+
+                    // Interaction step — unchanged driver behavior.
                     val arg = step.substringAfter(' ', "").trim()
                     val ok = when (verb) {
                         "deeplink" -> { QaLens.navigate(arg); true }
@@ -62,13 +98,27 @@ internal object QaLensMacros {
                         else -> { QaLens.log("Macro '${macro.name}': unknown step '$step' (skipped)"); true }
                     }
                     if (!ok) {
+                        stoppedStep = step
                         QaLens.breadcrumb("✕ Macro '${macro.name}' stopped at: $step")
-                        return@launch
+                        break@loop
                     }
                     // Small breather between steps so navigation/recomposition can settle.
                     delay(150)
                 }
-                QaLens.breadcrumb("■ Macro finished: ${macro.name}")
+
+                // ── B15: finish summary + last-run record ──
+                if (stoppedStep == null) {
+                    QaLens.breadcrumb("■ Macro finished: ${macro.name} ✓")
+                    QaLens.log("Macro '${macro.name}' finished: all ${macro.steps.size} step(s) passed")
+                    lastRun[macro.name] = MacroRunResult(passed = true, assertionFailures = 0)
+                } else if (assertionFailures > 0) {
+                    QaLens.breadcrumb("■ Macro finished: ${macro.name} ✕ $assertionFailures assertion${if (assertionFailures > 1) "s" else ""} failed")
+                    QaLens.log("Macro '${macro.name}' finished: ✕ $assertionFailures assertion(s) failed (stopped at: $stoppedStep)")
+                    lastRun[macro.name] = MacroRunResult(passed = false, assertionFailures = assertionFailures)
+                } else {
+                    QaLens.log("Macro '${macro.name}' failed: interaction step '$stoppedStep' failed")
+                    lastRun[macro.name] = MacroRunResult(passed = false, assertionFailures = 0)
+                }
             } finally {
                 running = false
             }
@@ -131,5 +181,33 @@ internal object QaLensMacros {
     private fun fail(verb: String, target: String): Boolean {
         QaLens.log("Macro $verb failed: '$target' not found within ${AWAIT_MS / 1000}s (check the test tag)")
         return false
+    }
+
+    // ── B15: assertion descriptions ────────────────────────────────────────
+
+    /** Canonical human description of an assertion step, used in the ✓/✕ timeline event. */
+    private fun describe(step: MacroStep): String = when (step) {
+        is MacroStep.AssertExists -> "assert exists ${step.selector}"
+        is MacroStep.AssertLabel -> "assert label ${step.tag} \"${step.text}\""
+        is MacroStep.AssertRoute -> "assert route ${step.expected}"
+        is MacroStep.AssertNetwork -> "assert network ${step.urlContains}" +
+            if (step.expectStatus != 0) " (status ${step.expectStatus})" else ""
+        is MacroStep.AssertNoNetworkErrors -> "assert no network errors"
+        is MacroStep.AssertNoSlowNetwork -> "assert no slow network (${step.slowThresholdMs}ms)"
+        is MacroStep.If -> "if ${describeCondition(step.condition)}"
+        is MacroStep.Tap -> "tap ${step.selector}"
+        is MacroStep.Type -> "type ${step.selector}"
+        is MacroStep.Scroll -> "scroll ${step.selector}"
+        is MacroStep.Wait -> "wait ${step.seconds}s"
+        else -> step.toString()
+    }
+
+    private fun describeCondition(condition: MacroCondition): String = when (condition) {
+        is MacroCondition.Exists -> "exists ${condition.selector}"
+        is MacroCondition.RouteEquals -> "route == ${condition.expected}"
+        is MacroCondition.NetworkOk -> "network ok ${condition.urlContains}"
+        is MacroCondition.NoErrors -> "no errors"
+        is MacroCondition.ScoreAbove -> "score >= ${condition.threshold}"
+        else -> "condition"
     }
 }

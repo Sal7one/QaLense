@@ -103,7 +103,7 @@ QaLens has one rule that explains everything: **it never invents data it didn't 
 ```
 qalens-core    pure Kotlin/JVM — no Android. Models, config+redaction, rules, scoring, classifier,
                timeline/repro, build safety, screen-quality, evidence bundle, reports, .sal encoders.
-               (Has the only unit tests today — 49 of them.)
+               (Has the only unit tests today — 69 of them.)
 
 qalens-android Android device/build info, shake detector, foreground notification, FileProvider,
                MediaProjection helpers live in qalens-compose (need QaLens), not here.
@@ -121,6 +121,10 @@ qalens-noop    Release-safe no-op with the IDENTICAL public API. Every public sy
                artifacts must have a no-op twin here or release builds break.
 
 web/           Zero-dependency browser .sal viewer (HTML/CSS/JS). Unzips with native DecompressionStream.
+
+backend/       Mock Python webhook backend (stdlib-only) for testing the webhook without a real
+               server: POST /webhook (mobile) + /api/ingest (web player), dashboard, uploads
+               store, deterministic mock AI verdict. See backend/README.md.
 
 sample-app     A banking-style demo wired for the full wo flow.
 ```
@@ -291,7 +295,7 @@ These are non-negotiable invariants — preserve them in any change:
 # Build the debug app (full debug dependency path)
 ./gradlew :sample-app:assembleDebug
 
-# Core unit tests (the engines) — 49 tests
+# Core unit tests (the engines) — 69 tests
 ./gradlew :qalens-core:test
 
 # Release / no-op API parity (THE check that release still compiles)
@@ -299,7 +303,14 @@ These are non-negotiable invariants — preserve them in any change:
 
 # Web .sal reader regression test
 node web/test/read.test.js
+
+# Mock backend end-to-end tests (11)
+python3 backend/tests/test_backend.py
 ```
+
+To test the webhook without a real server: `python3 backend/server.py` → `adb reverse tcp:8000
+tcp:8000` (emulator) → Control Room → Webhook → `http://127.0.0.1:8000/webhook` → **Test endpoint**;
+uploads land on the dashboard at http://127.0.0.1:8000/. See `backend/README.md`.
 
 Always run `compileReleaseKotlin` after touching the public API — it's how you catch a missing no-op twin.
 

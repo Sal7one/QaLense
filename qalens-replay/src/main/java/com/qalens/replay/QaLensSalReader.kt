@@ -5,6 +5,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
+import java.util.zip.CRC32
+import java.util.zip.GZIPInputStream
 import java.util.zip.ZipInputStream
 
 // ── Player-side models (decoded from a .sal) ───────────────────────────────────
@@ -70,6 +72,13 @@ object QaLensSalReader {
         unzip(input, dir)
 
         val manifest = runCatching { JSONObject(textOf(dir, "manifest.json")) }.getOrDefault(JSONObject())
+        val formatVersion = manifest.optInt("formatVersion", 1)
+        if (formatVersion > 2) {
+            throw IllegalArgumentException(
+                "Unsupported .sal formatVersion $formatVersion — this player supports versions 1 and 2."
+            )
+        }
+        verifyChecksums(manifest, dir)
         val app = manifest.optJSONObject("app")
         val appLabel = buildString {
             append(app?.optString("name") ?: "App")
@@ -193,8 +202,63 @@ object QaLensSalReader {
         }.getOrDefault(emptyList())
     }
 
-    private fun textOf(dir: File, name: String): String =
-        File(dir, name).let { if (it.exists()) it.readText() else "" }
+    /**
+     * Read a track as UTF-8, transparently decompressing v2 entries (gzip detected by magic bytes:
+     * 0x1f 0x8b). v1 entries (plain text) pass through unchanged.
+     */
+    private fun textOf(dir: File, name: String): String {
+        val f = File(dir, name)
+        if (!f.exists()) return ""
+        return runCatching {
+            val raw = f.readBytes()
+            val content = if (isGzip(raw)) gunzip(raw) else raw
+            String(content, Charsets.UTF_8)
+        }.getOrDefault("")
+    }
+
+    private fun isGzip(bytes: ByteArray): Boolean =
+        bytes.size >= 2 && bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte()
+
+    private fun gunzip(bytes: ByteArray): ByteArray =
+        GZIPInputStream(bytes.inputStream()).use { it.readBytes() }
+
+    private fun crc32Hex(bytes: ByteArray): String {
+        val crc = CRC32()
+        crc.update(bytes)
+        return "%08x".format(crc.value)
+    }
+
+    /**
+     * R9: verify per-entry CRC-32 (of *uncompressed* content) when present in manifest.files.
+     * files may be an array of strings (v1) or objects {name, crc32, compressed} (v2) — accept
+     * both. Mismatches only warn (never hard-fail), and missing entries are skipped.
+     */
+    private fun verifyChecksums(manifest: JSONObject, dir: File) {
+        val files = manifest.optJSONArray("files") ?: return
+        for (i in 0 until files.length()) {
+            val item = files.opt(i) ?: continue
+            val name: String
+            val expected: String?
+            when (item) {
+                is JSONObject -> {
+                    name = item.optString("name")
+                    expected = item.optString("crc32").takeIf { it.isNotBlank() }
+                }
+                is String -> { name = item; expected = null }
+                else -> continue
+            }
+            if (name.isBlank() || expected == null) continue
+            val f = File(dir, name)
+            if (!f.exists()) continue
+            val actual = runCatching {
+                val raw = f.readBytes()
+                crc32Hex(if (isGzip(raw)) gunzip(raw) else raw)
+            }.getOrNull() ?: continue
+            if (!actual.equals(expected, ignoreCase = true)) {
+                android.util.Log.w("QaLensSalReader", "CRC32 mismatch for " + name + ": expected " + expected + ", got " + actual)
+            }
+        }
+    }
 
     private fun unzip(input: InputStream, dir: File) {
         ZipInputStream(input).use { zip ->

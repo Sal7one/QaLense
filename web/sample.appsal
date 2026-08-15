@@ -9,7 +9,7 @@
     "dockBottom": false
   },
   "webhook": {
-    "url": "https://qa.example.com/api/sal-intake",
+    "url": "http://127.0.0.1:8000/webhook",
     "headerName": "Authorization",
     "headerValue": "•••",
     "params": "team=payments&pipeline=nightly",

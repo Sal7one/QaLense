@@ -112,6 +112,7 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
         }
         QaLens.onActivityResumed(activity)
         attachOverlay(activity)
+        QaLensFrameMetrics.attach(activity)
         healOverlayVisibility(activity)
         startShake(activity)
         maybeRequestNotificationPermission(activity)
@@ -127,6 +128,7 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     override fun onActivityPaused(activity: Activity) {
         if (isInternal(activity)) return
         QaLens.onActivityPaused(activity)
+        QaLensFrameMetrics.detach(activity)
         stopShake(activity)
     }
 

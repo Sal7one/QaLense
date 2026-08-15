@@ -34,6 +34,9 @@ qalens-replay          on-device .sal player (own task, no launcher icon; opened
                        Control Room or a shared file)
 qalens-noop            release-safe mirror of every public API
 web/                   offline web player + sal_report CLI + sample generator
+backend/               mock Python webhook backend (stdlib-only): POST /webhook (mobile) +
+                       /api/ingest (web player), dashboard, uploads store, deterministic mock AI
+                       verdict — lets you test the webhook without a real server (see backend/README.md)
 ```
 
 ### Task model (load-bearing — do not regress)

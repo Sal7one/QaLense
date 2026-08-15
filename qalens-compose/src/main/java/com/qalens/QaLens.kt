@@ -5,6 +5,8 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import androidx.room.InvalidationTracker
 import androidx.room.RoomDatabase
@@ -21,22 +23,46 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.lang.ref.WeakReference
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 object QaLens {
     private val configState = MutableStateFlow(QaLensConfig())
     private val uiStateMutable = MutableStateFlow(QaLensUiState())
     private val manualNodes = linkedMapOf<String, InspectNode>()
-    private val recomposeBuffer = mutableMapOf<String, Int>()
+    private val recomposeBuffer = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private var lastRecomposeFlushMs = 0L
 
     private var featureFlagProvider: (() -> Map<String, Boolean>)? = null
     private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Main-thread handler for all state mutations + debounced analysis. Never null after first use. */
+    private val mainHandler = Handler(Looper.getMainLooper())
+    /** True when a recompute is pending (set on any thread, consumed on main). */
+    private val analysisDirty = AtomicBoolean(false)
+    /** A pending recompute runnable, deduped so bursts coalesce into one pass. */
+    private var analysisPending: Runnable? = null
+    /** Debounce window for [markAnalysisDirty]. Tuned so a burst of 10 network calls → 1 recompute. */
+    private const val ANALYSIS_DEBOUNCE_MS = 250L
     private var lastScreenKey: String? = null
     private var lastScreenshot: EvidenceAttachment? = null
     private val contracts = linkedMapOf<String, ScreenContract>()
-    private val dataSourceProviders = linkedMapOf<String, () -> Map<String, String>>()
+    private val dataSourceProviders = linkedMapOf<String, DataSourceEntry>()
+    /** B3: registered custom tab providers — appended after the built-in tabs in the panel. */
+    private val customTabs = linkedMapOf<String, QaLensTabProvider>()
     private var pendingScenario: DeepLinkScenario? = null
     private var lastNavMs = 0L
+
+    /** A3: the analysis pipeline, extracted from the orchestrator so it's testable in isolation. */
+    private val analysisEngine: AnalysisEngine by lazy {
+        AnalysisEngine(
+            contracts = contracts,
+            dataSourceProviders = dataSourceProviders,
+            featureFlagProvider = { featureFlagProvider?.invoke() ?: emptyMap() },
+            onError = ::onAnalysisError
+        )
+    }
 
     private var appRef: WeakReference<Application>? = null
     private var currentActivityRef: WeakReference<Activity>? = null
@@ -61,7 +87,11 @@ object QaLens {
             return
         }
         currentActivityRef?.get()?.let { updateDeviceAndScreen(it) }
-        recomputeAnalysis()
+        // Network source may have been flipped in configure() after install — apply it lazily.
+        if (configState.value.networkFromChucker) {
+            appContext?.let { QaLensChuckerSource.ensureRegistered(it) }
+        }
+        markAnalysisDirty()
     }
 
     /**
@@ -70,7 +100,7 @@ object QaLens {
      */
     fun setFeatureFlagProvider(provider: () -> Map<String, Boolean>) {
         featureFlagProvider = provider
-        recomputeAnalysis()
+        markAnalysisDirty()
     }
 
     // ── Deep link scenarios ───────────────────────────────────────────────────
@@ -125,8 +155,27 @@ object QaLens {
      */
     fun contract(screen: String, block: ScreenContractBuilder.() -> Unit) {
         contracts[screen] = ScreenContractBuilder(screen).apply(block).build()
-        recomputeAnalysis()
+        markAnalysisDirty()
     }
+
+    // ── Custom panel tabs (B3) ────────────────────────────────────────────────
+    /**
+     * Register a custom tab in the inspector panel. The tab's [QaLensTabProvider.Content] is
+     * rendered when QA selects it, receiving the current [QaLensUiState] + [QaLensConfig]. Tabs
+     * appear after the built-ins. In release builds this is a no-op (the provider compiles but is
+     * never invoked).
+     */
+    fun registerTab(provider: QaLensTabProvider) {
+        customTabs[provider.title] = provider
+    }
+
+    /** Remove a previously registered custom tab by title. */
+    fun unregisterTab(title: String) {
+        customTabs.remove(title)
+    }
+
+    /** The registered custom tab providers (internal — the panel appends them to the tab strip). */
+    internal fun registeredTabs(): List<QaLensTabProvider> = customTabs.values.toList()
 
     // ── Custom data sources (DataStore prefs / Room snapshots) ─────────────────
     /**
@@ -134,13 +183,28 @@ object QaLens {
      * to appear in the panel, evidence bundle, reports, and recorded sessions. Evaluated safely on
      * every analysis pass — a throwing provider is caught and ignored. Values are redacted.
      *
-     *   QaLens.registerDataSource("Preferences") {
-     *       mapOf("theme" to prefs.theme, "onboarded" to prefs.onboarded.toString())
-     *   }
+     * B16: per-source redaction options on top of the global defaults:
+     * - [redactKeys] — exact key names whose values are always masked (e.g. `"ssn"`, `"email"`).
+     * - [redactPatterns] — regexes applied to this source's values only (domain-specific PII).
+     * - [redactAll] — mask every value from this source.
+     * The global [QaLensConfig.redact] rules still apply as a backstop after these.
+     *
+     *   QaLens.registerDataSource("User", provider, redactKeys = listOf("ssn", "email"))
      */
-    fun registerDataSource(name: String, provider: () -> Map<String, String>) {
-        dataSourceProviders[name] = provider
-        recomputeAnalysis()
+    fun registerDataSource(
+        name: String,
+        redactKeys: List<String> = emptyList(),
+        redactPatterns: List<Regex> = emptyList(),
+        redactAll: Boolean = false,
+        provider: () -> Map<String, String>
+    ) {
+        dataSourceProviders[name] = DataSourceEntry(
+            provider = provider,
+            redactKeys = redactKeys.toSet(),
+            redactPatterns = redactPatterns,
+            redactAll = redactAll
+        )
+        markAnalysisDirty()
     }
 
     // ── Room / DataStore change events ─────────────────────────────────────────
@@ -156,7 +220,7 @@ object QaLens {
             }
         }
         runCatching { db.invalidationTracker.addObserver(observer) }
-            .onFailure { log("observeRoom failed: ${it.message}") }
+            .onFailure { pushError(ErrorKind.DATA_SOURCE, "observeRoom failed: ${it.message}") }
     }
 
     /**
@@ -175,6 +239,43 @@ object QaLens {
         }
     }
 
+    // ── A6: Generic data-source observer (Room/DataStore agnostic) ───────────
+    private val dataObservers = mutableListOf<DataSourceObserver>()
+
+    /**
+     * Register a [DataSourceObserver] to be notified of data-layer changes.
+     * The observer is called on the thread that fires the change — typically a binder or
+     * background thread. Implementations should be lightweight (emit a timeline event or
+     * push to QaLens state) rather than performing heavy work.
+     */
+    fun registerDataSourceObserver(observer: DataSourceObserver) {
+        if (observer in dataObservers) return
+        dataObservers += observer
+    }
+
+    /** Remove a previously registered [DataSourceObserver]. */
+    fun unregisterDataSourceObserver(observer: DataSourceObserver) {
+        dataObservers -= observer
+    }
+
+    /** Notify all registered observers of a data-layer change. Called by the host app. */
+    fun notifyDataChange(source: String, tableName: String, changeType: ChangeType) {
+        val snapshot = dataObservers.toList()
+        snapshot.forEach { obs ->
+            runCatching { obs.onChanged(source, tableName, changeType) }
+                .onFailure { log("DataSourceObserver.onChanged failed: ${it.message}") }
+        }
+    }
+
+    /** Notify all registered observers of a data-layer error. */
+    fun notifyDataError(source: String, error: String) {
+        val snapshot = dataObservers.toList()
+        snapshot.forEach { obs ->
+            runCatching { obs.onError(source, error) }
+                .onFailure { log("DataSourceObserver.onError failed: ${it.message}") }
+        }
+    }
+
     fun install(application: Application) {
         appRef = WeakReference(application)
         // Restore persisted QA preferences so overlay setups survive process death.
@@ -187,6 +288,12 @@ object QaLens {
             )
         }
         QaLensActivityInstaller.install(application)
+        QaLensCrashHandler.install()
+        QaLensConnectivity.start(application)
+        QaLensMemoryMonitor.start(application)
+        // Feature flag: networkFromChucker → Chucker's TransactionListener becomes the network
+        // source (QaLensOkHttpInterceptor turns pass-through). Idempotent + logs a fallback note.
+        if (configState.value.networkFromChucker) QaLensChuckerSource.ensureRegistered(application)
     }
 
     fun setScreen(name: String, route: String? = null) {
@@ -217,7 +324,7 @@ object QaLens {
         lastNavMs = now
 
         resolvePendingScenario(name, route)
-        recomputeAnalysis()
+        markAnalysisDirty()
     }
 
     fun log(message: String) = pushEvent(QaEvent(type = QaEventType.LOG, message = message))
@@ -276,8 +383,9 @@ object QaLens {
 
     /** Move the panel / watch HUD between the top and bottom edge (frees the opposite edge). Persisted. */
     fun toggleDock() {
-        uiStateMutable.update { it.copy(dockBottom = !it.dockBottom) }
-        appContext?.let { QaLensPrefs.setDockBottom(it, uiStateMutable.value.dockBottom) }
+        var newValue = false
+        uiStateMutable.update { newValue = !it.dockBottom; it.copy(dockBottom = newValue) }
+        appContext?.let { QaLensPrefs.setDockBottom(it, newValue) }
     }
 
     /**
@@ -322,6 +430,14 @@ object QaLens {
             QaLensScreenCapture.setOverlayVisible(activity, true)
         }
         log("Panic restore: overlay re-attached, recording discarded, state reset.")
+
+        // A5: safety net — if a recording is somehow still flagged and the recorder reports no
+        // recent frames (>15s — stuck capture, e.g. FLAG_SECURE), force-clear the flag.
+        if (uiStateMutable.value.isRecording && !QaLensSessionRecorder.hasRecentFrames(15_000L)) {
+            QaLensSessionRecorder.cancel()
+            uiStateMutable.update { it.copy(isRecording = false) }
+            log("Panic restore: stuck recording with no recent frames force-cleared.")
+        }
     }
 
     /**
@@ -353,11 +469,15 @@ object QaLens {
     fun markNetworkAvailable() = uiStateMutable.update { it.copy(networkAvailable = true) }
 
     fun logNetwork(event: NetworkEvent) {
-        uiStateMutable.update { old ->
-            // 250: heavy apps fire 8+ calls per screen; 50 rolled over within a couple of screens.
-            old.copy(networkEvents = (old.networkEvents + event).takeLast(250), networkAvailable = true)
+        // OkHttp interceptors run on OkHttp's dispatcher thread; confine the state mutation to main
+        // so the read-compute-write in recomputeAnalysis can't race with another concurrent call.
+        mainHandler.post {
+            uiStateMutable.update { old ->
+                // 250: heavy apps fire 8+ calls per screen; 50 rolled over within a couple of screens.
+                old.copy(networkEvents = (old.networkEvents + event).takeLast(250), networkAvailable = true)
+            }
+            markAnalysisDirty()
         }
-        recomputeAnalysis()
     }
 
     fun clearNetworkLog() = uiStateMutable.update { it.copy(networkEvents = emptyList()) }
@@ -385,7 +505,7 @@ object QaLens {
             activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(deepLink)))
             breadcrumb("Deep link → $deepLink")
         } catch (e: Exception) {
-            log("Deep link failed: ${e.message}")
+            pushError(ErrorKind.NAVIGATION, "Deep link failed: ${e.message}")
         }
     }
 
@@ -394,7 +514,7 @@ object QaLens {
      * [share] additionally opens the share sheet. The minimal panel and markMoment save silently.
      */
     fun takeScreenshot(share: Boolean = true) {
-        val activity = currentActivityRef?.get() ?: run { log("No active activity for screenshot"); return }
+        val activity = currentActivityRef?.get() ?: run { pushError(ErrorKind.SCREENSHOT, "No active activity for screenshot"); return }
         val s = uiStateMutable.value
         QaLensScreenCapture.captureAndShare(activity, s.nodes, s.selectedNode, share = share)
     }
@@ -413,7 +533,7 @@ object QaLens {
      * recorder; [video] = true uses MediaProjection H.264 (shows a system consent dialog).
      */
     fun startRecording(video: Boolean = false) {
-        val activity = currentActivityRef?.get() ?: run { log("No active activity to record"); return }
+        val activity = currentActivityRef?.get() ?: run { pushError(ErrorKind.RECORDING, "No active activity to record"); return }
         closePanel() // get the panel out of the recording; stop via the notification
         QaLensSessionRecorder.start(activity, video)
     }
@@ -449,7 +569,7 @@ object QaLens {
         val context: Context = currentActivityRef?.get() ?: appContext ?: return
         val file = java.io.File(info.path)
         if (file.exists()) QaLensSessionRecorder.shareFile(context, file)
-        else { log("Recording no longer exists"); refreshRecordings() }
+        else { pushError(ErrorKind.RECORDING, "Recording no longer exists", retry = ::refreshRecordings); refreshRecordings() }
     }
 
     fun deleteRecording(info: RecordingInfo) {
@@ -490,6 +610,7 @@ object QaLens {
 
     /** Assemble the full in-memory evidence bundle from everything observed so far. */
     fun evidenceBundle(attachments: List<EvidenceAttachment> = emptyList()): EvidenceBundle {
+        flushAnalysis()  // never export a stale score/classification from a debounced recompute
         val s = uiStateMutable.value
         val cfg = configState.value
         val allAttachments = if (attachments.isNotEmpty()) attachments else listOfNotNull(lastScreenshot)
@@ -497,7 +618,7 @@ object QaLens {
             snapshot = snapshot(),
             network = s.networkEvents,
             config = cfg,
-            featureFlags = resolveFeatureFlags(cfg),
+            featureFlags = s.featureFlags,
             attachments = allAttachments,
             networkInterceptorInstalled = s.networkAvailable,
             expectedEnvironment = cfg.expectedEnvironment,
@@ -515,9 +636,24 @@ object QaLens {
     fun buildFullReport(): String = QaLensReports.full(evidenceBundle(), configState.value)
     fun buildSessionSummary(): String =
         QaLensReports.sessionSummary(uiStateMutable.value.screenQuality, configState.value)
+    fun buildGitHubIssue(): String = QaLensReports.githubIssue(evidenceBundle(), configState.value)
+    fun buildLinearIssue(): String = QaLensReports.linearIssue(evidenceBundle(), configState.value)
+    fun buildMarkdownReport(): String = QaLensReports.markdown(evidenceBundle(), configState.value)
 
     /** Back-compat: the original report API now returns the full v2 report. */
     fun buildReport(): String = buildFullReport()
+
+    /**
+     * B15: Run a macro against the current UI state, returning pass/fail for each step.
+     *
+     * Steps that interact with the UI (tap, type, scroll) require a real driver and
+     * are recorded as "pending" when run from the panel snapshot. Use this to validate
+     * assertions and conditional logic without driving the UI.
+     */
+    fun runMacro(steps: List<MacroStep>): MacroResult {
+        val state = uiStateMutable.value
+        return MacroEngine.execute(steps, state, configState.value)
+    }
 
     internal fun onActivityResumed(activity: Activity) {
         currentActivityRef = WeakReference(activity)
@@ -552,72 +688,75 @@ object QaLens {
             val selected = old.selectedNode?.let { selected -> evaluated.firstOrNull { it.id == selected.id } }
             old.copy(nodes = evaluated, warnings = warnings, selectedNode = selected)
         }
-        recomputeAnalysis()
+        markAnalysisDirty()
+    }
+
+    /**
+     * Mark derived analysis as stale and schedule a debounced recompute on the main thread. Bursts
+     * (e.g. 10 OkHttp calls in a screen) coalesce into a single pass [ANALYSIS_DEBOUNCE_MS] after
+     * the first mark. Safe to call from any thread — the work always runs on main, so the
+     * read-compute-write in [runAnalysis] can't race with a concurrent mutation.
+     */
+    private fun markAnalysisDirty() {
+        if (!analysisDirty.compareAndSet(false, true)) return  // a recompute is already pending
+        val r = Runnable {
+            analysisPending = null
+            if (analysisDirty.compareAndSet(true, false)) runAnalysis()
+        }
+        analysisPending = r
+        mainHandler.postDelayed(r, ANALYSIS_DEBOUNCE_MS)
+    }
+
+    /**
+     * Synchronously run any pending recompute. Call before reading derived state for an export
+     * (evidence bundle / reports) so a 250ms-debounced update can't make a report stale. If called
+     * on a background thread, blocks until the main-thread recompute completes (bounded).
+     */
+    private fun flushAnalysis() {
+        if (!analysisDirty.get() && analysisPending == null) return
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            analysisPending?.let { mainHandler.removeCallbacks(it) }
+            analysisPending = null
+            if (analysisDirty.compareAndSet(true, false)) runAnalysis()
+        } else {
+            // Post and await so a report built on a background thread sees the fresh state.
+            val latch = CountDownLatch(1)
+            mainHandler.post {
+                analysisPending?.let { mainHandler.removeCallbacks(it) }
+                analysisPending = null
+                if (analysisDirty.compareAndSet(true, false)) runAnalysis()
+                latch.countDown()
+            }
+            runCatching { latch.await(2, TimeUnit.SECONDS) }
+        }
     }
 
     /**
      * Recomputes all derived analysis (score, likely-cause, build safety, feature flags, and the
-     * per-screen quality map) from the current observed state. Pure core engines do the work;
-     * this just feeds them and stores the result. Cheap enough to call on every scan/network event.
+     * per-screen quality map) from the current observed state. Delegates to [analysisEngine] (A3)
+     * — the pure pipeline extracted from this orchestrator so it's testable without Android.
+     * MUST be called on the main thread — [markAnalysisDirty] enforces that.
      */
-    private fun recomputeAnalysis() {
+    private fun runAnalysis() {
         val cfg = configState.value
         val old = uiStateMutable.value
-        val flags = resolveFeatureFlags(cfg)
-        val observedHost = old.networkEvents.lastOrNull()?.let { hostOf(it.url) }
-        val buildSafety = BuildSafetyCheck.check(old.device, cfg.expectedEnvironment, observedHost)
-        val score = ReleaseReadinessEngine.score(
-            warnings = old.warnings,
-            screen = old.screen,
-            network = old.networkEvents,
-            buildSafetyIssues = buildSafety.issues,
-            slowThresholdMs = cfg.slowNetworkThresholdMs
-        )
-        val classification = BugClassifier.classify(
-            network = old.networkEvents,
-            warnings = old.warnings,
-            screenHistory = old.screen.history,
-            slowThresholdMs = cfg.slowNetworkThresholdMs,
-            buildSafetyIssues = buildSafety.issues
-        )
-        val key = ScreenQualityStore.keyFor(old.screen)
-        val newVisit = key != lastScreenKey
-        lastScreenKey = key
-        val screenQuality = ScreenQualityStore.record(old.screenQuality, old.screen, score, newVisit)
-
-        val contractResult = contracts.values
-            .firstOrNull { ScreenContractValidator.appliesTo(it, old.screen) }
-            ?.let { ScreenContractValidator.validate(it, old.nodes, old.warnings, old.screen, old.networkEvents) }
-
-        val dataSources = resolveDataSources(cfg)
-
+        val result = analysisEngine.analyze(old, cfg, old.screenQuality)
         uiStateMutable.update {
             it.copy(
-                score = score,
-                classification = classification,
-                buildSafety = buildSafety,
-                featureFlags = flags,
-                screenQuality = screenQuality,
-                contractResult = contractResult,
-                dataSources = dataSources
+                score = result.score,
+                classification = result.classification,
+                buildSafety = result.buildSafety,
+                featureFlags = result.featureFlags,
+                screenQuality = result.screenQuality,
+                contractResult = result.contractResult,
+                dataSources = result.dataSources
             )
         }
     }
 
-    private fun resolveDataSources(cfg: QaLensConfig): Map<String, Map<String, String>> =
-        dataSourceProviders.mapNotNull { (name, provider) ->
-            val snapshot = runCatching { provider() }
-                .onFailure { log("Data source '$name' failed: ${it.message}") }
-                .getOrNull() ?: return@mapNotNull null
-            name to snapshot.mapValues { (_, v) -> cfg.redact(v) }
-        }.toMap()
-
-    private fun resolveFeatureFlags(cfg: QaLensConfig): Map<String, Boolean> {
-        val provided = runCatching { featureFlagProvider?.invoke() }
-            .onFailure { log("Feature flag provider failed: ${it.message}") }
-            .getOrNull()
-            .orEmpty()
-        return cfg.featureFlags + provided
+    /** Bridge: AnalysisEngine reports provider failures here so the facade can surface them (A4). */
+    private fun onAnalysisError(kind: ErrorKind, message: String) {
+        pushError(kind, message)
     }
 
     private fun hostOf(url: String): String? = runCatching { java.net.URL(url).host }.getOrNull()
@@ -635,10 +774,160 @@ object QaLens {
     private fun pushEvent(event: QaEvent) {
         val config = configState.value
         val safe = event.copy(message = config.redact(event.message), tag = event.tag?.let(config::redact))
-        uiStateMutable.update { old ->
-            old.copy(events = (old.events + safe).takeLast(config.maxEventHistory))
+        // Confine to main so events appended from coroutines/IO threads can't race the analysis read.
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            uiStateMutable.update { old ->
+                old.copy(events = (old.events + safe).takeLast(config.maxEventHistory))
+            }
+        } else {
+            mainHandler.post {
+                uiStateMutable.update { old ->
+                    old.copy(events = (old.events + safe).takeLast(config.maxEventHistory))
+                }
+            }
         }
     }
+
+    /**
+     * Surface a failure to QA instead of swallowing it into the event log. Renders a dismissible
+     * banner in the panel header. Also logs the message so the Logs tab still has it. The [retry]
+     * lambda, if provided, powers a ↻ button on the banner.
+     */
+    fun pushError(kind: ErrorKind, message: String, retry: (() -> Unit)? = null) {
+        log("⚠ ${kind.name}: $message")
+        val error = QaLensError(id = "${System.currentTimeMillis()}-${kind.ordinal}", kind = kind, message = message, retry = retry)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            appendError(error)
+        } else {
+            mainHandler.post { appendError(error) }
+        }
+    }
+
+    private fun appendError(error: QaLensError) {
+        uiStateMutable.update { old ->
+            old.copy(errors = (old.errors + error).takeLast(20))
+        }
+    }
+
+    /** Dismiss a single surfaced error by id (the banner's ✕ button). */
+    fun dismissError(id: String) {
+        uiStateMutable.update { old -> old.copy(errors = old.errors.filterNot { it.id == id }) }
+    }
+
+    /** Clear all surfaced errors. */
+    fun clearErrors() {
+        uiStateMutable.update { it.copy(errors = emptyList()) }
+    }
+
+    // ── C9: Bookmarks / annotations ──────────────────────────────────────────
+
+    /** Drop a bookmark at the current timestamp. Visible in the panel and .sal marks.json track. */
+    fun addBookmark(label: String, severity: BookmarkSeverity = BookmarkSeverity.INFO) {
+        val bookmark = Bookmark(label = label, severity = severity)
+        uiStateMutable.update { it.copy(bookmarks = (it.bookmarks + bookmark).takeLast(100)) }
+        event("bookmark", "★ ${severity.name}: $label")
+    }
+
+    /** Remove a bookmark by its id. */
+    fun removeBookmark(id: String) {
+        uiStateMutable.update { it.copy(bookmarks = it.bookmarks.filter { b -> b.id != id }) }
+    }
+
+    /** Clear all bookmarks. */
+    fun clearBookmarks() {
+        uiStateMutable.update { it.copy(bookmarks = emptyList()) }
+    }
+
+    // ── Crashes & ANRs (B1+B13) ────────────────────────────────────────────────
+    private var crashBridge: QaLensCrashBridge = QaLensNoopCrashBridge
+
+    /** Called by [QaLensCrashHandler] to append a captured crash to state + fire the bridge. */
+    internal fun appendCrash(crash: QaLensCrash) {
+        val s = uiStateMutable.value
+        uiStateMutable.update { old -> old.copy(crashes = (old.crashes + crash).takeLast(10)) }
+        // Enrich the host crash reporter with QaLens evidence (score, classification, repro).
+        runCatching {
+            val evidence = buildString {
+                s.classification?.let { append("Likely owner: ${it.category.display} (${it.confidence}). ") }
+                s.score?.let { append("Score: ${it.score}/100. ") }
+                crash.screen?.let { append("Screen: $it. ") }
+                crash.lastNetworkSummary?.let { append("Last network: $it.") }
+            }
+            crashBridge.enrich(crash, evidence)
+        }
+    }
+
+    /**
+     * Register a bridge to an existing crash reporter (Sentry, Bugsnag, Crashlytics, …). QaLens
+     * enriches the host report with its evidence bundle and surfaces host-caught crashes in its
+     * own timeline. See [QaLensCrashBridge].
+     */
+    fun bridgeCrashes(bridge: QaLensCrashBridge) {
+        crashBridge = bridge
+        bridge.onCrash { crash ->
+            // Host-reported crashes come from a vendor thread; hop to main.
+            if (Looper.myLooper() == Looper.getMainLooper()) appendCrash(crash)
+            else mainHandler.post { appendCrash(crash) }
+        }
+    }
+
+    /** The most recent crash/ANR captured this session, or null. Surfaced in the Overview tab. */
+    fun lastCrash(): QaLensCrash? = QaLensCrashHandler.peekLastCrash() ?: uiStateMutable.value.crashes.lastOrNull()
+
+    /** Called by [QaLensFrameMetrics] to append a frame-timing sample (capped at 1000). */
+    internal fun appendFrameMetrics(sample: FrameMetricsSample) {
+        uiStateMutable.update { old ->
+            old.copy(frameMetrics = (old.frameMetrics + sample).takeLast(1000))
+        }
+    }
+
+    // ── Connectivity (B5) ──────────────────────────────────────────────────────
+    /** Called by [com.qalens.android.QaLensConnectivity] to update the current snapshot + transitions. */
+    internal fun appendConnectivity(snapshot: ConnectivitySnapshot) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            uiStateMutable.update { old ->
+                old.copy(
+                    connectivity = snapshot,
+                    connectivityTransitions = (old.connectivityTransitions + snapshot).takeLast(100)
+                )
+            }
+        } else {
+            mainHandler.post {
+                uiStateMutable.update { old ->
+                    old.copy(
+                        connectivity = snapshot,
+                        connectivityTransitions = (old.connectivityTransitions + snapshot).takeLast(100)
+                    )
+                }
+            }
+        }
+    }
+
+    /** The current connectivity snapshot (null if not started). Stamped onto each NetworkEvent. */
+    fun currentConnectivity(): ConnectivitySnapshot? = uiStateMutable.value.connectivity
+
+    /** Called by [QaLensMemoryMonitor] to append a memory sample (capped at 200). B8. */
+    internal fun appendMemorySample(sample: MemorySample) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            uiStateMutable.update { old -> old.copy(memorySamples = (old.memorySamples + sample).takeLast(200)) }
+        } else {
+            mainHandler.post {
+                uiStateMutable.update { old -> old.copy(memorySamples = (old.memorySamples + sample).takeLast(200)) }
+            }
+        }
+    }
+
+    // ── Coroutine exception bridge (B7) ────────────────────────────────────────
+    /**
+     * A [kotlinx.coroutines.CoroutineExceptionHandler] that forwards uncaught coroutine
+     * exceptions into the QaLens timeline + crash buffer (with screen/route/network context).
+     * Use it in your coroutine scopes:
+     * ```kotlin
+     * viewModelScope.launch(QaLens.coroutineExceptionHandler()) { … }
+     * ```
+     */
+    fun coroutineExceptionHandler(): kotlinx.coroutines.CoroutineExceptionHandler =
+        QaLensCoroutineExceptionHandler.capture()
 
     private fun updateDeviceAndScreen(activity: Activity) {
         val cfg = configState.value

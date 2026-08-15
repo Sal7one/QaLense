@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QaLens — Integration Guide</title>
+<style>
+:root { --bg:#06090f; --surface:#0c1220; --surface2:#141d31; --line:rgba(151,178,226,.14);
+  --text:#eef2fb; --muted:#8b99b5; --accent:#7ba7ff; --accent2:#9b8bff;
+  --ok:#3fe08a; --warn:#fbc447; --err:#ff7d7d;
+  --tok-k:#c792ea; --tok-s:#a5e07c; --tok-c:#5c6b8a; --tok-a:#f5c05c; --tok-n:#f78c6c; --tok-f:#82aaff; }
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body { margin:0; color:var(--text);
+  font:15px/1.65 "Inter",-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:
+    radial-gradient(1200px 560px at 82% -14%, rgba(84,128,255,.20), transparent 62%),
+    radial-gradient(900px 480px at -12% 112%, rgba(56,96,214,.16), transparent 58%),
+    var(--bg);
+  -webkit-font-smoothing:antialiased; }
+nav { position:sticky; top:0; z-index:50; backdrop-filter:blur(16px) saturate(1.3);
+  background:rgba(6,9,15,.78); border-bottom:1px solid var(--line); }
+nav .wrap { display:flex; align-items:center; gap:16px; padding:12px 0; }
+.brand { display:flex; align-items:center; gap:9px; font-weight:800; font-size:16px; letter-spacing:-.2px; text-decoration:none; color:var(--text); }
+.brand-mark { width:26px; height:26px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; }
+.nav-links { margin-left:auto; display:flex; gap:4px; flex-wrap:wrap; }
+.nav-links a { color:var(--muted); text-decoration:none; font-size:13px; font-weight:600; padding:6px 12px; border-radius:9px; }
+.nav-links a:hover { color:var(--text); background:var(--surface2); }
+
+.wrap { max-width:980px; margin:0 auto; padding:0 24px; }
+header.hero { padding:72px 0 40px; }
+h1 { font-size:44px; line-height:1.08; letter-spacing:-1.6px; font-weight:850; margin:0 0 14px; }
+h1 em { font-style:normal; background:linear-gradient(115deg,var(--accent) 10%,var(--accent2) 90%);
+  -webkit-background-clip:text; background-clip:text; color:transparent; }
+.lede { color:var(--muted); font-size:16.5px; max-width:720px; margin:0 0 22px; }
+.btn { border:1px solid var(--line); background:var(--surface); color:var(--text); border-radius:11px;
+  padding:10px 20px; font-size:14px; font-weight:650; text-decoration:none; display:inline-flex; gap:8px; align-items:center; }
+.btn:hover { border-color:var(--accent); }
+.btn-primary { background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; color:#fff; }
+
+/* table of contents chips */
+.toc { display:flex; gap:8px; flex-wrap:wrap; margin:26px 0 8px; }
+.toc a { color:var(--muted); text-decoration:none; font-size:12.5px; font-weight:600;
+  border:1px solid var(--line); background:var(--surface); border-radius:16px; padding:4px 12px; }
+.toc a:hover { color:var(--accent); border-color:rgba(123,167,255,.45); }
+
+section { padding:34px 0 10px; border-top:1px solid var(--line); }
+section:first-of-type { border-top:none; }
+h2 { font-size:26px; letter-spacing:-.8px; margin:0 0 6px; }
+h2 .num { color:var(--accent); font-size:15px; vertical-align:middle; margin-right:8px; }
+p.sub { color:var(--muted); margin:0 0 18px; }
+p { color:var(--text); }
+.note { border-left:3px solid var(--accent); background:var(--surface); border-radius:0 10px 10px 0;
+  padding:10px 16px; margin:14px 0; font-size:13.5px; color:var(--muted); }
+.note b { color:var(--text); }
+.warn-note { border-left-color:var(--warn); }
+
+/* code blocks */
+.codeblock { margin:16px 0 22px; border:1px solid var(--line); border-radius:14px; overflow:hidden;
+  background:#05070d; box-shadow:0 12px 30px rgba(0,0,0,.35); }
+.codebar { display:flex; align-items:center; justify-content:space-between; padding:8px 14px;
+  border-bottom:1px solid var(--line); background:var(--surface); }
+.codebar .lang { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:var(--accent); }
+.codebar button { background:var(--surface2); color:var(--muted); border:1px solid var(--line); border-radius:7px;
+  font-size:11.5px; font-weight:600; padding:3px 10px; cursor:pointer; }
+.codebar button:hover { color:var(--text); border-color:var(--accent); }
+pre { margin:0; padding:16px 18px; overflow-x:auto; }
+code { font-family:ui-monospace,"JetBrains Mono",Menlo,monospace; font-size:13px; line-height:1.7; }
+.tok-k { color:var(--tok-k); }
+.tok-s { color:var(--tok-s); }
+.tok-c { color:var(--tok-c); font-style:italic; }
+.tok-a { color:var(--tok-a); }
+.tok-n { color:var(--tok-n); }
+.tok-f { color:var(--tok-f); }
+
+table { width:100%; border-collapse:collapse; font-size:13.5px; margin:12px 0 18px; }
+th { text-align:left; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.8px; padding:8px 10px; border-bottom:1px solid var(--line); }
+td { padding:9px 10px; border-bottom:1px solid var(--line); }
+td code { color:var(--accent); }
+
+footer { margin-top:60px; border-top:1px solid var(--line); padding:26px 0 50px; color:var(--muted); font-size:13px; }
+footer a { color:var(--accent); text-decoration:none; }
+@media (max-width:800px) { h1 { font-size:32px; } pre { font-size:12px; } }
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <a class="brand" href="landing.html"><span class="brand-mark">◉</span>QaLens</a>
+  <span class="nav-links">
+    <a href="landing.html">Showcase</a>
+    <a href="index.html?sample&t=24.6">Web player</a>
+    <a href="http://127.0.0.1:8000/" target="_blank" rel="noopener">Backend</a>
+    <a href="../DEMO.md" target="_blank" rel="noopener">Demo tour</a>
+  </span>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <h1>Integrate QaLens <em>in minutes</em></h1>
+  <p class="lede">Debug-only release evidence for Jetpack Compose apps. Four dependency lines, four
+  optional integration levels (L0–L4), and every snippet below is copy-paste ready — the release
+  build stays a guaranteed no-op.</p>
+  <a class="btn btn-primary" href="index.html?sample&t=24.6">▶ See the result in Mission Control</a>
+  <a class="btn" href="../integration.md" target="_blank" rel="noopener">Plain-text guide</a>
+</div></header>
+
+<div class="wrap">
+  <div class="toc">
+    <a href="#step1">1 · Dependencies</a>
+    <a href="#step2">2 · L0 zero-code</a>
+    <a href="#step3">3 · L1 identify the build</a>
+    <a href="#step4">4 · L2 navigation</a>
+    <a href="#step5">5 · L3 network &amp; logs</a>
+    <a href="#step6">6 · L4 enrichment</a>
+    <a href="#step7">7 · Webhook</a>
+    <a href="#step8">8 · Verify</a>
+  </div>
+</div>
+
+<section id="step1"><div class="wrap">
+  <h2><span class="num">1</span>Dependencies</h2>
+  <p class="sub">The debug/release split is the whole safety model — copy it exactly. Debug gets the real SDK,
+  release links the no-op artifact with the identical public API.</p>
+  <script type="text/plain" class="src" data-lang="kotlin">
+// settings.gradle.kts — modules in this repo (or publishToMavenLocal / an internal Maven repo)
+includeBuild("../qalens-compose-overlay")   // or copy the qalens-* modules in
+
+// app/build.gradle.kts
+dependencies {
+    debugImplementation(project(":qalens-compose"))           // overlay, panel, recorder, Control Room
+    debugImplementation(project(":qalens-navigation-compose")) // auto route tracking (optional)
+    debugImplementation(project(":qalens-replay"))             // the .sal player (optional)
+    releaseImplementation(project(":qalens-noop"))             // identical API, does NOTHING
+}
+</script>
+  <div class="note"><b>Never</b> wrap QaLens calls in <code>if (DEBUG)</code> — the no-op artifact
+  mirrors every public symbol, so release builds compile unchanged and execute nothing.</div>
+</div></section>
+
+<section id="step2"><div class="wrap">
+  <h2><span class="num">2</span>L0 — zero code</h2>
+  <p class="sub">Nothing to write. AndroidX Startup auto-installs the overlay in debug builds. Build,
+  run, and you already have:</p>
+  <table>
+    <tr><th>You get</th><th>How to reach it</th></tr>
+    <tr><td>Floating <b>QA bubble</b> + full inspector panel</td><td>tap the bubble</td></tr>
+    <tr><td>Shake-to-open</td><td>shake the device</td></tr>
+    <tr><td>Persistent notification with recording actions</td><td>notification shade</td></tr>
+    <tr><td><b>QaLens Control</b> launcher icon (Control Room)</td><td>app drawer</td></tr>
+  </table>
+  <div class="note warn-note">Manifest merging adds (debug only): <code>POST_NOTIFICATIONS</code>
+  (requested at runtime), <code>SYSTEM_ALERT_WINDOW</code> (optional floating stop chip),
+  <code>INTERNET</code> (webhook), a FileProvider and the Control Room + player activities in their
+  own tasks. No action needed unless you have manifest conflicts.</div>
+</div></section>
+
+<section id="step3"><div class="wrap">
+  <h2><span class="num">3</span>L1 — identify the build</h2>
+  <p class="sub">Tell QaLens what it is looking at. Wrong-build testing gets flagged automatically,
+  and every report carries build, device, environment and git context.</p>
+  <script type="text/plain" class="src" data-lang="kotlin">
+// Application.onCreate()
+QaLens.configure {
+    appName = "My App"
+    appVersion = BuildConfig.VERSION_NAME
+    buildVariant = BuildConfig.BUILD_TYPE
+    environment = "staging"                  // what this build points at
+    expectedEnvironment = "staging"           // flags wrong-build testing in the panel
+    gitSha = BuildConfig.GIT_SHA             // if you inject it
+    featureFlags = mapOf("checkout_v2" to true)
+    slowNetworkThresholdMs = 1500L
+    addRedaction("internal-token-[a-z0-9]+")  // extra masking on top of the defaults
+
+    // Capture feature flags — decide what feeds the tracks (all default true/false as shown):
+    captureNetwork = true         // false → QaLensOkHttpInterceptor is a pure pass-through
+    captureLogs = true            // false → QaLensTimberTree drops every line
+    networkFromChucker = false    // true  → Chucker becomes the network source (no QaLens interceptor)
+}
+QaLens.install(this)   // no-op if Startup already installed; safe to call
+</script>
+  <div class="note">Wrap your root composable for better semantics + <code>testTagsAsResourceId</code>
+  mapping for UI tests:</div>
+  <script type="text/plain" class="src" data-lang="kotlin">
+setContent {
+    QaLensRoot { App() }
+}
+</script>
+</div></section>
+
+<section id="step4"><div class="wrap">
+  <h2><span class="num">4</span>L2 — screens &amp; navigation</h2>
+  <p class="sub">Replace NavHost with QaLensNavHost (same parameters) and every route change lands in
+  the timeline, the screen-visit map, and your recordings.</p>
+  <script type="text/plain" class="src" data-lang="kotlin">
+QaLensNavHost(
+    navController = navController,
+    startDestination = "home",
+    routeNameMapper = { route -> route?.substringBefore("/") }   // optional pretty names
+) {
+    composable("home") { HomeScreen() }
+    composable("checkout/{orderId}") { backStackEntry ->
+        CheckoutScreen(backStackEntry.arguments?.getString("orderId"))
+    }
+}
+</script>
+  <div class="note">Not using Navigation Compose? Call <code>QaLens.setScreen("Checkout", route)</code>
+  yourself on screen changes.</div>
+</div></section>
+
+<section id="step5"><div class="wrap">
+  <h2><span class="num">5</span>L3 — network &amp; logs</h2>
+  <p class="sub">One line each. Both libraries are compileOnly — QaLens never forces OkHttp or Timber
+  on you, and coverage in the .sal says so when a track is absent.</p>
+  <script type="text/plain" class="src" data-lang="kotlin">
+OkHttpClient.Builder()
+    .addInterceptor(QaLensOkHttpInterceptor())   // network track: method/url/status/latency only
+    .build()
+
+Timber.plant(QaLensTimberTree())                 // log track: level, tag, message, exception
+</script>
+  <p class="sub">Already running <b>Chucker</b>? Make Chucker the single source of truth — QaLens
+  registers a TransactionListener and its interceptor becomes a pass-through (nothing double-counted):</p>
+  <script type="text/plain" class="src" data-lang="kotlin">
+// Option A — both inspectors, one client (Chucker first: it needs the raw bodies)
+OkHttpClient.Builder()
+    .addInterceptor(ChuckerInterceptor.Builder(context).build())
+    .addInterceptor(QaLensOkHttpInterceptor())   // metadata only; pass-through when flag is on
+    .build()
+
+// Option B — Chucker IS the source, no QaLens interceptor at all
+QaLens.configure { networkFromChucker = true }
+OkHttpClient.Builder()
+    .addInterceptor(ChuckerInterceptor.Builder(context).build())
+    .build()   // QaLens converts every Chucker transaction into a NetworkEvent via reflection
+</script>
+  <div class="note"><b>Gate the automatic captures</b> without touching your client code:
+  <code>captureNetwork = false</code> (pass-through interceptor) and <code>captureLogs = false</code>
+  (silent Timber tree). Explicit <code>QaLens.event()/log()/breadcrumb()</code> calls keep working —
+  and <code>analysis.json.coverage</code> records the mode so the .sal never lies about it.</div>
+</div></section>
+
+<section id="step6"><div class="wrap">
+  <h2><span class="num">6</span>L4 — enrichment (all optional)</h2>
+  <p class="sub">Each line below unlocks one more kind of evidence. Stop at any level.</p>
+  <script type="text/plain" class="src" data-lang="kotlin">
+// Test tags — what macros target, what Inspect/Tag modes draw (tag your fields!)
+Modifier.qaTag("login.email.field")
+Modifier.qaName("Submit payment")
+Modifier.qaLensRecompose("SubmitButton")          // per-composable recomposition counter
+
+// App-owned data → panel, reports, .sal state track
+QaLens.registerDataSource("Prefs") { mapOf("theme" to prefs.theme) }
+QaLens.observeDataStore("Prefs", dataStore.data) { it.toString() }
+QaLens.observeRoom(db, "accounts", "orders")
+
+// Live feature flags (evaluated safely on every analysis pass)
+QaLens.setFeatureFlagProvider { flags.snapshot() }
+
+// Deep-link smoke scenarios (Tools tab) + live screen contracts (Screen Health)
+QaLens.registerDeepLinkScenario("Open cart", "myapp://cart", expectedRoute = "cart")
+QaLens.contract("Checkout") {
+    requiresTag("checkout.submit")
+    requiresLabel("Submit payment")
+    requiresNoFailedNetwork()
+}
+</script>
+  <script type="text/plain" class="src" data-lang="kotlin">
+// Crashes + ANRs + coroutines: context-aware capture, bridged to your vendor reporter
+QaLens.bridgeCrashes(object : QaLensCrashBridge {
+    override fun enrich(crash: QaLensCrash, evidence: String) {
+        // Sentry: beforeSend { ... } / Bugsnag: addOnError / Crashlytics: setCustomKeys
+    }
+    override fun onCrash(callback: (QaLensCrash) -> Unit) {}
+})
+val handler = QaLens.coroutineExceptionHandler()   // scope: CoroutineScope(SupervisorJob() + handler)
+
+// QA moments: star the timeline + save an annotated screenshot
+QaLens.markMoment("checkout hangs here")
+QaLens.addBookmark("suspect transition", BookmarkSeverity.BUG)
+</script>
+  <script type="text/plain" class="src" data-lang="kotlin">
+// Macros with assertions — one step per line, drives the real semantics actions
+// deeplink <uri> · wait <ms> · tap <tag|text> · type <tag> <text> · record [video] · stop
+// screenshot · mark <text> · assert exists|label|route|network … · if <cond> … else …
+val steps = listOf(
+    "deeplink myapp://login",
+    "type login.email.field qa+payments@example.com",
+    "type login.password.field Secret123!",
+    "tap login.submit",
+    "assert route home",
+    "assert network no-errors",
+)
+QaLens.runMacro(steps)   // failures stop the run and land as ASSERTION timeline events
+</script>
+</div></section>
+
+<section id="step7"><div class="wrap">
+  <h2><span class="num">7</span>Webhook — ship sessions to your analysis backend</h2>
+  <p class="sub">One URL in the Control Room. The app POSTs the .sal as multipart with
+  X-QaLens-* headers; the backend's response body appears right under the recording. Try it against
+  the bundled mock backend with zero setup.</p>
+  <script type="text/plain" class="src" data-lang="bash">
+python3 backend/server.py          # dashboard: http://127.0.0.1:8000/
+adb reverse tcp:8000 tcp:8000      # emulator → host
+
+# Control Room → Webhook →
+#   URL:        http://127.0.0.1:8000/webhook
+#   Test endpoint  →  "Endpoint OK — QaLens webhook reachable"
+</script>
+  <div class="note">Large recordings stream in 1&nbsp;MB chunks with CRC32 and resume; flaky Wi-Fi
+  gets 3 attempts with backoff plus an offline retry queue — all client-side, contract unchanged.</div>
+</div></section>
+
+<section id="step8"><div class="wrap">
+  <h2><span class="num">8</span>Verify</h2>
+  <p class="sub">Run these after integrating — the release compile is the check that the no-op parity
+  holds (a missing twin fails the build, never silently at runtime).</p>
+  <script type="text/plain" class="src" data-lang="bash">
+./gradlew :app:assembleDebug        # bubble visible + "QaLens Control" icon
+./gradlew :app:compileReleaseKotlin # no-op parity — THE release guarantee
+./gradlew :qalens-core:test         # 115 pure-engine unit tests
+./demo.sh test                      # every suite: kotlin + web reader + mock backend + CLI
+</script>
+  <div class="note"><b>Build note:</b> use JDK 17 — Kotlin 2.0.21 cannot parse newer JDKs
+  (gradle.properties already sets <code>kotlin.daemon.jvmargs</code>). Any cached Gradle 9.x binary
+  works if the wrapper download is slow.</div>
+</div></section>
+
+<footer><div class="wrap">
+  <span>QaLens · debug-only release-evidence SDK · full tour in <a href="../DEMO.md">DEMO.md</a> ·
+  plain-text copy-paste guide in <a href="../integration.md">integration.md</a> ·
+  showcase in <a href="landing.html">landing.html</a></span>
+</div></footer>
+
+<script>
+(function () {
+  // Zero-dependency Kotlin (and bash) syntax highlighter + copy buttons.
+  var KEYWORDS = "fun val var object class interface data sealed enum override private public internal protected if else when for while return in is as import package companion this super true false null suspend by typealias const lateinit init constructor get set".split(" ");
+  var kwSet = {};
+  KEYWORDS.forEach(function (k) { kwSet[k] = true; });
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function highlight(code) {
+    var src = escapeHtml(code);
+    var out = "";
+    var i = 0;
+    // Ordered alternatives: comments, strings (incl. triple-quoted), annotations, numbers, keywords, function calls.
+    var re = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("""[\s\S]*?"""|"(?:\\.|[^"\\\n])*")|(@[A-Za-z_][\w.]*)|(\b\d+(?:\.\d+)?[fFL]?\b)|([A-Za-z_][\w]*)(?=\s*\()|([A-Za-z_][\w]*)/g;
+    var m;
+    while ((m = re.exec(src)) !== null) {
+      out += src.slice(i, m.index);
+      var tok = m[0];
+      var cls = "";
+      if (m[1]) cls = "tok-c";
+      else if (m[2]) cls = "tok-s";
+      else if (m[3]) cls = "tok-a";
+      else if (m[4]) cls = "tok-n";
+      else if (m[5]) cls = "tok-f";
+      else if (m[6] && kwSet[m[6]]) cls = "tok-k";
+      out += cls ? "<span class=\"" + cls + "\">" + tok + "</span>" : tok;
+      i = re.lastIndex;
+    }
+    out += src.slice(i);
+    return out;
+  }
+
+  function copyText(text, btn) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        btn.textContent = "✓ Copied";
+        setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+      });
+    } else {
+      var ta = document.createElement("textarea");
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      document.execCommand("copy"); document.body.removeChild(ta);
+      btn.textContent = "✓ Copied";
+      setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+    }
+  }
+
+  var sources = document.querySelectorAll("script.src[type='text/plain']");
+  sources.forEach(function (el) {
+    var raw = el.textContent.replace(/^\n/, "").replace(/\n[\t ]*$/, "");
+    var lang = el.getAttribute("data-lang") || "kotlin";
+    var div = document.createElement("div");
+    div.className = "codeblock";
+    var bar = document.createElement("div");
+    bar.className = "codebar";
+    var langLabel = document.createElement("span");
+    langLabel.className = "lang";
+    langLabel.textContent = lang;
+    var btn = document.createElement("button");
+    btn.textContent = "Copy";
+    btn.addEventListener("click", function () { copyText(raw, btn); });
+    bar.appendChild(langLabel); bar.appendChild(btn);
+    var pre = document.createElement("pre");
+    var codeEl = document.createElement("code");
+    codeEl.innerHTML = lang === "kotlin" ? highlight(raw) : escapeHtml(raw);
+    pre.appendChild(codeEl);
+    div.appendChild(bar); div.appendChild(pre);
+    el.parentNode.insertBefore(div, el);
+  });
+})();
+</script>
+</body>
+</html>

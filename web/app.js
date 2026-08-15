@@ -32,11 +32,15 @@
     cTimeline: $("cTimeline"), cNetwork: $("cNetwork"), cLogs: $("cLogs"),
     cScreens: $("cScreens"), cInsights: $("cInsights"),
     topbarSession: $("topbarSession"), tbApp: $("tbApp"), tbEnv: $("tbEnv"), tbScore: $("tbScore"),
-    exportBtn: $("exportBtn"), closeSessionBtn: $("closeSessionBtn"),
+    exportBtn: $("exportBtn"), exportSalBtn: $("exportSalBtn"), closeSessionBtn: $("closeSessionBtn"),
+    compareBtn: $("compareBtn"), compareInput: $("compareInput"),
+    sendBackendBtn: $("sendBackendBtn"), markBtn: $("markBtn"),
     drawer: $("drawer"), drawerClose: $("drawerClose"), settingsBtn: $("settingsBtn"),
     setTheme: $("setTheme"), setDensity: $("setDensity"), setSpeed: $("setSpeed"),
     setAutoplay: $("setAutoplay"), setFollow: $("setFollow"),
     setCache: $("setCache"), setCacheUsage: $("setCacheUsage"), setCacheClear: $("setCacheClear"),
+    setBackend: $("setBackend"), backendOpen: $("backendOpen"),
+    aiBriefBar: $("aiBriefBar"), aiBriefCopy: $("aiBriefCopy"),
   };
 
   // ── Prefs (localStorage) ───────────────────────────────────────────────────
@@ -55,6 +59,7 @@
     compact: LS.get("compact", false),
     cache: LS.get("cache", true),
     theater: LS.get("theater", false),
+    backend: LS.get("backend", ""),
   };
 
   // ── IndexedDB session cache (instant-replay recents) ───────────────────────
@@ -142,6 +147,7 @@
 
   // ── State ──────────────────────────────────────────────────────────────────
   let S = null;            // session
+  let S2 = null;           // C13: second session for compare mode (null = single-session view)
   let playhead = 0;        // absolute ms
   let playing = false;
   let activeTrack = prefs.track;
@@ -149,6 +155,7 @@
   let rafId = null, lastReal = 0, lastHeavy = 0;
   let objectUrls = [];
   let pendingSeekSec = null;   // from ?t=<seconds>; applied to the next loaded session
+  let lastRenderSig = "";      // C2: signature of the last renderTrack() rebuild — skip rebuilds when unchanged
 
   // ── Utils ────────────────────────────────────────────────────────────────
   const clampHead = (v) => Math.max(S.start, Math.min(S.end, v));
@@ -191,7 +198,7 @@
       toast("Reading " + file.name + "…", 1500);
       const buf = await file.arrayBuffer();
       const session = await SAL.read(buf);
-      onLoaded(session, file.name, file.size || buf.byteLength);
+      onLoaded(session, file.name, file.size || buf.byteLength, buf);
       cacheSession(file.name + ":" + (file.size || buf.byteLength), file.name, file.size || buf.byteLength, buf);
     } catch (e) {
       console.error(e);
@@ -398,15 +405,17 @@
     if (!rec || !rec.blob) { toast("Not in cache anymore — drop the file again."); return; }
     try {
       const buf = await rec.blob.arrayBuffer();
-      onLoaded(await SAL.read(buf), rec.name, rec.size);
+      onLoaded(await SAL.read(buf), rec.name, rec.size, buf);
     } catch (e) { toast("⚠ " + (e.message || "Failed to replay cached session"), 5000); }
   }
 
-  function onLoaded(session, name, size) {
-    objectUrls.forEach(URL.revokeObjectURL);
+  function onLoaded(session, name, size, rawBuf) {
+    revokeObjectUrls();
     objectUrls = session.frames.map((f) => f.url).concat(session.videoUrl ? [session.videoUrl] : []);
     S = session;
+    S._rawBuf = rawBuf || null;  // store for Export .sal / send-to-backend
     S._screens = null; S._insights = null; S._events = null;
+    S._localMarks = [];           // C9: bookmarks added in this viewer (not in the file)
     playhead = S.start;
     playing = false;
 
@@ -414,7 +423,10 @@
     els.landing.hidden = true;
     els.session.hidden = false;
     els.exportBtn.hidden = false;
+    els.exportSalBtn.hidden = false;
     els.closeSessionBtn.hidden = false;
+    els.compareBtn.hidden = false;
+    els.sendBackendBtn.hidden = false;
 
     setupMedia();
     renderTopbar();
@@ -431,21 +443,134 @@
     applySpeed();
     document.title = "QaLens · " + (session.manifest.app ? (session.manifest.app.name || "session") : "session");
     if (pendingSeekSec != null) {
-      seek(S.start + pendingSeekSec * 1000, true);
-      toast("Opened at " + fmtFine(playhead - S.start) + " (from link)");
-      pendingSeekSec = null;
+      // C1: for video mode the seek is deferred to onloadedmetadata (set above in setupMedia);
+      // for frame mode there's no async metadata to wait for, so seek right away.
+      if (!S.videoUrl) {
+        seek(S.start + pendingSeekSec * 1000, true);
+        toast("Opened at " + fmtFine(playhead - S.start) + " (from link)");
+        pendingSeekSec = null;
+      }
     } else if (prefs.autoplay) play();
+  }
+
+  function revokeObjectUrls() {
+    objectUrls.forEach(URL.revokeObjectURL);
+    objectUrls = [];
+  }
+
+  // Revoke object URLs held by the comparison session S2 to prevent memory leaks.
+  function revokeS2Urls() {
+    if (!S2) return;
+    (S2.frames || []).forEach((f) => { if (f.url) URL.revokeObjectURL(f.url); });
+    if (S2.videoUrl) URL.revokeObjectURL(S2.videoUrl);
   }
 
   function closeSession() {
     pause();
+    revokeObjectUrls();
+    revokeS2Urls();
+    S = null; S2 = null;
     els.session.hidden = true;
     els.landing.hidden = false;
     els.exportBtn.hidden = true;
+    els.exportSalBtn.hidden = true;
     els.closeSessionBtn.hidden = true;
+    els.compareBtn.hidden = true;
+    els.sendBackendBtn.hidden = true;
     els.topbarSession.hidden = true;
     document.title = "QaLens Mission Control — .sal session viewer";
     renderRecents();
+  }
+
+  // ── C13: Compare mode — drop a second .sal to diff against the current session ──────────
+  async function loadCompare(file) {
+    try {
+      revokeS2Urls();
+      const buf = await file.arrayBuffer();
+      S2 = await SAL.read(buf);
+      renderDiff();
+    } catch (e) {
+      toast("⚠ " + (e.message || "Failed to read comparison file"), 5000);
+    }
+  }
+
+  function sessionSummary(s) {
+    const failed = s.network.filter((e) => e.error || e.status >= 400).map((e) => `${e.method} ${shortPath(e.url)}`);
+    const anomalies = (s.analysis?.anomalies || []).map((a) => a.title || a.kind);
+    const screens = [...new Set(s.state.map((st) => st.screen || "Unknown"))];
+    return {
+      appName: (s.manifest.app && s.manifest.app.name) || "app",
+      appVersion: (s.manifest.app && s.manifest.app.version) || "",
+      environment: s.manifest.environment || "",
+      durationMs: s.duration,
+      score: s.summary ? s.summary.score : null,
+      likelyOwner: s.summary ? s.summary.category : null,
+      screensVisited: screens,
+      failedRequests: failed,
+      errorCount: s.timeline.filter((e) => e.isError).length,
+      crashCount: (s.analysis?.stats?.crashes) ?? 0,
+      anomalyTitles: anomalies,
+    };
+  }
+
+  function renderDiff() {
+    if (!S || !S2) return;
+    const a = sessionSummary(S), b = sessionSummary(S2);
+    const scoreDelta = (b.score ?? 0) - (a.score ?? 0);
+    const addedFail = b.failedRequests.filter((f) => !a.failedRequests.includes(f));
+    const resolved = a.failedRequests.filter((f) => !b.failedRequests.includes(f));
+    const addedScreens = b.screensVisited.filter((s) => !a.screensVisited.includes(s));
+    const removedScreens = a.screensVisited.filter((s) => !b.screensVisited.includes(s));
+    const newAnom = b.anomalyTitles.filter((an) => !a.anomalyTitles.includes(an));
+    const isRegression = scoreDelta < 0 || addedFail.length > 0 || b.crashCount > a.crashCount;
+    const ownerChanged = a.likelyOwner !== b.likelyOwner;
+
+    const regBanner = isRegression
+      ? `<div class="diff-banner err">⚠ Regression — score ${scoreDelta >= 0 ? "+" : ""}${scoreDelta}, +${addedFail.length} new failures, ${b.crashCount - a.crashCount >= 0 ? "+" : ""}${b.crashCount - a.crashCount} crashes</div>`
+      : `<div class="diff-banner ok">✓ No regression — score ${scoreDelta >= 0 ? "+" : ""}${scoreDelta}, ${resolved.length} resolved</div>`;
+
+    const rows = [
+      ["Score", a.score ?? "—", b.score ?? "—", `${scoreDelta >= 0 ? "+" : ""}${scoreDelta}`, scoreDelta < 0],
+      ["Duration", fmt(a.durationMs), fmt(b.durationMs), "", false],
+      ["Failed requests", a.failedRequests.length, b.failedRequests.length, `+${addedFail.length} / -${resolved.length}`, addedFail.length > 0],
+      ["Crashes", a.crashCount, b.crashCount, `+${b.crashCount - a.crashCount}`, b.crashCount > a.crashCount],
+      ["Likely owner", a.likelyOwner ?? "—", b.likelyOwner ?? "—", ownerChanged ? "changed" : "", ownerChanged],
+    ];
+    const table = `<table class="diff-table"><thead><tr><th></th><th>Baseline</th><th>Current</th><th>Δ</th></tr></thead><tbody>` +
+      rows.map(([label, base, curr, delta, bad]) =>
+        `<tr><td>${label}</td><td>${esc(String(base))}</td><td>${esc(String(curr))}</td><td class="${bad ? "err" : ""}">${esc(delta)}</td></tr>`
+      ).join("") + `</tbody></table>`;
+
+    const lists = [];
+    if (addedFail.length) {
+      lists.push(`<div class="diff-section"><h4>New failures (not in baseline)</h4><ul>${addedFail.map((f) => `<li class="err">${esc(f)}</li>`).join("")}</ul></div>`);
+    }
+    if (resolved.length) {
+      lists.push(`<div class="diff-section"><h4>Resolved (fixed since baseline)</h4><ul>${resolved.map((f) => `<li class="ok">${esc(f)}</li>`).join("")}</ul></div>`);
+    }
+    if (addedScreens.length) {
+      lists.push(`<div class="diff-section"><h4>New screens</h4><ul>${addedScreens.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>`);
+    }
+    if (removedScreens.length) {
+      lists.push(`<div class="diff-section"><h4>Screens no longer visited</h4><ul>${removedScreens.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>`);
+    }
+    if (newAnom.length) {
+      lists.push(`<div class="diff-section"><h4>New anomalies</h4><ul>${newAnom.map((an) => `<li class="warn">${esc(an)}</li>`).join("")}</ul></div>`);
+    }
+
+    const html = `
+      <div class="diff-view">
+        <div class="diff-header"><h3>Session Diff</h3><button class="btn btn-ghost small" id="diffClose">✕ Close compare</button></div>
+        ${regBanner}
+        <div class="diff-apps"><b>${esc(a.appName)} ${esc(a.appVersion)}</b> (${esc(a.environment || "—")}) vs <b>${esc(b.appName)} ${esc(b.appVersion)}</b> (${esc(b.environment || "—")})</div>
+        ${table}
+        ${lists.join("")}
+      </div>`;
+    els.trackList.innerHTML = html;
+    els.trackList.hidden = false;
+    els.reportView.hidden = true;
+    els.trackSubstats.hidden = true;
+    $("diffClose").onclick = () => { revokeS2Urls(); S2 = null; setTrack(activeTrack); };
   }
 
   // ── Media ────────────────────────────────────────────────────────────────
@@ -456,6 +581,17 @@
       els.video.src = S.videoUrl; els.video.hidden = false;
       els.frame.hidden = true; els.noMedia.hidden = true;
       els.video.onended = pause;
+      // C1: a ?t= deep-link seek (or any syncMedia(true)) issued before <video> has metadata
+      // silently lands at 0. Defer until the element is actually ready, then apply the pending seek.
+      els.video.onloadedmetadata = () => {
+        if (pendingSeekSec != null) {
+          seek(S.start + pendingSeekSec * 1000, true);
+          toast("Opened at " + fmtFine(playhead - S.start) + " (from link)");
+          pendingSeekSec = null;
+        } else {
+          syncMedia(true);
+        }
+      };
     } else if (S.frames.length) {
       els.frame.hidden = false; els.video.hidden = true; els.noMedia.hidden = true;
     } else {
@@ -494,9 +630,13 @@
       const name = s.screen || "Unknown";
       const last = visits[visits.length - 1];
       if (last && last.name === name) last.end = s.ts;
-      else visits.push({ name, start: s.ts, end: s.ts });
+      else { if (last) last.end = s.ts; visits.push({ name, start: s.ts, end: s.ts }); }
     }
-    visits.forEach((v, i) => { v.end = i + 1 < visits.length ? visits[i + 1].start : S.end; });
+    // C5: the first loop already set each visit's end to the next sample's ts. Only the last visit
+    // never got its end advanced — cap it at S.end. (Previously a second loop overwrote every
+    // visit's end with the next *visit's* start, inflating merged-visit durations.)
+    const last = visits[visits.length - 1];
+    if (last) last.end = S.end;
     S._screens = visits;
     return visits;
   }
@@ -596,7 +736,11 @@
 
   function syncMedia(force) {
     if (S.videoUrl) {
-      if (force) { try { els.video.currentTime = Math.max(0, (playhead - videoBase()) / 1000); } catch {} }
+      // C1/C6: only set currentTime once the element has metadata; otherwise the seek is lost
+      // (readyState < 1) or videoBase() divides by a non-finite duration.
+      if (force && els.video.readyState >= 1 && Number.isFinite(els.video.duration)) {
+        try { els.video.currentTime = Math.max(0, (playhead - videoBase()) / 1000); } catch {}
+      }
     } else if (S.frames.length) {
       const f = frameAt(playhead);
       if (f && els.frame.src !== f.url) els.frame.src = f.url;
@@ -652,8 +796,22 @@
   }
   function stepEvent(dir) {
     const ev = allEvents();
-    if (dir > 0) { const n = ev.find((e) => e.ts > playhead); if (n) seek(n.ts, true); }
-    else { let p = null; for (const e of ev) { if (e.ts < playhead) p = e; else break; } if (p) seek(p.ts, true); }
+    if (!ev.length) return;
+    if (dir > 0) {
+      // C7: binary search for the first event strictly after the playhead.
+      let lo = 0, hi = ev.length, ans = ev.length;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (ev[m].ts > playhead) { ans = m; hi = m; } else lo = m + 1; }
+      if (ans < ev.length) seek(ev[ans].ts, true);
+    } else {
+      // C7: binary search for the rightmost event strictly before the playhead. If it shares the
+      // playhead's ts (clustered events), keep stepping back until the ts changes.
+      let lo = 0, hi = ev.length, ans = -1;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (ev[m].ts < playhead) { ans = m; lo = m + 1; } else hi = m; }
+      if (ans < 0) return;
+      const target = ev[ans].ts;
+      while (ans > 0 && ev[ans - 1].ts === target) ans--;
+      seek(ev[ans].ts, true);
+    }
   }
   function jumpError() { const e = allEvents().find((x) => x.isError); if (e) seek(e.ts, true); else toast("No errors in this session"); }
 
@@ -664,7 +822,7 @@
     if (heavy) {
       renderState();
       highlightFilmstrip();
-      if (prefs.follow && activeTrack !== "report") renderTrack();
+      if (prefs.follow && activeTrack !== "report" && activeTrack !== "aibrief") renderTrack();
     }
   }
 
@@ -700,6 +858,8 @@
     const slow = S.network.filter((e) => !e.error && e.status < 400 && e.latencyMs >= SLOW_MS).length;
     const errLogs = S.logs.filter((e) => /error|\[ERROR\]|fail|exception/i.test(e.message || "")).length;
     const sc = S.summary ? S.summary.score : null;
+    const crashes = S.analysis?.stats?.crashes ?? 0;
+    const jankRate = S.analysis?.jank?.jankRate ?? null;
     const cells = [
       [fmt(S.duration), "duration"],
       [sc == null ? "—" : sc, "score", sc == null ? "" : scoreClass(sc)],
@@ -710,6 +870,8 @@
       [errLogs, "error logs", errLogs ? "err" : "ok"],
       [screenVisits().length, "screens"],
     ];
+    if (crashes > 0) cells.push([crashes, "crashes", "err"]);
+    if (jankRate != null && jankRate > 0) cells.push([jankRate + "%", "jank", jankRate > 30 ? "err" : "warn"]);
     els.statbar.innerHTML = cells.map(([v, l, cls]) =>
       `<div class="stat"><b class="${cls || ""}">${esc(v)}</b><span>${esc(l)}</span></div>`).join("");
   }
@@ -802,15 +964,27 @@
     }
     if (cur) cur.classList.add("cur");
   }
+  // C16: half the mean inter-frame interval, so a filmstrip click lands mid-frame.
+  function filmstripHalfStep() {
+    const f = S.frames;
+    if (f.length < 2) return 250;
+    const sorted = f.map((x) => x.ts).sort((a, b) => a - b);
+    let sum = 0;
+    for (let i = 1; i < sorted.length; i++) sum += sorted[i] - sorted[i - 1];
+    return Math.min(750, Math.round(sum / (sorted.length - 1) / 2));
+  }
 
   function renderScrubMarks() {
-    // Activity ticks (accent) under the scrubber, error ticks (red) on top.
+    // Activity ticks (accent) under the scrubber, error ticks (red) on top,
+    // star bookmarks (C9) above — the three layers share the same timeline.
     const evs = allEvents();
-    const plain = evs.filter((e) => !e.isError).slice(0, 300);
+    const plain = evs.filter((e) => !e.isError).slice(0,300);
     const errs = evs.filter((e) => e.isError).slice(0, 200);
-    const tick = (e, cls) =>
-      `<i class="${cls}" style="left:${(((e.ts - S.start) / S.duration) * 100).toFixed(2)}%"></i>`;
-    els.scrubMarks.innerHTML = plain.map((e) => tick(e, "")).join("") + errs.map((e) => tick(e, "err")).join("");
+    const tick = (ts, cls) =>
+      `<i class="${cls}" style="left:${(((ts - S.start) / S.duration) * 100).toFixed(2)}%"></i>`;
+    const stars = (S.marks || []).concat(S._localMarks || []).map((m) =>
+      `<i class="star" title="${esc(m.label || "bookmark")}" style="left:${(((m.ts - S.start) / S.duration) * 100).toFixed(2)}%"></i>`).join("");
+    els.scrubMarks.innerHTML = plain.map((e) => tick(e.ts, "")).join("") + errs.map((e) => tick(e.ts, "err")).join("") + stars;
   }
 
   function statusPill(e) {
@@ -831,13 +1005,24 @@
     const avg = lat.length ? Math.round(lat.reduce((a, b) => a + b, 0) / lat.length) : 0;
     const hosts = [...new Set(S.network.map((e) => hostOf(e.url)).filter(Boolean))];
     const bytes = S.network.reduce((n, e) => n + (e.responseBytes || 0), 0);
-    return `<span><b>${S.network.length}</b> requests</span>
+    let html = `<span><b>${S.network.length}</b> requests</span>
       <span class="${failed ? "err" : ""}"><b>${failed}</b> failed</span>
       <span class="${slow ? "warn" : ""}"><b>${slow}</b> slow</span>
       <span>avg <b>${avg}ms</b></span>
       <span>p95 <b>${percentile(lat, 95)}ms</b></span>
       <span><b>${fmtBytes(bytes)}</b> down</span>
       <span><b>${hosts.length}</b> host${hosts.length === 1 ? "" : "s"}</span>`;
+    // C11: Surface per-endpoint breakdown from analysis.json when available.
+    const endpoints = S.analysis?.endpoints;
+    if (endpoints && endpoints.length) {
+      html += `<div class="sub-endpoints">`;
+      endpoints.slice(0, 8).forEach((ep) => {
+        const cls = ep.failedRequests > 0 ? "err" : ep.slowRequests > 0 ? "warn" : "";
+        html += `<span class="${cls}" title="${esc(ep.endpoint)}">${esc(ep.endpoint.split(" ").pop()?.slice(0, 30) || ep.endpoint)}</span>`;
+      });
+      html += `</div>`;
+    }
+    return html;
   }
 
   function rowsFor(track) {
@@ -845,10 +1030,15 @@
     const follow = prefs.follow;
     let items;
     if (track === "timeline") {
+      const markItems = (S.marks || []).concat(S._localMarks || []).map((m) => ({
+        ts: m.ts, isError: false, main: "★ " + (m.label || "bookmark"), sub: m.severity || "",
+        tag: "bookmark", text: ("★ " + (m.label || "") + " " + (m.severity || "")).toLowerCase(),
+        _bookmark: true, _severity: m.severity,
+      }));
       items = S.timeline.map((e) => ({
         ts: e.ts, isError: !!e.isError, main: e.title || "", sub: e.detail || "", tag: e.kind || "",
         text: (e.title + " " + (e.detail || "")).toLowerCase(),
-      }));
+      })).concat(markItems).sort((a, b) => a.ts - b.ts);
     } else if (track === "network") {
       const maxLat = Math.max(1, ...S.network.map((e) => e.latencyMs || 0));
       items = S.network.map((e) => {
@@ -892,17 +1082,28 @@
     if (activeTrack === "report") return;
     if (activeTrack === "screens") return renderScreens();
     if (activeTrack === "insights") return renderInsights();
-    const { visible, follow } = rowsFor(activeTrack);
+    const { visible, follow, total } = rowsFor(activeTrack);
     if (!visible.length) {
       els.trackList.innerHTML = `<div class="empty">No entries.</div>`;
+      lastRenderSig = "";
       return;
     }
+    // C2: only rebuild the DOM when the filter/track/content actually changed. During playback
+    // updatePlayheadUI calls this every ~200ms with follow on — rebuilding 600 rows 5×/s janks.
+    // When the signature is unchanged, keep the existing rows and just reapply highlight classes.
+    const sig = `${activeTrack}|${els.search.value.trim().toLowerCase()}|${prefs.logLevel}|${total}|${follow}`;
+    if (sig === lastRenderSig && els.trackList.children.length === visible.length) {
+      updateRowHighlighting(visible, follow);
+      return;
+    }
+    lastRenderSig = sig;
     // visible is newest-first; the "current" row is the first one at/behind the playhead.
     const curIdx = follow ? visible.findIndex((i) => i.ts <= playhead) : -1;
     const html = visible.map((i, idx) => {
       const cur = idx === curIdx;
       const future = follow && i.ts > playhead;
-      return `<div class="row ${i.isError ? "row-err" : ""} ${cur ? "row-cur" : ""} ${future ? "row-future" : ""}" data-ts="${i.ts}" data-detail="${i.detail ? esc(i.detail) : ""}" title="Click to jump the player to ${fmtFine(i.ts - S.start)}">
+      const bkmrk = i._bookmark ? " row-bookmark" : "";
+      return `<div class="row ${i.isError ? "row-err" : ""} ${bkmrk} ${cur ? "row-cur" : ""} ${future ? "row-future" : ""}" data-ts="${i.ts}" data-detail="${i.detail ? esc(i.detail) : ""}" title="Click to jump the player to ${fmtFine(i.ts - S.start)}">
         <div class="row-time">${fmtFine(i.ts - S.start)}</div>
         <div class="row-body">
           <div class="row-main">${i.pill || ""}${i.tag ? `<span class="kind">${esc(i.tag)}</span>` : ""}<span>${esc(i.main)}</span></div>
@@ -913,6 +1114,24 @@
       </div>`;
     }).join("");
     els.trackList.innerHTML = html;
+  }
+
+  // C2: cheap highlight-only update for the follow-the-playhead case — toggles row-cur/row-future
+  // classes on existing DOM nodes instead of rebuilding innerHTML. O(rows) with no layout thrash.
+  function updateRowHighlighting(visible, follow) {
+    const kids = els.trackList.children;
+    let curIdx = follow ? -1 : -2;  // -2 means "no current row highlight" (follow off)
+    if (follow) {
+      for (let i = 0; i < visible.length; i++) {
+        if (visible[i].ts <= playhead) curIdx = i; else break;
+      }
+    }
+    for (let i = 0; i < kids.length; i++) {
+      const want = i === curIdx;
+      const future = follow && visible[i].ts > playhead;
+      kids[i].classList.toggle("row-cur", want);
+      kids[i].classList.toggle("row-future", future);
+    }
   }
 
   function renderScreens() {
@@ -941,16 +1160,29 @@
 
   function setTrack(track) {
     activeTrack = track; prefs.track = track; LS.set("track", track);
+    lastRenderSig = "";  // C2: force a rebuild on tab switch
     [...els.trackTabs.children].forEach((b) => b.classList.toggle("active", b.dataset.track === track));
     els.logChips.hidden = track !== "logs";
     const isReport = track === "report";
-    els.reportView.hidden = !isReport;
-    els.trackList.hidden = isReport;
-    els.search.parentElement.style.display = (isReport || track === "screens" || track === "insights") ? "none" : "";
+    const isAiBrief = track === "aibrief";
+    els.reportView.hidden = !(isReport || isAiBrief);
+    els.trackList.hidden = isReport || isAiBrief;
+    els.aiBriefBar.hidden = !isAiBrief;
+    els.search.parentElement.style.display = (isReport || isAiBrief || track === "screens" || track === "insights") ? "none" : "";
     els.trackSubstats.hidden = track !== "network";
     if (track === "network") els.trackSubstats.innerHTML = networkSubstats();
-    if (isReport) { els.reportView.textContent = S.report || "(no report)"; }
-    else renderTrack();
+    if (isReport) {
+      els.reportView.textContent = S.report || "(no report)";
+    } else if (isAiBrief) {
+      // C12: prefer the recorder's own for_ai.md; synthesize a brief for older files.
+      els.reportView.textContent = S.forAi ||
+        "This recording predates for_ai.md. Quick brief:\n\n" +
+        "Session: " + ((S.manifest.app && S.manifest.app.name) || "app") +
+        " · " + fmt(S.duration) + " · score " + (S.summary ? S.summary.score : "?") + "/100\n" +
+        "Likely owner: " + (S.summary ? S.summary.category : "?") + "\n" +
+        "Failed requests: " + S.network.filter((e) => e.error || e.status >= 400).length + "\n" +
+        "Screens: " + [...new Set(S.state.map((st) => st.screen || "?"))].join(", ");
+    } else renderTrack();
   }
 
   // ── Export (markdown to clipboard) ─────────────────────────────────────────
@@ -983,10 +1215,83 @@
       lines.push("", "**Auto-detected anomalies** (open the .sal with `?t=<sec>` to land on the moment)");
       ins.forEach((i) => lines.push(`- \`t=${((i.ts - S.start) / 1000).toFixed(1)}\` ${i.title} — ${i.detail}`));
     }
+    const marks = (S.marks || []).concat(S._localMarks || []);
+    if (marks.length) {
+      lines.push("", "**Bookmarks**");
+      marks.forEach((mk) => lines.push(`- \`t=${((mk.ts - S.start) / 1000).toFixed(1)}\` ★ ${mk.label || "bookmark"}${mk.severity ? " (" + mk.severity + ")" : ""}`));
+    }
+    if (S.forAi) lines.push("", "**AI brief** (`for_ai.md`) is embedded in the .sal — paste it into your AI of choice.");
     const text = lines.join("\n");
     (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
       .then(() => toast("Session summary copied as markdown ✓"))
       .catch(() => { console.log(text); toast("Clipboard blocked — summary printed to console"); });
+  }
+
+  // ── C9: in-viewer bookmarks ("⭐ Mark moment") ─────────────────────────────
+  function markNow() {
+    if (!S) return;
+    S._localMarks.push({ id: "m" + Date.now(), ts: playhead, label: "Marked by QA", severity: "info" });
+    renderScrubMarks();
+    if (activeTrack === "timeline") renderTrack();
+    toast("★ Marked " + fmtFine(playhead - S.start) + " — included in Export (this viewer only, not the file)");
+  }
+
+  // ── Backend hook: send the open session to the configured Mission Control backend ──
+  // Mirrors the mobile webhook contract: multipart 'file' (.sal) + X-QaLens-* headers to
+  // <base>/webhook, or a JSON summary to <base>/api/ingest when no raw file is available.
+  function buildWebSummary() {
+    const m = S.manifest, a = m.app || {}, s = S.summary;
+    return {
+      app: a.name || "web session", version: a.version || "",
+      environment: m.environment || "", device: m.device || "web player",
+      platform: "web", name: (a.name || "session") + ".sal",
+      sessionId: m.sessionId || null,
+      score: s ? s.score : null, likelyOwner: s ? s.category : null,
+      failedRequests: S.network.filter((e) => e.error || e.status >= 400).length,
+      crashes: S.analysis?.stats?.crashes ?? 0,
+      durationMs: S.duration,
+      marks: (S.marks || []).concat(S._localMarks || []).map((mk) => ({ tSec: ((mk.ts - S.start) / 1000).toFixed(1), label: mk.label })),
+      anomalies: insights().filter((i) => i.sev !== "ok").map((i) => ({ tSec: ((i.ts - S.start) / 1000).toFixed(1), title: i.title, detail: i.detail })),
+    };
+  }
+
+  async function sendToBackend() {
+    if (!S) return;
+    const base = String(prefs.backend || "").trim().replace(/\/+$/, "");
+    if (!base) { openDrawer(); toast("Set a Backend URL in Settings first", 3500); return; }
+    els.sendBackendBtn.disabled = true;
+    els.sendBackendBtn.textContent = "⇪ sending…";
+    try {
+      const m = S.manifest, a = m.app || {};
+      const headers = {
+        "X-QaLens-App": a.name || "web session",
+        "X-QaLens-Version": a.version || "",
+        "X-QaLens-Env": m.environment || "",
+        "X-QaLens-Device": m.device || "web player",
+        "X-QaLens-Platform": "web",
+      };
+      Object.keys(headers).forEach((k) => { if (!headers[k]) delete headers[k]; });
+      let res;
+      if (S._rawBuf) {
+        // Full-fidelity: ship the actual .sal (multipart 'file'), same as the mobile Control Room.
+        const fd = new FormData();
+        fd.append("file", new Blob([S._rawBuf], { type: "application/zip" }), (a.name || "session") + ".sal");
+        res = await fetch(base + "/webhook", { method: "POST", headers, body: fd });
+      } else {
+        headers["Content-Type"] = "application/json";
+        res = await fetch(base + "/api/ingest", { method: "POST", headers, body: JSON.stringify(buildWebSummary()) });
+      }
+      const text = await res.text();
+      let verdict = "";
+      try { const j = JSON.parse(text); verdict = j.summary || j.message || j.verdict || ""; } catch { verdict = text.slice(0, 160); }
+      if (res.ok) toast("Backend ✓ " + (verdict || "accepted"), 5000);
+      else toast("Backend rejected (" + res.status + ") " + (verdict || text.slice(0, 120)), 6000);
+    } catch (e) {
+      toast("Backend unreachable (" + base + "): " + (e.message || e), 6000);
+    } finally {
+      els.sendBackendBtn.disabled = false;
+      els.sendBackendBtn.textContent = "⇪ Send to backend";
+    }
   }
 
   // ── Recents (metadata in localStorage, payloads in IndexedDB) ─────────────
@@ -1034,6 +1339,35 @@
     else if (frame) frame.requestFullscreen().catch(() => toast("Fullscreen blocked by the browser"));
   }
 
+  // ── C8: Keyboard help overlay (press ? to toggle) ─────────────────────────
+  function toggleHelpOverlay() {
+    let overlay = document.getElementById("helpOverlay");
+    if (overlay) { overlay.remove(); return; }
+    overlay = document.createElement("div");
+    overlay.id = "helpOverlay";
+    overlay.className = "help-overlay";
+    overlay.innerHTML = `
+      <div class="help-card">
+        <div class="help-title">Keyboard Shortcuts</div>
+        <div class="help-grid">
+          <div class="help-row"><kbd>Space</kbd><span>Play / Pause</span></div>
+          <div class="help-row"><kbd>←</kbd><span>Previous event</span></div>
+          <div class="help-row"><kbd>→</kbd><span>Next event</span></div>
+          <div class="help-row"><kbd>e</kbd><span>Jump to next error</span></div>
+          <div class="help-row"><kbd>s</kbd><span>Cycle playback speed</span></div>
+          <div class="help-row"><kbd>f</kbd><span>Toggle follow mode</span></div>
+          <div class="help-row"><kbd>t</kbd><span>Toggle theater mode</span></div>
+          <div class="help-row"><kbd>x</kbd><span>Toggle fullscreen</span></div>
+          <div class="help-row"><kbd>1</kbd>–<kbd>7</kbd><span>Switch track (7 = AI brief)</span></div>
+          <div class="help-row"><kbd>m</kbd><span>⭐ Mark moment</span></div>
+          <div class="help-row"><kbd>?</kbd><span>Toggle this help</span></div>
+        </div>
+        <div class="help-dismiss">Press <kbd>?</kbd> or <kbd>Esc</kbd> to close</div>
+      </div>`;
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) toggleHelpOverlay(); });
+    document.body.appendChild(overlay);
+  }
+
   // ── Settings drawer ────────────────────────────────────────────────────────
   function setTheme(t) { document.documentElement.dataset.theme = t; prefs.theme = t; LS.set("theme", t); els.setTheme.value = t; }
   function setCompact(on) { document.body.classList.toggle("compact", on); prefs.compact = on; LS.set("compact", on); }
@@ -1074,7 +1408,8 @@
       try {
         const res = await fetch("sample.sal");
         if (!res.ok) throw new Error("not found");
-        onLoaded(await SAL.read(await res.arrayBuffer()), "sample.sal", 0);
+        const buf = await res.arrayBuffer();
+        onLoaded(await SAL.read(buf), "sample.sal", buf.byteLength, buf);
       } catch (_) {
         toast("Serve the folder (python3 -m http.server) or drag web/sample.sal in.", 4500);
       }
@@ -1108,9 +1443,38 @@
     els.setCache.onchange = () => { prefs.cache = els.setCache.checked; LS.set("cache", prefs.cache); };
     els.setCacheClear.onclick = async () => { await IDB.clear(); updateCacheUsage(); renderRecents(); toast("Session cache cleared"); };
 
+    // Backend hook (frontend): Mission Control → mock/real QaLens backend.
+    els.setBackend.value = prefs.backend;
+    els.setBackend.onchange = () => { prefs.backend = els.setBackend.value.trim(); LS.set("backend", prefs.backend); toast(prefs.backend ? "Backend URL saved — use ⇪ Send to backend" : "Backend URL cleared"); };
+    els.backendOpen.onclick = () => {
+      const b = String(prefs.backend || "").trim();
+      if (!b) { toast("Set a Backend URL first"); return; }
+      window.open(b, "_blank", "noopener");
+    };
+    els.sendBackendBtn.onclick = sendToBackend;
+    els.markBtn.onclick = markNow;
+    els.aiBriefCopy.onclick = () => {
+      const brief = S && S.forAi ? S.forAi : els.reportView.textContent;
+      (navigator.clipboard ? navigator.clipboard.writeText(brief) : Promise.reject())
+        .then(() => toast("AI brief copied ✓"))
+        .catch(() => toast("Clipboard blocked"));
+    };
+
     // export + close
     els.exportBtn.onclick = exportSummary;
+    els.exportSalBtn.onclick = () => {
+      if (!S || !S._rawBuf) { toast("No raw .sal buffer to export", 3000); return; }
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([S._rawBuf], { type: "application/zip" }));
+      a.download = (S.manifest?.app?.name || "session") + ".sal";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast("Exported " + a.download, 2000);
+    };
     els.closeSessionBtn.onclick = closeSession;
+    // C13: compare — open a second .sal to diff against the current session.
+    els.compareBtn.onclick = () => els.compareInput.click();
+    els.compareInput.onchange = (e) => { if (e.target.files[0]) loadCompare(e.target.files[0]); e.target.value = ""; };
 
     // transport
     els.playPause.onclick = () => (playing ? pause() : play());
@@ -1122,7 +1486,7 @@
     els.fsBtn.onclick = toggleFullscreen;
     setTheater(prefs.theater);
     els.scrubber.oninput = () => seek(S.start + Number(els.scrubber.value), true);
-    els.filmstrip.onclick = (e) => { const img = e.target.closest("img"); if (img) seek(Number(img.dataset.ts), true); };
+    els.filmstrip.onclick = (e) => { const img = e.target.closest("img"); if (img) seek(Number(img.dataset.ts) + filmstripHalfStep(), true); };
 
     // tabs
     els.trackTabs.onclick = (e) => { const b = e.target.closest(".tab"); if (b) setTrack(b.dataset.track); };
@@ -1176,10 +1540,11 @@
     $("clearRecents").onclick = async () => { LS.set("recent", []); await IDB.clear(); renderRecents(); };
 
     // keyboard
-    const TRACK_KEYS = ["timeline", "network", "logs", "screens", "insights", "report"];
+    const TRACK_KEYS = ["timeline", "network", "logs", "screens", "insights", "report", "aibrief"];
     window.addEventListener("keydown", (e) => {
-      if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
-      if (e.key === "Escape") { closeDrawer(); return; }
+      if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" ||
+          e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
+      if (e.key === "Escape") { closeDrawer(); const h = document.getElementById("helpOverlay"); if (h) h.remove(); return; }
       if (els.session.hidden) return;
       if (e.code === "Space") { e.preventDefault(); playing ? pause() : play(); }
       else if (e.code === "ArrowRight") stepEvent(1);
@@ -1189,7 +1554,9 @@
       else if (e.key === "f") { els.followToggle.checked = !els.followToggle.checked; els.followToggle.onchange(); }
       else if (e.key === "t") setTheater(!prefs.theater);
       else if (e.key === "x") toggleFullscreen();
-      else if (/^[1-6]$/.test(e.key)) setTrack(TRACK_KEYS[Number(e.key) - 1]);
+      else if (e.key === "?") toggleHelpOverlay();
+      else if (e.key === "m") markNow();
+      else if (/^[1-7]$/.test(e.key)) setTrack(TRACK_KEYS[Number(e.key) - 1]);
     });
 
     updateCacheUsage();
@@ -1212,6 +1579,17 @@
       fetch("sample.appsal").then((r) => r.json())
         .then((cfg) => renderAppSal(cfg, "sample.appsal"))
         .catch(() => toast("Serve the folder over http to load sample.appsal", 4000));
+    }
+
+    // C13: ?compare=a.sal&b=b.sal — load both sessions and show the diff (needs http serving).
+    if (params.has("compare") && params.get("a") && params.get("b")) {
+      Promise.all([fetch(params.get("a")).then((r) => r.arrayBuffer()), fetch(params.get("b")).then((r) => r.arrayBuffer())])
+        .then(async ([bufA, bufB]) => {
+          onLoaded(await SAL.read(bufA), params.get("a").split("/").pop(), bufA.byteLength, bufA);
+          S2 = await SAL.read(bufB);
+          renderDiff();
+        })
+        .catch(() => toast("Serve the folder over http to use ?compare=a&b", 4000));
     }
   }
 

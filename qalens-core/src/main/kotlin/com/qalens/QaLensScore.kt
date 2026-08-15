@@ -57,13 +57,16 @@ object ReleaseReadinessEngine {
     private const val P_MISSING_TAG = 2
     private const val P_WARNING = 1
     private const val P_BUILD_ISSUE = 5
+    private const val P_FROZEN_FRAME = 5      // capped — a long freeze shouldn't zero the score
+    private const val P_HIGH_JANK_RATE = 10    // >30% of frames janked
 
     fun score(
         warnings: List<QaWarning>,
         screen: ScreenSnapshot,
         network: List<NetworkEvent>,
         buildSafetyIssues: List<String> = emptyList(),
-        slowThresholdMs: Long = 2000L
+        slowThresholdMs: Long = 2000L,
+        frameMetrics: List<FrameMetricsSample> = emptyList()
     ): ReleaseReadinessScore {
         val penalties = mutableListOf<ScorePenalty>()
 
@@ -111,6 +114,24 @@ object ReleaseReadinessEngine {
 
         buildSafetyIssues.forEach {
             penalties += ScorePenalty(ScoreDimension.BUILD_SAFETY, P_BUILD_ISSUE, it)
+        }
+
+        // ── Performance: frame-timing jank (B2) ──────────────────────────────
+        if (frameMetrics.isNotEmpty()) {
+            val digest = JankAnalyzer.analyze(frameMetrics)
+            val frozenPenalty = (digest.frozenCount * P_FROZEN_FRAME).coerceAtMost(20)
+            if (frozenPenalty > 0) {
+                penalties += ScorePenalty(
+                    ScoreDimension.PERFORMANCE, frozenPenalty,
+                    "${digest.frozenCount} frozen frame(s) (>${FrameMetricsSample.FROZEN_THRESHOLD_MS}ms)."
+                )
+            }
+            if (digest.jankRate > 0.30f) {
+                penalties += ScorePenalty(
+                    ScoreDimension.PERFORMANCE, P_HIGH_JANK_RATE,
+                    "High jank rate: ${(digest.jankRate * 100).toInt()}% of frames exceeded ${FrameMetricsSample.JANK_THRESHOLD_MS}ms (p95 ${digest.p95TotalMs}ms)."
+                )
+            }
         }
 
         // Non-critical warnings each cost a little (capped so they can't dominate).

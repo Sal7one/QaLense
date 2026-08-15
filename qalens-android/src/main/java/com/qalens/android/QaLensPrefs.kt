@@ -51,6 +51,7 @@ object QaLensPrefs {
     private const val KEY_WEBHOOK_HEADER_VALUE = "webhook_header_value"
     private const val KEY_WEBHOOK_PARAMS = "webhook_params"
     private const val KEY_WEBHOOK_META = "webhook_meta"
+    private const val KEY_WEBHOOK_QUEUE = "webhook_pending_queue"
 
     fun webhookUrl(context: Context): String = prefs(context).getString(KEY_WEBHOOK_URL, "") ?: ""
     fun setWebhookUrl(context: Context, value: String) =
@@ -73,6 +74,15 @@ object QaLensPrefs {
     fun webhookIncludeMeta(context: Context): Boolean = prefs(context).getBoolean(KEY_WEBHOOK_META, true)
     fun setWebhookIncludeMeta(context: Context, value: Boolean) =
         prefs(context).edit().putBoolean(KEY_WEBHOOK_META, value).apply()
+
+    /**
+     * Pending-upload queue (offline retry): a JSON array string of
+     * [{"path","name","createdAt"}]. QaLensWebhook owns the mutation (cap/dedupe);
+     * this just persists the raw JSON.
+     */
+    fun webhookQueue(context: Context): String = prefs(context).getString(KEY_WEBHOOK_QUEUE, "[]") ?: "[]"
+    fun setWebhookQueue(context: Context, value: String) =
+        prefs(context).edit().putString(KEY_WEBHOOK_QUEUE, value).apply()
 
     // ── Active tester (set by QaLensProfiles.activate) ───────────────────────
     private const val KEY_USER_NAME = "qa_user_name"

@@ -25,6 +25,8 @@ dependencies {
     api(project(":qalens-core"))
     implementation(project(":qalens-android"))
 
+    testImplementation("junit:junit:4.13.2")
+
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.startup:startup-runtime:1.2.0")
@@ -47,6 +49,9 @@ dependencies {
     // compileOnly — QaLens.observeRoom() compiles against Room's InvalidationTracker; apps that use
     // Room opt in. (observeDataStore needs only a kotlinx Flow, so it requires no extra dependency.)
     compileOnly("androidx.room:room-runtime:2.6.1")
+
+    // B5: QaLensChuckerBridge launches Chucker via reflection (no compileOnly dep needed — Chucker
+    // is on JitPack, and the bridge works whether or not the app ships it). See QaLensChuckerBridge.
 }
 
 // Local/team integration: ./gradlew publishToMavenLocal →

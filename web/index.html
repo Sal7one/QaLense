@@ -43,15 +43,21 @@
     <div class="topbar-actions">
       <button id="exportBtn" class="btn btn-ghost" title="Copy session summary (markdown)" hidden>
         <svg width="14" height="14"><use href="#i-copy"/></svg> Export</button>
+      <button id="sendBackendBtn" class="btn btn-ghost btn-hook" title="Send this .sal to the configured Mission Control backend (Settings → Backend URL)" hidden>
+        <svg width="14" height="14"><use href="#i-bolt"/></svg> Send to backend</button>
+      <button id="compareBtn" class="btn btn-ghost" title="Compare with another .sal (B11)" hidden>
+        <svg width="14" height="14"><use href="#i-pulse"/></svg> Compare</button>
       <button id="closeSessionBtn" class="btn btn-ghost" title="Back to sessions" hidden>
         <svg width="14" height="14"><use href="#i-back"/></svg> Sessions</button>
       <button id="openBtn" class="btn btn-accent">Open .sal</button>
+      <button id="exportSalBtn" class="btn btn-accent" style="background:var(--ok);color:#000" hidden title="Download current .sal">Export .sal</button>
       <button id="settingsBtn" class="btn btn-ghost btn-icon" title="Settings">
         <svg width="16" height="16"><use href="#i-gear"/></svg></button>
       <button id="themeBtn" class="btn btn-ghost btn-icon" title="Toggle theme">
         <svg width="15" height="15"><use href="#i-theme"/></svg></button>
     </div>
     <input id="fileInput" type="file" accept=".sal,.appsal,.zip,application/zip,application/json" hidden />
+    <input id="compareInput" type="file" accept=".sal,.zip,application/zip" hidden />
   </header>
 
   <!-- ============ Landing / dropzone ============ -->
@@ -130,6 +136,7 @@
               <button class="tbtn tbtn-main" id="playPause" title="Play / Pause (space)"><svg width="17" height="17"><use href="#i-play"/></svg></button>
               <button class="tbtn" id="stepNext" title="Next event (→)"><svg width="15" height="15"><use href="#i-next"/></svg></button>
               <button class="tbtn tbtn-err" id="jumpErr" title="Jump to first error (e)"><svg width="15" height="15"><use href="#i-alert"/></svg></button>
+              <button class="tbtn tbtn-mark" id="markBtn" title="Mark this moment (m)">★</button>
               <button class="tbtn tbtn-speed" id="speedBtn" title="Playback speed (s)">1×</button>
               <button class="tbtn" id="theaterBtn" title="Theatre mode (t)"><svg width="15" height="15"><use href="#i-theater"/></svg></button>
               <button class="tbtn" id="fsBtn" title="Fullscreen (x)"><svg width="15" height="15"><use href="#i-expand"/></svg></button>
@@ -151,6 +158,7 @@
             <button class="tab" data-track="screens">Screens <span class="count" id="cScreens"></span></button>
             <button class="tab" data-track="insights">Insights <span class="count" id="cInsights"></span></button>
             <button class="tab" data-track="report">Report</button>
+            <button class="tab" data-track="aibrief">AI Brief</button>
           </div>
           <label class="follow">
             <input type="checkbox" id="followToggle" checked /> follow playhead
@@ -170,6 +178,10 @@
         </div>
 
         <div class="track-list" id="trackList"></div>
+        <div class="ai-brief-bar" id="aiBriefBar" hidden>
+          <span class="muted small">for_ai.md — the recording's self-describing brief for AI analysis</span>
+          <button class="btn btn-ghost small" id="aiBriefCopy" title="Copy the AI brief">⧉ Copy AI brief</button>
+        </div>
         <pre class="report" id="reportView" hidden></pre>
       </div>
 
@@ -224,6 +236,17 @@
           <button id="setCacheClear" class="btn btn-ghost small">Clear cache</button></div>
       </div>
       <div class="set-group">
+        <h4>Mission Control backend (optional)</h4>
+        <p class="muted small">Off by default — nothing is uploaded unless you set a URL and press <b>⇪ Send to backend</b>. Works with the bundled mock backend (<code>python3 backend/server.py</code>) or your real analysis service.</p>
+        <label class="set-row"><span>Backend URL</span>
+          <input type="text" id="setBackend" placeholder="http://127.0.0.1:8000" style="width:150px" />
+        </label>
+        <div class="set-row">
+          <span class="muted small">Base URL — the player posts to <code>/webhook</code> or <code>/api/ingest</code></span>
+          <button class="btn btn-ghost small" id="backendOpen">Open dashboard ↗</button>
+        </div>
+      </div>
+      <div class="set-group">
         <h4>Keyboard</h4>
         <div class="kbd-list">
           <div><kbd>space</kbd> play / pause</div>
@@ -233,7 +256,8 @@
           <div><kbd>f</kbd> toggle follow</div>
           <div><kbd>t</kbd> theatre mode</div>
           <div><kbd>x</kbd> fullscreen</div>
-          <div><kbd>1–6</kbd> switch track tab</div>
+          <div><kbd>m</kbd> ⭐ mark moment</div>
+          <div><kbd>1–7</kbd> switch track tab</div>
         </div>
       </div>
       <p class="muted small">All preferences are stored locally (localStorage / IndexedDB).</p>

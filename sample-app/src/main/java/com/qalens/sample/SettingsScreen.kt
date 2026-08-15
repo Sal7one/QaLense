@@ -32,8 +32,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.qalens.BookmarkSeverity
+import com.qalens.QaLens
 import com.qalens.qaName
 import com.qalens.qaTag
+import android.os.Handler
+import android.os.Looper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(darkTheme: Boolean, onToggleDark: () -> Unit, onProfileClick: () -> Unit) {
@@ -122,6 +130,77 @@ fun SettingsScreen(darkTheme: Boolean, onToggleDark: () -> Unit, onProfileClick:
                     SettingsItem.Info("QaLens",      "Active ✓",  "settings.qalens"),
                 )
             )
+            Spacer(Modifier.height(16.dp))
+        }
+
+        // ── QaLens demo triggers ─────────────────────────────────────────
+        // One tap feeds the whole evidence pipeline: timeline, score, classifier,
+        // bookmarks, crashes, recordings — everything the QaLens panel visualizes.
+        item {
+            SettingsSection(
+                title = "QaLens Demos — feed the evidence pipeline",
+                items = listOf(
+                    SettingsItem.Action(
+                        label = "Trigger failing transfer",
+                        subtitle = "Deep-links to Account #2 → Transfer → POST /transfer 500",
+                        tag = "demo.transfer",
+                        onClick = { QaLens.navigate("qalenssample://account/2") }
+                    ),
+                    SettingsItem.Action(
+                        label = "⭐ Mark moment",
+                        subtitle = "Starred breadcrumb + annotated screenshot (markMoment)",
+                        tag = "demo.mark",
+                        onClick = { QaLens.markMoment("Demo moment from Settings") }
+                    ),
+                    SettingsItem.Action(
+                        label = "Add BUG bookmark",
+                        subtitle = "C9 bookmark → timeline + marks.json in recordings",
+                        tag = "demo.bookmark",
+                        onClick = { QaLens.addBookmark("Demo bug bookmark", BookmarkSeverity.BUG) }
+                    ),
+                    SettingsItem.Action(
+                        label = "Record a 10s session",
+                        subtitle = "Frames + tracks → .sal in the Control Room recordings",
+                        tag = "demo.record",
+                        onClick = {
+                            QaLens.startRecording()
+                            Handler(Looper.getMainLooper()).postDelayed(
+                                { QaLens.stopRecording() }, 10_000L
+                            )
+                        }
+                    ),
+                    SettingsItem.Action(
+                        label = "Emit business event",
+                        subtitle = "QaLens.event → timeline + reports",
+                        tag = "demo.event",
+                        onClick = { QaLens.event("demo_event", "Demo business event fired") }
+                    ),
+                    SettingsItem.Action(
+                        label = "Coroutine crash",
+                        subtitle = "Uncaught coroutine exception → QaLensCrashHandler",
+                        tag = "demo.coroutine.crash",
+                        onClick = {
+                            val scope = CoroutineScope(SupervisorJob() + QaLens.coroutineExceptionHandler())
+                            scope.launch {
+                                delay(300)
+                                throw IllegalStateException("Demo coroutine crash")
+                            }
+                        }
+                    ),
+                    SettingsItem.Action(
+                        label = "ANR for 8s",
+                        subtitle = "Blocks the main thread → QaLens ANR watchdog fires",
+                        tag = "demo.anr",
+                        onClick = { Thread.sleep(8_000) }
+                    ),
+                    SettingsItem.Action(
+                        label = "Crash the app",
+                        subtitle = "Uncaught exception → QaLens captures it, app still crashes",
+                        tag = "demo.crash",
+                        onClick = { throw RuntimeException("Demo crash from Settings screen") }
+                    ),
+                )
+            )
         }
     }
 }
@@ -132,6 +211,9 @@ private sealed class SettingsItem {
         val checked: Boolean, val onToggle: () -> Unit
     ) : SettingsItem()
     data class Info(val label: String, val value: String, val tag: String) : SettingsItem()
+    data class Action(
+        val label: String, val subtitle: String, val tag: String, val onClick: () -> Unit
+    ) : SettingsItem()
 }
 
 @Composable
@@ -152,6 +234,7 @@ private fun SettingsSection(title: String, items: List<SettingsItem>) {
                 when (item) {
                     is SettingsItem.Toggle -> SettingsToggleRow(item)
                     is SettingsItem.Info   -> SettingsInfoRow(item)
+                    is SettingsItem.Action -> SettingsActionRow(item)
                 }
                 if (idx < items.lastIndex) {
                     HorizontalDivider(
@@ -184,6 +267,28 @@ private fun SettingsToggleRow(item: SettingsItem.Toggle) {
             checked = item.checked, onCheckedChange = { item.onToggle() },
             modifier = Modifier.qaTag("${item.tag}.switch").qaName("${item.label} Switch")
         )
+    }
+}
+
+@Composable
+private fun SettingsActionRow(item: SettingsItem.Action) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { item.onClick() }
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .qaTag(item.tag)
+            .qaName("${item.label} Button"),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(item.label, fontWeight = FontWeight.Medium)
+            Text(
+                item.subtitle, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary
+            )
+        }
+        Text("›", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

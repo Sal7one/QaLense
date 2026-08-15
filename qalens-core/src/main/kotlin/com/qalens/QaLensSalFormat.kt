@@ -59,6 +59,17 @@ data class SalManifest(
     val durationMs: Long get() = (endMillis - startMillis).coerceAtLeast(0)
 }
 
+/**
+ * R9: one entry in a v2 `manifest.files` array — `{name, crc32, compressed}`. `crc32` is the
+ * lowercase-hex CRC-32 of the **uncompressed** content; `compressed` is true when the entry is
+ * GZIP-compressed inside the ZIP (JSON tracks), false for frames/video/plain text.
+ */
+data class SalFileEntry(
+    val name: String,
+    val crc32: String,
+    val compressed: Boolean
+)
+
 /** Minimal, allocation-light JSON writer. Supports the value types the `.sal` tracks need. */
 object SalJson {
     fun encode(value: Any?): String = when (value) {
@@ -95,7 +106,17 @@ object SalJson {
 /** Encoders that turn live tracks into the JSON arrays/objects stored inside a `.sal`. */
 object SalTracks {
 
-    fun manifest(m: SalManifest): String = SalJson.obj(
+    /** v1 manifest: files is an array of strings. */
+    fun manifest(m: SalManifest): String = manifestJson(m, m.files)
+
+    /** v2 manifest (R9): files is an array of {name, crc32, compressed} objects. */
+    fun manifest(m: SalManifest, entries: List<SalFileEntry>): String =
+        manifestJson(
+            m,
+            entries.map { mapOf("name" to it.name, "crc32" to it.crc32, "compressed" to it.compressed) }
+        )
+
+    private fun manifestJson(m: SalManifest, files: Any): String = SalJson.obj(
         "formatVersion" to m.formatVersion,
         "createdAtMillis" to m.createdAtMillis,
         "app" to mapOf("name" to m.appName, "version" to m.appVersion, "variant" to m.buildVariant),
@@ -108,7 +129,7 @@ object SalTracks {
         "durationMs" to m.durationMs,
         "fps" to m.fps,
         "frameIndex" to m.frameIndex.entries.associate { it.key.toString() to it.value },
-        "files" to m.files,
+        "files" to files,
         "counts" to m.counts,
         "video" to m.videoFile,
         "videoStartMillis" to m.videoStartMillis,
@@ -122,6 +143,20 @@ object SalTracks {
         "density" to m.density,
         "fontScale" to m.fontScale
     )
+
+    /** R9: GZIP-compress a track's JSON text (RFC 1952) for v2 .sal packaging. */
+    fun gzip(text: String): ByteArray =
+        java.io.ByteArrayOutputStream().use { bos ->
+            java.util.zip.GZIPOutputStream(bos).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+            bos.toByteArray()
+        }
+
+    /** R9: lowercase-hex CRC-32 of [bytes] (crc32Hex of empty bytes is "00000000"). */
+    fun crc32Hex(bytes: ByteArray): String {
+        val crc = java.util.zip.CRC32()
+        crc.update(bytes)
+        return "%08x".format(crc.value)
+    }
 
     fun timeline(events: List<TimelineEvent>, config: QaLensConfig): String =
         SalJson.encode(events.map {
@@ -144,7 +179,14 @@ object SalTracks {
                 "latencyMs" to it.latencyMs,
                 "requestBytes" to it.requestBodyBytes,
                 "responseBytes" to it.responseBodyBytes,
-                "error" to it.error
+                "error" to it.error,
+                // R8: re-redact body previews at encode time (belt-and-suspenders on top of the
+                // capture-time redaction in the interceptor).
+                "requestBodyPreview" to it.requestBodyPreview?.let(config::redact),
+                "responseBodyPreview" to it.responseBodyPreview?.let(config::redact),
+                "connectivity" to it.connectivity?.let { c ->
+                    mapOf("type" to c.type.name, "strengthBars" to c.strengthBars, "hasVpn" to c.hasVpn, "isMetered" to c.isMetered)
+                }
             )
         })
 
@@ -189,6 +231,66 @@ object SalTracks {
                 "route" to s.route?.let(config::redact),
                 "featureFlags" to s.featureFlags,
                 "dataSources" to s.dataSources.mapValues { (_, kv) -> kv.mapValues { config.redact(it.value) } }
+            )
+        })
+
+    fun crashes(crashes: List<QaLensCrash>, config: QaLensConfig): String =
+        SalJson.encode(crashes.map { c ->
+            mapOf(
+                "ts" to c.timestampMillis,
+                "type" to c.type.name,
+                "thread" to config.redact(c.thread),
+                "throwable" to c.throwable?.let(config::redact),
+                "stackTrace" to c.stackTrace,
+                "screen" to c.screen?.let(config::redact),
+                "route" to c.route?.let(config::redact),
+                "lastNetworkSummary" to c.lastNetworkSummary?.let(config::redact)
+            )
+        })
+
+    fun performance(samples: List<FrameMetricsSample>, config: QaLensConfig): String =
+        SalJson.encode(samples.map { s ->
+            mapOf(
+                "ts" to s.timestampMillis,
+                "totalMs" to s.totalMs,
+                "layoutMs" to s.layoutMs,
+                "drawMs" to s.drawMs,
+                "gpuMs" to s.gpuMs,
+                "jank" to s.jank,
+                "frozen" to s.frozen
+            )
+        })
+
+    fun connectivity(transitions: List<ConnectivitySnapshot>): String =
+        SalJson.encode(transitions.map { c ->
+            mapOf(
+                "ts" to c.timestampMillis,
+                "type" to c.type.name,
+                "strengthBars" to c.strengthBars,
+                "hasVpn" to c.hasVpn,
+                "isMetered" to c.isMetered
+            )
+        })
+
+    fun memory(samples: List<MemorySample>): String =
+        SalJson.encode(samples.map { m ->
+            mapOf(
+                "ts" to m.timestampMillis,
+                "totalKb" to m.totalKb,
+                "freeKb" to m.freeKb,
+                "nativeKb" to m.nativeKb,
+                "trimLevel" to m.trimLevel
+            )
+        })
+
+    /** C9: QA bookmarks / annotations. */
+    fun marks(bookmarks: List<Bookmark>): String =
+        SalJson.encode(bookmarks.map { b ->
+            mapOf(
+                "id" to b.id,
+                "ts" to b.timestampMillis,
+                "label" to b.label,
+                "severity" to b.severity.name.lowercase()
             )
         })
 }

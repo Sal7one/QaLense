@@ -21,7 +21,14 @@ object QaLensAnalysis {
         val networkInterceptorInstalled: Boolean,
         val networkCount: Int,
         val logCount: Int,
-        val stateCount: Int
+        val stateCount: Int,
+        val crashCount: Int = 0,
+        val frameMetricsCount: Int = 0,
+        val connectivityCount: Int = 0,
+        /** Config-driven capture modes — lets the digest say "disabled by config" vs "not installed". */
+        val networkCaptureEnabled: Boolean = true,
+        val logCaptureEnabled: Boolean = true,
+        val networkFromChucker: Boolean = false
     )
 
     fun digest(
@@ -33,18 +40,28 @@ object QaLensAnalysis {
         timeline: List<TimelineEvent>,
         stateSamples: List<StateSample>,
         classification: BugClassification?,
-        config: QaLensConfig
+        config: QaLensConfig,
+        crashes: List<QaLensCrash> = emptyList(),
+        frameMetrics: List<FrameMetricsSample> = emptyList(),
+        connectivityTransitions: List<ConnectivitySnapshot> = emptyList(),
+        assertionFailures: Int = 0
     ): String {
         val durationMs = (endMillis - startMillis).coerceAtLeast(1)
         val slowMs = config.slowNetworkThresholdMs
 
         // ── Coverage notes: what is missing and why it matters ──────────────
         val notes = mutableListOf<String>()
-        if (!coverage.networkInterceptorInstalled)
+        if (!coverage.networkCaptureEnabled)
+            notes += "Network capture DISABLED via QaLensConfig.captureNetwork — network.json is blind by configuration."
+        else if (coverage.networkFromChucker)
+            notes += "Network sourced from Chucker (TransactionListener) — no QaLensOkHttpInterceptor in the pipeline."
+        else if (!coverage.networkInterceptorInstalled)
             notes += "Network capture NOT installed (QaLensOkHttpInterceptor missing) — network.json is blind, do not infer 'no traffic'."
         else if (coverage.networkCount == 0)
             notes += "Interceptor installed but no requests in the window — screens may be cached/offline."
-        if (coverage.logCount == 0)
+        if (!coverage.logCaptureEnabled)
+            notes += "Log capture DISABLED via QaLensConfig.captureLogs — logs.json is blind by configuration."
+        else if (coverage.logCount == 0)
             notes += "No log events captured — host app may not forward logs (Timber tree not planted?). Absence of errors in logs.json is NOT evidence of health."
         if (coverage.stateCount == 0)
             notes += "No state samples — screen/flag context unavailable."
@@ -52,6 +69,12 @@ object QaLensAnalysis {
             notes += "No visual track — reason about behavior from tracks only."
         if (!coverage.hasVideo && coverage.hasFrames)
             notes += "Visual track is low-fps frames (~2fps), not video — fast UI glitches can fall between frames."
+        if (coverage.crashCount == 0)
+            notes += "No crash/ANR data — QaLensCrashHandler may not be installed. Absence of crashes is NOT evidence of stability."
+        if (coverage.frameMetricsCount == 0)
+            notes += "No frame metrics — JankAnalyzer unavailable (requires API 24+ and foreground activity). Do not infer smooth rendering from absence."
+        if (coverage.connectivityCount == 0)
+            notes += "No connectivity transitions — QaLensConnectivity may not be started. A device that stays on WiFi the whole session looks identical to one that was offline."
 
         // ── Stats ────────────────────────────────────────────────────────────
         val failed = network.filter { it.isError }
@@ -97,7 +120,9 @@ object QaLensAnalysis {
 
         // ── Anomalies (timestamped, relative ms — join any track on these) ──
         val anomalies = mutableListOf<Map<String, Any?>>()
-        failed.forEach {
+        // Non-connectivity failures appear as "failed_request"; connectivity-caused failures
+        // appear separately as "connectivity_failure" to avoid double-reporting.
+        failed.filter { !it.failedDueToConnectivity }.forEach {
             anomalies += mapOf(
                 "tMs" to (it.timestampMillis - startMillis), "kind" to "failed_request",
                 "title" to "${it.method} ${endpointKey(it).substringAfter(' ')} → ${it.error ?: it.status}",
@@ -139,6 +164,34 @@ object QaLensAnalysis {
         }
         anomalies.sortBy { it["tMs"] as Long }
 
+        // Connectivity-caused failures — a request that failed while the device was offline.
+        failed.filter { it.failedDueToConnectivity }.forEach { c ->
+            anomalies += mapOf(
+                "tMs" to (c.timestampMillis - startMillis), "kind" to "connectivity_failure",
+                "title" to "${c.method} ${endpointKey(c).substringAfter(' ')} failed (device offline)",
+                "detail" to "the device had no network at request time — not a server bug"
+            )
+        }
+
+        // Crash/ANR anomalies — the most severe signal in the session.
+        crashes.forEach { c ->
+            anomalies += mapOf(
+                "tMs" to (c.timestampMillis - startMillis), "kind" to c.type.name.lowercase(),
+                "title" to "${c.type.display}: ${c.throwable ?: c.thread}",
+                "detail" to (c.screen?.let { "on screen $it" } ?: "") +
+                    (c.lastNetworkSummary?.let { " · last network: $it" } ?: "")
+            )
+        }
+        // Macro assertion failures — the macro run's own verdict.
+        if (assertionFailures > 0) {
+            anomalies += mapOf(
+                "tMs" to 0L, "kind" to "assertion_failed",
+                "title" to "$assertionFailures macro assertion(s) failed",
+                "detail" to "a macro run assert steps did not pass"
+            )
+        }
+        anomalies.sortBy { it["tMs"] as Long }
+
         return SalJson.obj(
             "schema" to SCHEMA,
             "coverage" to mapOf(
@@ -146,11 +199,17 @@ object QaLensAnalysis {
                 "video" to coverage.hasVideo,
                 "network" to (coverage.networkCount > 0),
                 "networkInterceptorInstalled" to coverage.networkInterceptorInstalled,
+                "networkCaptureEnabled" to coverage.networkCaptureEnabled,
+                "networkFromChucker" to coverage.networkFromChucker,
                 "logs" to (coverage.logCount > 0),
+                "logCaptureEnabled" to coverage.logCaptureEnabled,
                 "state" to (coverage.stateCount > 0),
+                "crashes" to (coverage.crashCount > 0),
+                "performance" to (coverage.frameMetricsCount > 0),
+                "connectivity" to (coverage.connectivityCount > 0),
                 "notes" to notes
             ),
-            "stats" to mapOf(
+            "stats" to mutableMapOf<String, Any?>(
                 "durationMs" to durationMs,
                 "screensVisited" to visits.size,
                 "requests" to network.size,
@@ -159,9 +218,23 @@ object QaLensAnalysis {
                 "slowThresholdMs" to slowMs,
                 "logEvents" to events.size,
                 "errorLogs" to errorLogs.size,
+                "crashes" to crashes.size,
                 "avgLatencyMs" to (latencies.takeIf { it.isNotEmpty() }?.average()?.toLong() ?: 0L),
                 "p95LatencyMs" to p(95)
-            ),
+            ).apply {
+                if (assertionFailures > 0) this["assertionFailures"] = assertionFailures
+            },
+            "jank" to JankAnalyzer.analyze(frameMetrics).let { d ->
+                mapOf(
+                    "samples" to d.sampleCount,
+                    "jankCount" to d.jankCount,
+                    "frozenCount" to d.frozenCount,
+                    "jankRate" to d.jankRate,
+                    "p95TotalMs" to d.p95TotalMs,
+                    "p99TotalMs" to d.p99TotalMs,
+                    "worstFrameMs" to d.worstFrameMs
+                )
+            },
             "endpoints" to endpoints,
             "screens" to screens,
             "anomalies" to anomalies,
