@@ -24,7 +24,11 @@ object QaLensAnalysis {
         val stateCount: Int,
         val crashCount: Int = 0,
         val frameMetricsCount: Int = 0,
-        val connectivityCount: Int = 0
+        val connectivityCount: Int = 0,
+        /** Config-driven capture modes — lets the digest say "disabled by config" vs "not installed". */
+        val networkCaptureEnabled: Boolean = true,
+        val logCaptureEnabled: Boolean = true,
+        val networkFromChucker: Boolean = false
     )
 
     fun digest(
@@ -39,18 +43,25 @@ object QaLensAnalysis {
         config: QaLensConfig,
         crashes: List<QaLensCrash> = emptyList(),
         frameMetrics: List<FrameMetricsSample> = emptyList(),
-        connectivityTransitions: List<ConnectivitySnapshot> = emptyList()
+        connectivityTransitions: List<ConnectivitySnapshot> = emptyList(),
+        assertionFailures: Int = 0
     ): String {
         val durationMs = (endMillis - startMillis).coerceAtLeast(1)
         val slowMs = config.slowNetworkThresholdMs
 
         // ── Coverage notes: what is missing and why it matters ──────────────
         val notes = mutableListOf<String>()
-        if (!coverage.networkInterceptorInstalled)
+        if (!coverage.networkCaptureEnabled)
+            notes += "Network capture DISABLED via QaLensConfig.captureNetwork — network.json is blind by configuration."
+        else if (coverage.networkFromChucker)
+            notes += "Network sourced from Chucker (TransactionListener) — no QaLensOkHttpInterceptor in the pipeline."
+        else if (!coverage.networkInterceptorInstalled)
             notes += "Network capture NOT installed (QaLensOkHttpInterceptor missing) — network.json is blind, do not infer 'no traffic'."
         else if (coverage.networkCount == 0)
             notes += "Interceptor installed but no requests in the window — screens may be cached/offline."
-        if (coverage.logCount == 0)
+        if (!coverage.logCaptureEnabled)
+            notes += "Log capture DISABLED via QaLensConfig.captureLogs — logs.json is blind by configuration."
+        else if (coverage.logCount == 0)
             notes += "No log events captured — host app may not forward logs (Timber tree not planted?). Absence of errors in logs.json is NOT evidence of health."
         if (coverage.stateCount == 0)
             notes += "No state samples — screen/flag context unavailable."
@@ -171,6 +182,14 @@ object QaLensAnalysis {
                     (c.lastNetworkSummary?.let { " · last network: $it" } ?: "")
             )
         }
+        // Macro assertion failures — the macro run's own verdict.
+        if (assertionFailures > 0) {
+            anomalies += mapOf(
+                "tMs" to 0L, "kind" to "assertion_failed",
+                "title" to "$assertionFailures macro assertion(s) failed",
+                "detail" to "a macro run assert steps did not pass"
+            )
+        }
         anomalies.sortBy { it["tMs"] as Long }
 
         return SalJson.obj(
@@ -180,14 +199,17 @@ object QaLensAnalysis {
                 "video" to coverage.hasVideo,
                 "network" to (coverage.networkCount > 0),
                 "networkInterceptorInstalled" to coverage.networkInterceptorInstalled,
+                "networkCaptureEnabled" to coverage.networkCaptureEnabled,
+                "networkFromChucker" to coverage.networkFromChucker,
                 "logs" to (coverage.logCount > 0),
+                "logCaptureEnabled" to coverage.logCaptureEnabled,
                 "state" to (coverage.stateCount > 0),
                 "crashes" to (coverage.crashCount > 0),
                 "performance" to (coverage.frameMetricsCount > 0),
                 "connectivity" to (coverage.connectivityCount > 0),
                 "notes" to notes
             ),
-            "stats" to mapOf(
+            "stats" to mutableMapOf<String, Any?>(
                 "durationMs" to durationMs,
                 "screensVisited" to visits.size,
                 "requests" to network.size,
@@ -199,7 +221,9 @@ object QaLensAnalysis {
                 "crashes" to crashes.size,
                 "avgLatencyMs" to (latencies.takeIf { it.isNotEmpty() }?.average()?.toLong() ?: 0L),
                 "p95LatencyMs" to p(95)
-            ),
+            ).apply {
+                if (assertionFailures > 0) this["assertionFailures"] = assertionFailures
+            },
             "jank" to JankAnalyzer.analyze(frameMetrics).let { d ->
                 mapOf(
                     "samples" to d.sampleCount,

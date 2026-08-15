@@ -6,9 +6,13 @@ import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.FileProvider
+import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.lang.ref.WeakReference
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /**
  * Records a QA session as a `.sal` file.
@@ -28,6 +32,7 @@ internal object QaLensSessionRecorder {
     private const val MAX_FRAME_WIDTH = 720
     private const val MAX_SAVED_SAL = 5
     private const val WATCHDOG_TIMEOUT_MS = 10_000L // A5: auto-cancel if no frame for 10s
+    private const val WATCHDOG_TICK_MS = 2_000L       // A5: watchdog polls every 2s
     private val intervalMs = 1000L / FPS
 
     private val handler = Handler(Looper.getMainLooper())
@@ -50,17 +55,19 @@ internal object QaLensSessionRecorder {
     private var sessionDir: File? = null
     private var videoFile: File? = null
 
-    // A5: Watchdog — auto-cancel recording if no frame arrives for WATCHDOG_TIMEOUT_MS.
+    // A5: Watchdog — poll every 2s; auto-cancel the recording if no frame arrives for
+    // WATCHDOG_TIMEOUT_MS (screen may be FLAG_SECURE, or capture stalled).
     private val watchdog = object : Runnable {
         override fun run() {
             if (!recording) return
-            if (lastFrameTimestamp > 0 && System.currentTimeMillis() - lastFrameTimestamp > WATCHDOG_TIMEOUT_MS) {
-                QaLens.log("Recording watchdog: no frame for ${WATCHDOG_TIMEOUT_MS / 1000}s — auto-stopping.")
-                QaLens.pushError(ErrorKind.RECORDING, "Recording auto-stopped: frame capture stalled for ${WATCHDOG_TIMEOUT_MS / 1000}s")
-                stop()
+            if (System.currentTimeMillis() - lastFrameTimestamp > WATCHDOG_TIMEOUT_MS) {
+                val msg = "Watchdog: no frames captured for ${WATCHDOG_TIMEOUT_MS / 1000}s — recording cancelled (screen may be FLAG_SECURE or capture stalled)"
+                QaLens.log(msg)
+                QaLens.pushError(ErrorKind.RECORDING, msg, retry = { QaLens.startRecording() })
+                cancel()
                 return
             }
-            handler.postDelayed(this, WATCHDOG_TIMEOUT_MS)
+            handler.postDelayed(this, WATCHDOG_TICK_MS)
         }
     }
 
@@ -153,6 +160,7 @@ internal object QaLensSessionRecorder {
         if (!recording && sessionDir == null) return
         recording = false
         handler.removeCallbacks(tick)
+        handler.removeCallbacks(watchdog) // A5: stop watchdog
         QaLensSystemChip.hide()
         restoreOverlay()
         if (videoMode) {
@@ -165,6 +173,10 @@ internal object QaLensSessionRecorder {
         sessionDir = null
         QaLens.log("Recording discarded.")
     }
+
+    /** A5: true when a frame/video sample was captured within [withinMs] ms. */
+    internal fun hasRecentFrames(withinMs: Long): Boolean =
+        lastFrameTimestamp > 0 && System.currentTimeMillis() - lastFrameTimestamp <= withinMs
 
     /** Un-hide the overlay on whichever activity is alive — never strand QA with an invisible UI. */
     private fun restoreOverlay() {
@@ -274,7 +286,20 @@ internal object QaLensSessionRecorder {
         return Bitmap.createScaledBitmap(bmp, MAX_FRAME_WIDTH, (bmp.height * ratio).toInt(), true)
     }
 
-    private fun finalizeAndShare(video: File?) {
+    private fun finalizeAndShare(video: File?) = finalize(video, share = true)
+
+    /** R10: finalize an in-flight recording on crash — saves the .sal WITHOUT the share sheet. */
+    fun autoFinalize() {
+        if (!recording && sessionDir == null) return
+        recording = false
+        handler.removeCallbacks(tick)
+        handler.removeCallbacks(watchdog)
+        // Video.mp4 was not stopped cleanly on a crash; finalize from the PixelCopy safety-net frames.
+        runCatching { finalize(video = null, share = false) }
+            .onFailure { QaLens.log("Recording auto-finalize failed: ${it.message}") }
+    }
+
+    private fun finalize(video: File?, share: Boolean) {
         val dir = sessionDir ?: return
         val usingVideo = videoMode && video != null
         val activity = activityRef?.get() ?: QaLens.currentActivity
@@ -292,13 +317,65 @@ internal object QaLensSessionRecorder {
         val classification = BugClassifier.classify(windowNetwork, s.warnings, s.screen.history, cfg.slowNetworkThresholdMs, buildIssues)
         val repro = ReproStepGenerator.generate(timeline)
 
-        val baseFiles = listOf(
-            "manifest.json", "summary.json", "timeline.json", "network.json", "logs.json",
-            "state.json", "analysis.json", "for_ai.md", "report.txt"
+        // Machine-readable digest + self-describing guide → every .sal is AI-ready on arrival.
+        val sessionCrashes = s.crashes
+        val sessionFrameMetrics = s.frameMetrics
+        val sessionConnectivity = s.connectivityTransitions
+        val analysisJson = QaLensAnalysis.digest(
+            coverage = QaLensAnalysis.Coverage(
+                hasFrames = !usingVideo && frameIndex.isNotEmpty(),
+                hasVideo = usingVideo,
+                networkInterceptorInstalled = s.networkAvailable,
+                networkCount = windowNetwork.size,
+                logCount = windowEvents.size,
+                stateCount = stateSamples.size,
+                crashCount = sessionCrashes.size,
+                frameMetricsCount = sessionFrameMetrics.size,
+                connectivityCount = sessionConnectivity.size,
+                networkCaptureEnabled = cfg.captureNetwork,
+                logCaptureEnabled = cfg.captureLogs,
+                networkFromChucker = cfg.networkFromChucker
+            ),
+            startMillis = startMs,
+            endMillis = endMs,
+            network = windowNetwork,
+            events = windowEvents,
+            timeline = timeline,
+            stateSamples = stateSamples,
+            classification = classification,
+            config = cfg,
+            crashes = sessionCrashes,
+            frameMetrics = sessionFrameMetrics,
+            connectivityTransitions = sessionConnectivity
         )
-        val mediaFiles = if (usingVideo) listOf("video.mp4") else frameIndex.values.toList()
+
+        // Every track except manifest.json (whose checksum depends on the file list — keep it out
+        // of files[] to avoid a self-referential crc32).
+        val texts = mapOf(
+            "summary.json" to SalTracks.summary(score, classification, repro, cfg),
+            "timeline.json" to SalTracks.timeline(timeline, cfg),
+            "network.json" to SalTracks.network(windowNetwork, cfg),
+            "logs.json" to SalTracks.logs(windowEvents, cfg),
+            "state.json" to SalTracks.state(stateSamples, cfg),
+            "crashes.json" to SalTracks.crashes(sessionCrashes, cfg),
+            "performance.json" to SalTracks.performance(sessionFrameMetrics, cfg),
+            "connectivity.json" to SalTracks.connectivity(sessionConnectivity),
+            "memory.json" to SalTracks.memory(s.memorySamples),
+            "marks.json" to SalTracks.marks(s.bookmarks),
+            "analysis.json" to analysisJson,
+            "for_ai.md" to QaLensAnalysis.aiGuide(),
+            "report.txt" to QaLens.buildFullReport()
+        )
+
+        val frameRelPaths = if (usingVideo) emptyList() else frameIndex.values.toList()
+        val extras = if (usingVideo) mapOf("video.mp4" to video!!) else emptyMap()
+
+        // R9 v2: compute per-entry checksums (of uncompressed content) before building the manifest.
+        val framesDir = File(dir, "frames")
+        val fileEntries = buildFileEntries(texts, framesDir, frameRelPaths, extras)
 
         val manifest = SalManifest(
+            formatVersion = 2,
             createdAtMillis = endMs,
             appName = s.device.appName,
             appVersion = s.device.appVersion,
@@ -311,7 +388,7 @@ internal object QaLensSessionRecorder {
             endMillis = endMs,
             fps = if (usingVideo) 30 else FPS,
             frameIndex = frameIndex,
-            files = baseFiles + mediaFiles,
+            files = fileEntries.map { it.name },
             counts = mapOf(
                 "frames" to frameIndex.size,
                 "network" to windowNetwork.size,
@@ -329,67 +406,85 @@ internal object QaLensSessionRecorder {
             density = s.device.density,
             fontScale = s.device.fontScale
         )
-
-        // Machine-readable digest + self-describing guide → every .sal is AI-ready on arrival.
-        val sessionCrashes = s.crashes
-        val sessionFrameMetrics = s.frameMetrics
-        val sessionConnectivity = s.connectivityTransitions
-        val analysisJson = QaLensAnalysis.digest(
-            coverage = QaLensAnalysis.Coverage(
-                hasFrames = !usingVideo && frameIndex.isNotEmpty(),
-                hasVideo = usingVideo,
-                networkInterceptorInstalled = s.networkAvailable,
-                networkCount = windowNetwork.size,
-                logCount = windowEvents.size,
-                stateCount = stateSamples.size,
-                crashCount = sessionCrashes.size,
-                frameMetricsCount = sessionFrameMetrics.size,
-                connectivityCount = sessionConnectivity.size
-            ),
-            startMillis = startMs,
-            endMillis = endMs,
-            network = windowNetwork,
-            events = windowEvents,
-            timeline = timeline,
-            stateSamples = stateSamples,
-            classification = classification,
-            config = cfg,
-            crashes = sessionCrashes,
-            frameMetrics = sessionFrameMetrics,
-            connectivityTransitions = sessionConnectivity
-        )
-
-        val texts = mapOf(
-            "manifest.json" to SalTracks.manifest(manifest),
-            "summary.json" to SalTracks.summary(score, classification, repro, cfg),
-            "timeline.json" to SalTracks.timeline(timeline, cfg),
-            "network.json" to SalTracks.network(windowNetwork, cfg),
-            "logs.json" to SalTracks.logs(windowEvents, cfg),
-            "state.json" to SalTracks.state(stateSamples, cfg),
-            "crashes.json" to SalTracks.crashes(sessionCrashes, cfg),
-            "performance.json" to SalTracks.performance(sessionFrameMetrics, cfg),
-            "connectivity.json" to SalTracks.connectivity(sessionConnectivity),
-            "memory.json" to SalTracks.memory(s.memorySamples),
-            "marks.json" to SalTracks.marks(s.bookmarks),
-            "analysis.json" to analysisJson,
-            "for_ai.md" to QaLensAnalysis.aiGuide(),
-            "report.txt" to QaLens.buildFullReport()
-        )
+        val manifestJson = SalTracks.manifest(manifest, fileEntries)
 
         try {
             val cacheRoot = activity?.cacheDir ?: QaLens.appContext?.cacheDir ?: dir.parentFile
             val salDir = File(cacheRoot, "qalens").apply { mkdirs() }
             val target = File(salDir, "session_$startMs.sal")
-            val extras = if (usingVideo) mapOf("video.mp4" to video!!) else emptyMap()
-            QaLensSalWriter.write(target, texts, File(dir, "frames"), if (usingVideo) emptyList() else frameIndex.values.toList(), extras)
+            writeSalZip(target, manifestJson, texts, framesDir, frameRelPaths, extras)
             val sizeNote = if (usingVideo) "video" else "${frameIndex.size} frames"
             QaLens.log("Recording saved: ${target.name} ($sizeNote, ${(endMs - startMs) / 1000}s)")
             videoMode = false
             trimRetention(salDir, dir)
             QaLens.refreshRecordings()
-            if (activity != null) shareFile(activity, target)
+            if (share) {
+                if (activity != null) shareFile(activity, target)
+            } else {
+                QaLens.log("Recording auto-finalized after crash: ${target.name}")
+            }
         } catch (e: Exception) {
             QaLens.pushError(ErrorKind.RECORDING, "Failed to write .sal: ${e.message}")
+        }
+    }
+
+    /** R9: v2 file entries — crc32 of uncompressed content; compressed=true only for JSON tracks. */
+    private fun buildFileEntries(
+        texts: Map<String, String>,
+        framesDir: File,
+        frameRelPaths: List<String>,
+        extraFiles: Map<String, File>
+    ): List<SalFileEntry> {
+        val entries = mutableListOf<SalFileEntry>()
+        texts.forEach { (path, content) ->
+            val bytes = content.toByteArray(Charsets.UTF_8)
+            entries += SalFileEntry(path, SalTracks.crc32Hex(bytes), path.endsWith(".json"))
+        }
+        frameRelPaths.forEach { rel ->
+            val f = File(framesDir.parentFile, rel)
+            if (f.exists()) entries += SalFileEntry(rel, SalTracks.crc32Hex(f.readBytes()), false)
+        }
+        extraFiles.forEach { (rel, f) ->
+            if (f.exists()) entries += SalFileEntry(rel, SalTracks.crc32Hex(f.readBytes()), false)
+        }
+        return entries
+    }
+
+    /** R9: write the v2 .sal ZIP — gzip JSON tracks + manifest; frames/video stay plain. */
+    private fun writeSalZip(
+        target: File,
+        manifestJson: String,
+        texts: Map<String, String>,
+        framesDir: File,
+        frameRelPaths: List<String>,
+        extraFiles: Map<String, File>
+    ) {
+        ZipOutputStream(BufferedOutputStream(FileOutputStream(target))).use { zip ->
+            // manifest.json first, gzipped like any other JSON track.
+            zip.putNextEntry(ZipEntry("manifest.json"))
+            zip.write(SalTracks.gzip(manifestJson))
+            zip.closeEntry()
+            texts.forEach { (path, content) ->
+                val bytes = content.toByteArray(Charsets.UTF_8)
+                zip.putNextEntry(ZipEntry(path))
+                if (path.endsWith(".json")) zip.write(SalTracks.gzip(content)) else zip.write(bytes)
+                zip.closeEntry()
+            }
+            frameRelPaths.forEach { rel ->
+                val f = File(framesDir.parentFile, rel)
+                if (f.exists()) {
+                    zip.putNextEntry(ZipEntry(rel))
+                    FileInputStream(f).use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
+            }
+            extraFiles.forEach { (rel, f) ->
+                if (f.exists()) {
+                    zip.putNextEntry(ZipEntry(rel))
+                    FileInputStream(f).use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
+            }
         }
     }
 

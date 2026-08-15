@@ -109,6 +109,40 @@ Both are `compileOnly` deps of QaLens — it never forces OkHttp/Timber on you. 
 interceptor the network tab and `.sal` network track stay empty, and `analysis.json.coverage`
 explicitly says so (so AI analysis won't infer "no traffic").
 
+### Capture feature flags (what feeds the tracks — and what doesn't)
+
+Three `QaLensConfig` flags decide which automatic captures run (explicit
+`QaLens.event()/log()/breadcrumb()` calls always work — only automatic capture is gated):
+
+```kotlin
+QaLens.configure {
+    captureNetwork = true        // default: QaLensOkHttpInterceptor logs metadata
+    captureLogs = true           // default: QaLensTimberTree mirrors Timber lines
+    networkFromChucker = false   // opt-in: Chucker becomes the network source instead
+}
+```
+
+- **`captureNetwork = false`** — the interceptor becomes a pure pass-through (zero reads).
+- **`captureLogs = false`** — the Timber tree drops every line.
+- **`networkFromChucker = true`** — if your app already runs Chucker, QaLens registers a
+  Chucker `TransactionListener` (reflection, optional dependency) and converts every transaction
+  into a NetworkEvent. No `QaLensOkHttpInterceptor` needed — it auto-passes-through so nothing
+  is double-counted. If Chucker is missing, QaLens logs a warning and falls back to the
+  interceptor. Recommended Chucker setup (both inspectors, one client):
+
+```kotlin
+OkHttpClient.Builder()
+    .addInterceptor(ChuckerInterceptor.Builder(context).build())  // first — full bodies
+    .addInterceptor(QaLensOkHttpInterceptor())                    // second — metadata (or omitted
+                                                                  //           when networkFromChucker)
+    .build()
+```
+
+Either way the `.sal` stays honest: `analysis.json.coverage` records
+`networkCaptureEnabled` / `logCaptureEnabled` / `networkFromChucker` and its notes say
+"DISABLED via QaLensConfig…" instead of "not installed" — so AI analysis can tell a gated track
+from a missing one.
+
 ## Step 6 — Enrichment (L4, all optional)
 
 ```kotlin
@@ -164,6 +198,11 @@ The minimal QA panel surfaces the **5 most recently used macros** at the top. Ve
 | Webhook upload | Control Room → per recording **⇪ Webhook**: multipart `file` + `X-QaLens-App/-Version/-Env/-Device/-Platform/-User/-Sal-Name/-Sal-Size/-Digest` headers + query params. Your backend's response body is shown to the tester. |
 | Screenshots | Annotated, auto-saved to **Photos → Pictures/QaLens** (Android 10+), share optional. |
 | Bug reports | Redacted Jira/Slack/repro text via one-tap copy (`QaLens.buildJiraReport()` etc.). |
+
+> **Testing against the mock backend** — no real server needed. Run `python3 backend/server.py`,
+> then `adb reverse tcp:8000 tcp:8000` (emulator), point the Control Room webhook at
+> `http://127.0.0.1:8000/webhook`, and hit **Test endpoint**. Uploads land on the dashboard at
+> http://127.0.0.1:8000/ with a deterministic mock AI verdict. See [`backend/README.md`](backend/README.md).
 
 ## Verification checklist (run these)
 

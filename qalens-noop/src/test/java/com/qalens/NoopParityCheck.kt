@@ -138,3 +138,14 @@ object NoopParityCheck {
         q.registerDeepLinkScenario("name", "uri")
     }
 }
+
+/**
+ * A7 executed (not only compiled): every no-op twin must actually RUN without throwing.
+ * JUnit4 needs a plain class — the object above is the compile-time reference surface.
+ */
+class NoopParityCheckTest {
+    @org.junit.Test
+    fun parityHoldsAtRuntime() {
+        NoopParityCheck.exerciseAll()
+    }
+}

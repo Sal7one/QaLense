@@ -75,6 +75,10 @@ object QaLensConnectivity {
                 (if (snap.hasVpn) " · VPN" else "") +
                 (if (snap.isMetered) " · metered" else "")
             QaLens.event("connectivity", message ?: "Connectivity now $desc")
+            // Back online: flush any recordings parked in the offline retry queue.
+            if (previous?.type == ConnectivityType.OFFLINE) {
+                QaLensWebhook.drainQueue(context.applicationContext)
+            }
         }
     }
 

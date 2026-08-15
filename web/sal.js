@@ -47,14 +47,22 @@
     return entries;
   }
 
-  async function inflateRaw(bytes) {
+  async function inflate(bytes, format) {
     if (typeof DecompressionStream === "undefined") {
       throw new Error("This browser lacks DecompressionStream; use a recent Chrome/Edge/Safari/Firefox.");
     }
-    const ds = new DecompressionStream("deflate-raw");
+    const ds = new DecompressionStream(format);
     const stream = new Blob([bytes]).stream().pipeThrough(ds);
     const buf = await new Response(stream).arrayBuffer();
     return new Uint8Array(buf);
+  }
+
+  // RFC 1952 gzip magic bytes (1f 8b).
+  const isGzip = (bytes) => bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+
+  // Inflate a ZIP method-8 entry body: gzip (v2 JSON tracks) or raw DEFLATE (v1), by magic bytes.
+  async function inflateEntry(bytes) {
+    return inflate(bytes, isGzip(bytes) ? "gzip" : "deflate-raw");
   }
 
   // Returns Map<name, Uint8Array>
@@ -72,9 +80,16 @@
       const dataStart = lo + 30 + nameLen + extraLen;
       const comp = u8.subarray(dataStart, dataStart + e.compSize);
       let data;
-      if (e.method === 0) data = comp.slice();
-      else if (e.method === 8) data = await inflateRaw(comp);
-      else throw new Error("Unsupported ZIP compression method " + e.method + " for " + e.name);
+      if (e.method === 0) {
+        data = comp.slice();
+        // v2 gzip-compressed JSON tracks may be STOREd (already compressed); detect via the gzip
+        // magic bytes and inflate. Plain STORE entries (JPEG frames, text) pass through unchanged.
+        if (isGzip(data)) data = await inflate(data, "gzip");
+      } else if (e.method === 8) {
+        data = await inflateEntry(comp);
+      } else {
+        throw new Error("Unsupported ZIP compression method " + e.method + " for " + e.name);
+      }
       out.set(e.name, data);
     }
     return out;
@@ -95,14 +110,52 @@
     return URL.createObjectURL(new Blob([bytes], { type: mime }));
   }
 
+  // CRC-32 (IEEE 802.3, table-based) over uncompressed bytes — used for v2 per-entry checksums.
+  const CRC32_T = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  function crc32(bytes) {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = CRC32_T[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+  function crc32Hex(bytes) {
+    return crc32(bytes).toString(16).padStart(8, "0");
+  }
+
   // Parse the extracted files into a structured session.
   function parse(files) {
     const manifest = jsonOf(files, "manifest.json", {});
-    // C15: Validate formatVersion for forward-compatibility.
+    // C15: Validate formatVersion for forward-compatibility. A newer major version means
+    // the archive layout/semantics may have changed — refuse loudly instead of misrendering.
     const fv = manifest.formatVersion;
-    if (fv !== undefined && typeof fv === "number" && fv > 1) {
-      console.warn(`QaLens: .sal formatVersion ${fv} is newer than supported (1). Some features may not render correctly.`);
+    if (fv !== undefined && fv > 2) {
+      throw new Error(`.sal formatVersion ${fv} is newer than this player supports (2). Update the QaLens web player / sal_report.js before opening this recording.`);
     }
+    if (fv === 2) console.info("QaLens: reading .sal formatVersion 2");
+    else if (fv !== undefined) console.info(`QaLens: reading .sal formatVersion ${fv}`);
+
+    // v2: per-entry CRC-32 checksums over the UNCOMPRESSED content. manifest.files is an array of
+    // strings (v1) or objects {name, crc32, compressed} (v2); accept both. A mismatch warns and
+    // CONTINUES — a single corrupt entry must not hard-fail the whole recording.
+    const filesList = manifest.files;
+    if (Array.isArray(filesList)) {
+      for (const f of filesList) {
+        if (f && typeof f === "object" && typeof f.name === "string" && typeof f.crc32 === "string") {
+          const data = files.get(f.name);
+          if (data && crc32Hex(data) !== f.crc32.toLowerCase()) {
+            console.warn(`QaLens: crc32 mismatch for ${f.name}`);
+          }
+        }
+      }
+    }
+
     const start = manifest.startMillis || 0;
     const end = manifest.endMillis || start + 1;
 
@@ -119,6 +172,7 @@
 
     return {
       manifest,
+      formatVersion: fv ?? 1,
       start,
       end,
       duration: Math.max(1, end - start),
@@ -133,6 +187,8 @@
       state: jsonOf(files, "state.json", []),
       marks: jsonOf(files, "marks.json", []),
       report: textOf(files, "report.txt"),
+      // C12: the self-describing AI brief (for_ai.md) embedded by the recorder.
+      forAi: textOf(files, "for_ai.md"),
     };
   }
 

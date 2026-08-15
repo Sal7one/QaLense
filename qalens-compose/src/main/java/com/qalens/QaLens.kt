@@ -87,6 +87,10 @@ object QaLens {
             return
         }
         currentActivityRef?.get()?.let { updateDeviceAndScreen(it) }
+        // Network source may have been flipped in configure() after install — apply it lazily.
+        if (configState.value.networkFromChucker) {
+            appContext?.let { QaLensChuckerSource.ensureRegistered(it) }
+        }
         markAnalysisDirty()
     }
 
@@ -287,6 +291,9 @@ object QaLens {
         QaLensCrashHandler.install()
         QaLensConnectivity.start(application)
         QaLensMemoryMonitor.start(application)
+        // Feature flag: networkFromChucker → Chucker's TransactionListener becomes the network
+        // source (QaLensOkHttpInterceptor turns pass-through). Idempotent + logs a fallback note.
+        if (configState.value.networkFromChucker) QaLensChuckerSource.ensureRegistered(application)
     }
 
     fun setScreen(name: String, route: String? = null) {
@@ -423,6 +430,14 @@ object QaLens {
             QaLensScreenCapture.setOverlayVisible(activity, true)
         }
         log("Panic restore: overlay re-attached, recording discarded, state reset.")
+
+        // A5: safety net — if a recording is somehow still flagged and the recorder reports no
+        // recent frames (>15s — stuck capture, e.g. FLAG_SECURE), force-clear the flag.
+        if (uiStateMutable.value.isRecording && !QaLensSessionRecorder.hasRecentFrames(15_000L)) {
+            QaLensSessionRecorder.cancel()
+            uiStateMutable.update { it.copy(isRecording = false) }
+            log("Panic restore: stuck recording with no recent frames force-cleared.")
+        }
     }
 
     /**

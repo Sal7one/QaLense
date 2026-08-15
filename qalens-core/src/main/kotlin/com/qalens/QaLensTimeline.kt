@@ -19,6 +19,7 @@ enum class TimelineKind {
     ACTION,      // app-reported business event (QaLens.event)
     NETWORK,     // an API call
     ERROR,       // a failure (network 4xx/5xx, error log, or app-reported)
+    ASSERTION,   // macro assertion pass/fail
     LOG,         // generic log / breadcrumb
     SCREENSHOT   // evidence captured
 }
@@ -46,9 +47,11 @@ object TimelineMerger {
             val msg = r(e.message)
             val isNav = e.type == QaEventType.BREADCRUMB &&
                 (msg.startsWith("Navigation") || msg.startsWith("Navigate"))
+            val isAssertion = msg.startsWith("assertion", ignoreCase = true) || e.tag == "qalens.assertion"
             val looksError = msg.contains("error", true) || msg.contains("fail", true) ||
                 msg.contains("exception", true) || msg.contains("crash", true)
             val kind = when {
+                isAssertion -> TimelineKind.ASSERTION
                 isNav -> TimelineKind.NAVIGATION
                 e.type == QaEventType.EVENT -> if (looksError) TimelineKind.ERROR else TimelineKind.ACTION
                 looksError -> TimelineKind.ERROR
@@ -64,7 +67,7 @@ object TimelineMerger {
                     else -> msg
                 },
                 detail = if (kind == TimelineKind.ACTION && e.tag != null && r(e.tag) != msg) msg else null,
-                isError = kind == TimelineKind.ERROR
+                isError = if (kind == TimelineKind.ASSERTION) msg.contains('✕') else kind == TimelineKind.ERROR
             )
         }
 
@@ -120,7 +123,7 @@ object ReproStepGenerator {
                 TimelineKind.ACTION -> steps += "Trigger: ${e.title}"
                 TimelineKind.NETWORK -> { /* network is context, not a user step */ }
                 TimelineKind.ERROR -> steps += "Observe: ${e.title}"
-                TimelineKind.LOG, TimelineKind.SCREENSHOT -> { /* omit from steps */ }
+                TimelineKind.LOG, TimelineKind.SCREENSHOT, TimelineKind.ASSERTION -> { /* omit from steps */ }
             }
         }
 

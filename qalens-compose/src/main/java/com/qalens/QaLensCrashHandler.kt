@@ -32,9 +32,22 @@ internal object QaLensCrashHandler {
         previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             recordCrash(thread, throwable, CrashType.CRASH)
+            autoFinalizeRecordingIfActive()
             previousHandler?.uncaughtException(thread, throwable)
         }
         startAnrWatchdog()
+    }
+
+    /**
+     * R10: on an uncaught crash, finalize any in-flight recording (saved to the recordings dir,
+     * no share sheet) BEFORE delegating to the previous handler, so QA keeps evidence of the crash
+     * that killed the app. Runs on the crashing thread, fully guarded — never pushError here (the
+     * app is dying), just log.
+     */
+    private fun autoFinalizeRecordingIfActive() {
+        if (!QaLens.state.value.isRecording) return
+        runCatching { QaLensSessionRecorder.autoFinalize() }
+            .onFailure { android.util.Log.w("QaLensCrashHandler", "Recording auto-finalize failed: ${it.message}") }
     }
 
     /** Record a coroutine exception forwarded by [QaLensCoroutineExceptionHandler] (B7). */

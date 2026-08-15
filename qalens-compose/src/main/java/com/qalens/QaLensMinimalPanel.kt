@@ -186,9 +186,21 @@ internal fun QaLensMinimalPanel(
                 ) {
                     Text("▶", color = MTeal1, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.width(10.dp))
-                    Column {
+                    Column(Modifier.weight(1f)) {
                         Text(macro.name, color = MText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Text("${macro.steps.size} steps", color = MMuted, fontSize = 10.sp)
+                    }
+                    // B15: last-run pass/fail chip (in-memory only).
+                    QaLensMacros.lastRunResult(macro.name)?.let { r ->
+                        Text(
+                            if (r.passed) "✓" else "✕",
+                            color = if (r.passed) MGreen1 else MRed1,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .background((if (r.passed) MGreen1 else MRed1).copy(alpha = 0.16f), CircleShape)
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
                     }
                 }
             }

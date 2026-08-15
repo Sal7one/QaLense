@@ -13,6 +13,9 @@ import timber.log.Timber
  */
 class QaLensTimberTree : Timber.Tree() {
     override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+        // Feature flag: captureLogs=false turns this tree into a no-op (explicit QaLens
+        // event()/log()/breadcrumb() calls still work — only automatic capture is gated).
+        if (!QaLens.config.value.captureLogs) return
         val full = if (t != null) "$message — ${t.javaClass.simpleName}: ${t.message}" else message
         QaLens.timberLog(priority, tag, full)
     }

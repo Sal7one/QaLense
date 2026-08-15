@@ -10,6 +10,10 @@ player, or CI). Every `.sal` ships with a precomputed `analysis.json` digest and
 QA uses it without Android Studio. Developers integrate it once. Engineers stop asking "what build?",
 "what screen?", "what steps?", "what API failed?", "what flags were on?", and "can you reproduce it?"
 
+> **⚡ 60-second demo:** `./demo.sh` starts the mock webhook backend + the web player and opens
+> both — then `./demo.sh curl` drives every hook, `./demo.sh android` scripts the full mobile
+> flow, and `./demo.sh test` runs every suite. The full tour is [`DEMO.md`](DEMO.md).
+>
 > **New here?** Read [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — a comprehensive guide for QA testers,
 > app developers, and library contributors. Integrating into your own app? Follow
 > [`integration.md`](integration.md) — a copy-paste guide precise enough for an AI agent.
@@ -133,12 +137,37 @@ own `analysis.json.stats` — triage without unzipping). The backend's HTTP stat
 are shown right under the recording. A **Test endpoint** button validates the URL with a
 metadata-only ping.
 
+### Mock backend & hooks (test the webhook without a server)
+
+`backend/server.py` is a **zero-dependency (stdlib-only) local mock** of your AI-analysis backend,
+so you can exercise both QaLens hooks end-to-end without standing up a real service. Run it:
+
+```bash
+python3 backend/server.py                  # http://0.0.0.0:8000  (dashboard: http://127.0.0.1:8000/)
+adb reverse tcp:8000 tcp:8000              # emulator → host port
+```
+
+Then point the **Control Room** webhook at `http://127.0.0.1:8000/webhook` and hit
+**Test endpoint**; uploads (multipart `.sal` + `X-QaLens-*` headers) land on the dashboard with a
+deterministic mock AI verdict. The **web player** hooks in via ⚙ Settings → **Backend URL** =
+`http://127.0.0.1:8000` → **⇪ Send to backend** (multipart `.sal` → `/webhook`, JSON summary →
+`/api/ingest`). Self-test:
+
+```bash
+python3 backend/tests/test_backend.py      # 11 end-to-end tests
+```
+
+Full endpoints, curl examples, data layout, and how to swap the mock verdict for a real AI call:
+[`backend/README.md`](backend/README.md).
+
 ### Web player (no Android needed)
 
 `web/` is a **zero-dependency, offline** `.sal` viewer ("Mission Control") — open `web/index.html`
 (or `cd web && python3 -m http.server 8000`), then drop a `.sal` or click **Watch demo session**.
-Filmstrip, error-marked scrubber, playback speed, theatre/fullscreen, six synced tracks (incl.
-**Screens** and auto-**Insights**), IndexedDB instant-replay recents, markdown **Export**, and
+Filmstrip, error-marked scrubber, playback speed, theatre/fullscreen, seven synced tracks (incl.
+**Screens**, auto-**Insights**, and the **AI Brief** — `for_ai.md`, key `7`), ⭐ **mark moments**
+(key `m`, scrubber stars + `marks.json`), IndexedDB instant-replay recents, markdown **Export**,
+an opt-in **Backend URL** + **⇪ Send to backend** hook, a responsive **mobile/touch layout**, and
 deep links (`?sample&t=24.6` opens the demo AT a moment). CLI:
 `node web/tools/sal_report.js session.sal [--json]` prints a Jira-ready report and exits 1 on
 failures — a ready-made CI gate. See [`web/README.md`](web/README.md).
@@ -151,6 +180,13 @@ OkHttpClient.Builder().addInterceptor(QaLensOkHttpInterceptor())
 
 // Logs
 Timber.plant(QaLensTimberTree())
+
+// Capture feature flags (optional) — decide what feeds the tracks:
+//   captureNetwork = false   → interceptor becomes a pure pass-through
+//   captureLogs = false      → the Timber tree drops every line
+//   networkFromChucker = true → Chucker is the network source (TransactionListener),
+//                              no QaLens interceptor needed, nothing double-counted
+// analysis.json.coverage records each mode so the .sal stays honest either way.
 
 // App-owned data → reports + .sal
 QaLens.registerDataSource("Preferences") { mapOf("theme" to prefs.theme) }
@@ -206,9 +242,10 @@ Failure), and a DataStore-style preferences flow (toggling dark mode emits a cha
 
 ```bash
 ./gradlew :sample-app:assembleDebug
-./gradlew :qalens-core:test            # 49 unit tests: redaction, scoring, classifier, repro,
+./gradlew :qalens-core:test            # 110 unit tests: redaction, scoring, classifier, repro,
                                        # network health, contracts/scenarios, .sal encoders
 node web/test/read.test.js             # web .sal reader regression test (reads web/sample.sal)
+python3 backend/tests/test_backend.py  # mock backend end-to-end tests (11)
 ```
 
 > Note: `assembleRelease` can fail in `lintVitalAnalyzeRelease` under **JDK 25** (an AGP-lint /

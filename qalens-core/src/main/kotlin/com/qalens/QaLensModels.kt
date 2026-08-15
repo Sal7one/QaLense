@@ -255,7 +255,15 @@ data class NetworkEvent(
     val responseBodyBytes: Long = 0,
     val error: String? = null,
     /** Connectivity at request time — distinguishes "server 500" from "device lost WiFi". B5. */
-    val connectivity: ConnectivitySnapshot? = null
+    val connectivity: ConnectivitySnapshot? = null,
+    /**
+     * R8: captured request-body preview. Non-null only when [QaLensConfig.captureNetworkBodies] is
+     * on; truncated at 64&nbsp;KB, redacted, and only for text-ish content types (binary bodies get a
+     * `<binary N bytes>` placeholder). Re-redacted again at `.sal` encode time.
+     */
+    val requestBodyPreview: String? = null,
+    /** R8: captured response-body preview — same rules as [requestBodyPreview]. */
+    val responseBodyPreview: String? = null
 ) {
     val isError: Boolean get() = error != null || status in 400..599
     val statusLabel: String get() = if (error != null) "ERR" else if (status == 0) "…" else "$status"

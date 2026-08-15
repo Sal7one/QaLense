@@ -13,6 +13,10 @@
 const fs = require("fs");
 const path = require("path");
 
+// sal.js logs "QaLens: reading .sal formatVersion N" via console.info; route it to stderr so
+// `--json` stdout stays pure, machine-parseable JSON.
+console.info = (...args) => console.error(...args);
+
 // Minimal browser shim for the sal.js IIFE (same approach as web/test/read.test.js).
 global.window = global;
 if (!global.URL.createObjectURL) global.URL.createObjectURL = () => "blob://stub";
@@ -180,6 +184,10 @@ function insights(s) {
         lines.push(`- Stats: ${st.requests || 0} requests, ${st.failedRequests || 0} failed, ${st.slowRequests || 0} slow`);
       }
     }
+    // C12: include the recorder's own AI brief when present — it explains every schema + join rule.
+    if (s.forAi) {
+      lines.push(``, `## for_ai.md (recorder's self-describing brief)`, ``, s.forAi);
+    }
     console.log(lines.join("\n"));
   } else {
     const lines = [
@@ -207,6 +215,17 @@ function insights(s) {
     if (ins.length) {
       lines.push("", "**Auto-detected anomalies** (open the .sal in the player with `?t=<sec>`)");
       ins.forEach((i) => lines.push(`- \`t=${sec(i.ts - s.start)}\` ${i.title} — ${i.detail}`));
+    }
+    // C14: on-device anomalies the web heuristic didn't already flag (dedup by |Δt| < 1.5s).
+    const onDevice = (s.analysis?.anomalies || []).filter((an) =>
+      !ins.some((i) => Math.abs((i.ts - s.start) - (an.tMs || 0)) < 1500));
+    if (onDevice.length) {
+      lines.push("", "**On-device anomalies**");
+      onDevice.forEach((an) => lines.push(`- \`t=${sec(an.tMs)}\` [${an.kind}] ${an.title} — ${an.detail}`));
+    }
+    if ((s.marks || []).length) {
+      lines.push("", "**Bookmarks**");
+      s.marks.forEach((mk) => lines.push(`- \`t=${sec(mk.ts - s.start)}\` ★ ${mk.label || "bookmark"}${mk.severity ? " (" + mk.severity + ")" : ""}`));
     }
     console.log(lines.join("\n"));
   }

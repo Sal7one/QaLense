@@ -48,12 +48,18 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 private val PanelBg     = Color(0xE6111827)
 private val PanelText   = Color.White
@@ -95,10 +101,18 @@ internal fun QaLensInspectorPanel(
     var tab by remember { mutableStateOf(lastInspectorTab) }
     var customTabTitle by remember { mutableStateOf<String?>(null) }
     var globalSearch by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
     fun select(t: InspectorTab) { tab = t; lastInspectorTab = t; customTabTitle = null }
+    fun clearSearch() { globalSearch = ""; searchQuery = "" }
     val customTabs = remember { QaLens.registeredTabs() }
     fun selectCustom(title: String) { customTabTitle = title }
     val context = LocalContext.current
+
+    // B14: debounce the search input so each keystroke doesn't rescan the whole state.
+    LaunchedEffect(globalSearch) {
+        delay(150)
+        searchQuery = globalSearch
+    }
 
     Column(
         modifier = modifier
@@ -267,7 +281,13 @@ internal fun QaLensInspectorPanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color.White.copy(alpha = 0.06f), MaterialTheme.shapes.extraSmall)
-                .padding(horizontal = 8.dp, vertical = 5.dp),
+                .padding(horizontal = 8.dp, vertical = 5.dp)
+                .onPreviewKeyEvent { e ->
+                    if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) {
+                        clearSearch()
+                        true
+                    } else false
+                },
             singleLine = true,
             textStyle = TextStyle(color = PanelText, fontSize = 12.sp),
             cursorBrush = androidx.compose.ui.graphics.SolidColor(PanelAccent),
@@ -323,10 +343,15 @@ internal fun QaLensInspectorPanel(
 
         // ── Content area – Nav/Network/Repro own their scroll, others share one ─
         Box(Modifier.weight(1f)) {
-            val q = globalSearch.trim()
+            val q = searchQuery.trim()
             if (q.isNotEmpty()) {
                 // B14: global search — unified results across all tracks.
-                GlobalSearchResults(state, q, onSelectNode)
+                GlobalSearchResults(
+                    state, q,
+                    onOpenNode = { node -> QaLens.selectNode(node); select(InspectorTab.INSPECT); clearSearch() },
+                    onOpenNetwork = { select(InspectorTab.NETWORK); clearSearch() },
+                    onOpenLogs = { select(InspectorTab.LOGS); clearSearch() }
+                )
             } else {
                 val activeCustom = customTabs.firstOrNull { it.title == customTabTitle }
                 if (activeCustom != null) {
@@ -844,7 +869,16 @@ private fun NetworkTab(state: QaLensUiState) {
         Spacer(Modifier.height(6.dp))
 
         if (events.isEmpty()) {
-            Text("No requests yet. Add QaLensOkHttpInterceptor to your OkHttpClient.", color = PanelMuted, fontSize = 12.sp)
+            val cfg = QaLens.config.value
+            val hint = when {
+                !cfg.captureNetwork ->
+                    "Network capture disabled (QaLensConfig.captureNetwork = false)."
+                cfg.networkFromChucker ->
+                    "Waiting for Chucker transactions — source is Chucker (TransactionListener)."
+                else ->
+                    "No requests yet. Add QaLensOkHttpInterceptor to your OkHttpClient."
+            }
+            Text(hint, color = PanelMuted, fontSize = 12.sp)
         } else {
             // Health summary
             Row(
@@ -1506,87 +1540,135 @@ private fun openControlRoom(context: Context) {
     }
 }
 
+// ── B14: global search ───────────────────────────────────────────────────────
+
+private enum class SearchGroup(val header: String) {
+    EVENTS("Events"),
+    NETWORK("Network"),
+    LOGS("Logs"),
+    COMPONENTS("Components")
+}
+
+private data class SearchHit(
+    val group: SearchGroup,
+    val label: String,
+    val detail: String,
+    val node: InspectNode? = null
+)
+
 /** B14: Unified search across all tracks — events, network, logs, and nodes. */
 @Composable
 private fun GlobalSearchResults(
     state: QaLensUiState,
     query: String,
-    onSelectNode: ((InspectNode) -> Unit)? = null
+    onOpenNode: (InspectNode) -> Unit,
+    onOpenNetwork: () -> Unit,
+    onOpenLogs: () -> Unit
 ) {
-    val q = query.lowercase()
-    data class SearchResult(val kind: String, val label: String, val detail: String, val ts: Long)
-
-    val results = remember(state, q) {
-        val list = mutableListOf<SearchResult>()
-        state.events.forEach { ev ->
-            if (ev.message.lowercase().contains(q) || (ev.tag?.lowercase()?.contains(q) == true)) {
-                list.add(SearchResult(
-                    if (ev.type == QaEventType.LOG) "log" else "event",
-                    ev.tag ?: ev.type.name,
-                    ev.message,
-                    ev.timestampMillis
+    val hits = remember(state, query) {
+        val out = mutableListOf<SearchHit>()
+        // Events + logs (both live in state.events; LOG type surfaces under the Logs group).
+        state.events.forEach { e ->
+            if (e.message.contains(query, ignoreCase = true) ||
+                (e.tag?.contains(query, ignoreCase = true) == true)) {
+                out.add(SearchHit(
+                    group = if (e.type == QaEventType.LOG) SearchGroup.LOGS else SearchGroup.EVENTS,
+                    label = e.tag ?: e.type.name,
+                    detail = e.message
                 ))
             }
         }
+        // Network: url / method / error / status.
         state.networkEvents.forEach { ne ->
-            if (ne.url.lowercase().contains(q) || ne.method.lowercase().contains(q)) {
-                list.add(SearchResult("network", ne.method, ne.shortUrl, ne.timestampMillis))
+            if (ne.url.contains(query, ignoreCase = true) ||
+                ne.method.contains(query, ignoreCase = true) ||
+                (ne.error?.contains(query, ignoreCase = true) == true) ||
+                ne.status.toString().contains(query)) {
+                out.add(SearchHit(
+                    group = SearchGroup.NETWORK,
+                    label = ne.method,
+                    detail = buildString {
+                        append(ne.shortUrl)
+                        if (ne.status != 0) append(" · ${ne.status}")
+                        ne.error?.let { append(" · $it") }
+                    }
+                ))
             }
         }
+        // Components: qaName / testTag / text / contentDescription.
         state.nodes.forEach { node ->
-            if (node.label.lowercase().contains(q) || (node.testTag?.lowercase()?.contains(q) == true)) {
-                list.add(SearchResult("node", node.label, "<${node.testTag ?: node.role ?: "?"}>", 0L))
+            if (node.qaName?.contains(query, ignoreCase = true) == true ||
+                node.testTag?.contains(query, ignoreCase = true) == true ||
+                node.text.any { it.contains(query, ignoreCase = true) } ||
+                node.contentDescription.any { it.contains(query, ignoreCase = true) }) {
+                out.add(SearchHit(
+                    group = SearchGroup.COMPONENTS,
+                    label = node.label,
+                    detail = "<${node.testTag ?: node.role ?: "?"}>",
+                    node = node
+                ))
             }
         }
-        list.sortedBy { it.ts }
+        out
     }
 
     ScrollContent {
-        if (results.isEmpty()) {
+        if (hits.isEmpty()) {
             Text("No matches for \"$query\"", color = PanelMuted, fontSize = 12.sp,
                 modifier = Modifier.padding(16.dp))
         } else {
-            Text("${results.size} result${if (results.size != 1) "s" else ""} across all tracks",
+            Text("${hits.size} result${if (hits.size != 1) "s" else ""} across all tracks",
                 color = PanelMuted, fontSize = 11.sp,
                 modifier = Modifier.padding(bottom = 6.dp))
-            results.forEach { r ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            if (r.kind == "node") PanelAccent.copy(alpha = 0.08f)
-                            else Color.White.copy(alpha = 0.04f),
-                            MaterialTheme.shapes.extraSmall
-                        )
-                        .clickable(enabled = r.kind == "node" && onSelectNode != null) {
-                            if (r.kind == "node") {
-                                val node = state.nodes.firstOrNull { it.label == r.label }
-                                if (node != null) onSelectNode?.invoke(node)
-                            }
-                        }
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val chipColor = when (r.kind) {
-                        "event" -> PanelAccent
-                        "network" -> if (r.detail.contains("err", ignoreCase = true)) PanelError else PanelGreen
-                        "log" -> PanelWarn
-                        else -> PanelMuted
-                    }
-                    Text(r.kind.uppercase(), color = chipColor, fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .background(chipColor.copy(alpha = 0.12f), CircleShape)
-                            .padding(horizontal = 6.dp, vertical = 2.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(r.label, color = PanelText, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        Text(r.detail, color = PanelMuted, fontSize = 10.sp, maxLines = 1,
-                            overflow = TextOverflow.Ellipsis)
-                    }
+            SearchGroup.entries.forEach { group ->
+                val grouped = hits.filter { it.group == group }
+                if (grouped.isNotEmpty()) {
+                    Text(group.header, color = PanelText, fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                    grouped.forEach { hit -> SearchHitRow(hit, onOpenNode, onOpenNetwork, onOpenLogs) }
                 }
-                Spacer(Modifier.height(3.dp))
             }
         }
     }
+}
+
+@Composable
+private fun SearchHitRow(
+    hit: SearchHit,
+    onOpenNode: (InspectNode) -> Unit,
+    onOpenNetwork: () -> Unit,
+    onOpenLogs: () -> Unit
+) {
+    val chip = when (hit.group) {
+        SearchGroup.EVENTS -> "EVENT" to PanelAccent
+        SearchGroup.NETWORK -> "NETWORK" to PanelGreen
+        SearchGroup.LOGS -> "LOG" to PanelWarn
+        SearchGroup.COMPONENTS -> "COMPONENT" to PanelAccent
+    }
+    val onClick: (() -> Unit)? = when (hit.group) {
+        SearchGroup.COMPONENTS -> hit.node?.let { node -> ({ onOpenNode(node) }) }
+        SearchGroup.NETWORK -> onOpenNetwork
+        SearchGroup.EVENTS, SearchGroup.LOGS -> onOpenLogs
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White.copy(alpha = 0.04f), MaterialTheme.shapes.extraSmall)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(chip.first, color = chip.second, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .background(chip.second.copy(alpha = 0.12f), CircleShape)
+                .padding(horizontal = 6.dp, vertical = 2.dp))
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(hit.label, color = PanelText, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(hit.detail, color = PanelMuted, fontSize = 10.sp, maxLines = 1,
+                overflow = TextOverflow.Ellipsis)
+        }
+    }
+    Spacer(Modifier.height(3.dp))
 }
