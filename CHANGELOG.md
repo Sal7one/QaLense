@@ -79,4 +79,4 @@
 
 ### Distribution
 - `maven-publish` on all library modules: `./gradlew publishToMavenLocal` →
-  `com.qalens:qalens-*:0.9.0`. See [`integration_llm.md`](integration_llm.md).
+  `com.qalens:qalens-*:0.9.0`. See [`integration_skill.md`](integration_skill.md) (AI agents) and [`integration.md`](integration.md) (humans).

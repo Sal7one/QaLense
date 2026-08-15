@@ -11,8 +11,9 @@ Welcome. This guide gets three audiences productive fast:
 > whole sessions into shareable **`.sal`** files you replay with the screen synced to
 > timeline/network/logs/state — on-device, on the web, or via a CI report.
 
-> **In a hurry?** [`integration_llm.md`](../integration_llm.md) is the copy-paste integration guide
-> (written so even an AI agent can follow it mechanically).
+> **In a hurry?** [`integration_skill.md`](../integration_skill.md) is the AI-agent skill — inspect,
+> ask, then set the SDK up level by level — while [`integration.md`](../integration.md) is the
+> human copy-paste guide.
 
 ---
 
