@@ -721,6 +721,17 @@ kbd {
 .diff-section li.ok { color: var(--ok); }
 .diff-section li.warn { color: var(--warn); }
 
+/* ── Mark feature polish: severity chips + delete (mirrors v2) ── */
+.mark-del { opacity: 0; border: none; background: transparent; color: var(--faint, #5d6a85); border-radius: 6px; cursor: pointer; font-size: 12px; padding: 2px 7px; transition: opacity .12s, color .12s; }
+.row:hover .mark-del { opacity: 1; }
+.mark-del:hover { color: var(--err); background: color-mix(in srgb, var(--err) 10%, transparent); }
+.row-bookmark.sev-warning { border-left-color: var(--warn); }
+.row-bookmark.sev-bug { border-left-color: var(--err); }
+.sev-chip { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; border-radius: 5px; padding: 1px 6px; }
+.sev-chip.info { background: var(--accent-soft); color: var(--accent); }
+.sev-chip.warning { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.sev-chip.bug { background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err); }
+
 /* ── Makeover polish (2026-08) + C9/C10/C12 component styles ── */
 
 /* Accessible focus rings everywhere interactive */

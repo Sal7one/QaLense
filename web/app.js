@@ -1033,9 +1033,10 @@
     let items;
     if (track === "timeline") {
       const markItems = (S.marks || []).concat(S._localMarks || []).map((m) => ({
-        ts: m.ts, isError: false, main: "★ " + (m.label || "bookmark"), sub: m.severity || "",
+        ts: m.ts, isError: false, main: "★ " + (m.label || "bookmark"),
+        sub: (m.local ? "" : "from the recording · ") + (m.severity || "info"),
         tag: "bookmark", text: ("★ " + (m.label || "") + " " + (m.severity || "")).toLowerCase(),
-        _bookmark: true, _severity: m.severity,
+        _bookmark: true, _severity: m.severity || "info", _markId: m.id || null, _local: !!m.local,
       }));
       items = S.timeline.map((e) => ({
         ts: e.ts, isError: !!e.isError, main: e.title || "", sub: e.detail || "", tag: e.kind || "",
@@ -1104,14 +1105,19 @@
     const html = visible.map((i, idx) => {
       const cur = idx === curIdx;
       const future = follow && i.ts > playhead;
-      const bkmrk = i._bookmark ? " row-bookmark" : "";
+      const bkmrk = i._bookmark ? " row-bookmark sev-" + (i._severity || "info") : "";
+      const sevChip = i._bookmark ? '<span class="sev-chip ' + (i._severity || "info") + '">' + esc(i._severity || "info") + '</span>' : "";
+      const del = i._bookmark && i._local
+        ? '<button class="mark-del" data-mark-id="' + esc(i._markId) + '" title="Delete this mark">✕</button>'
+        : "";
       return `<div class="row ${i.isError ? "row-err" : ""} ${bkmrk} ${cur ? "row-cur" : ""} ${future ? "row-future" : ""}" data-ts="${i.ts}" data-detail="${i.detail ? esc(i.detail) : ""}" title="Click to jump the player to ${fmtFine(i.ts - S.start)}">
         <div class="row-time">${fmtFine(i.ts - S.start)}</div>
         <div class="row-body">
-          <div class="row-main">${i.pill || ""}${i.tag ? `<span class="kind">${esc(i.tag)}</span>` : ""}<span>${esc(i.main)}</span></div>
+          <div class="row-main">${i.pill || ""}${i.tag ? `<span class="kind">${esc(i.tag)}</span>` : ""}<span>${esc(i.main)}</span>${sevChip}</div>
           ${i.sub ? `<div class="row-sub">${esc(i.sub)}</div>` : ""}
           ${i.extra || ""}
         </div>
+        ${del}
         <button class="row-jump" title="Jump here">↧</button>
       </div>`;
     }).join("");
@@ -1235,10 +1241,23 @@
   // ── C9: in-viewer bookmarks ("⭐ Mark moment") ─────────────────────────────
   function markNow() {
     if (!S) return;
-    S._localMarks.push({ id: "m" + Date.now(), ts: playhead, label: "Marked by QA", severity: "info" });
+    const all = (S.marks || []).concat(S._localMarks || []);
+    if (all.some((m) => Math.abs(m.ts - playhead) < 300)) {
+      toast("This moment is already marked — delete the existing mark first", 3000);
+      return;
+    }
+    const label = (window.prompt("What happened at this moment?", "Marked by QA") || "").trim() || "Marked by QA";
+    const severity = (window.prompt("Severity: info / warning / bug", "info") || "info").trim().toLowerCase();
+    S._localMarks.push({ id: "m" + Date.now(), ts: playhead, label: label, severity: ["info", "warning", "bug"].includes(severity) ? severity : "info", local: true });
     renderScrubMarks();
     if (activeTrack === "timeline") renderTrack();
-    toast("★ Marked " + fmtFine(playhead - S.start) + " — included in Export (this viewer only, not the file)");
+    toast("★ Marked " + fmtFine(playhead - S.start) + " (" + (["info", "warning", "bug"].includes(severity) ? severity : "info") + ")");
+  }
+  function deleteMark(id) {
+    S._localMarks = (S._localMarks || []).filter((m) => m.id !== id);
+    renderScrubMarks();
+    if (activeTrack === "timeline") renderTrack();
+    toast("Mark removed");
   }
 
   // ── Backend hook: send the open session to the configured Mission Control backend ──
@@ -1511,6 +1530,8 @@
     // Row interactions: clicking ANY row (or insight/screen-visit) seeks the player to that exact
     // moment — forward or backward. Rows with a detail payload also expand it.
     els.trackList.onclick = (e) => {
+      const del = e.target.closest(".mark-del");
+      if (del) { deleteMark(del.dataset.markId); return; }
       const jump = e.target.closest(".row-jump");
       if (jump) {
         const holder = jump.dataset.ts ? jump : jump.closest("[data-ts]");

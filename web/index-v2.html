@@ -178,6 +178,23 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<!-- mark dialog -->
+<div class="mark-overlay" id="markOverlay" hidden>
+  <div class="mark-card">
+    <div class="mark-title">★ Mark this moment <span class="muted small" id="markTime"></span></div>
+    <input type="text" id="markLabel" placeholder="What happened here?" maxlength="120" />
+    <div class="mark-row">
+      <label class="mark-sev sev-info"><input type="radio" name="markSev" value="info" checked /> note</label>
+      <label class="mark-sev sev-warning"><input type="radio" name="markSev" value="warning" /> warning</label>
+      <label class="mark-sev sev-bug"><input type="radio" name="markSev" value="bug" /> bug</label>
+    </div>
+    <div class="mark-actions">
+      <button class="btn btn-ghost" id="markCancel">Cancel</button>
+      <button class="btn btn-primary" id="markSave">★ Mark</button>
+    </div>
+  </div>
+</div>
+
 <script src="sal.js"></script>
 <script src="app-v2.js"></script>
 </body>

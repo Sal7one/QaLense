@@ -90,6 +90,8 @@
     setAutoplay: $("setAutoplay"), setFollow: $("setFollow"),
     setBackend: $("setBackend"), backendOpen: $("backendOpen"),
     toast: $("toast"), compatNote: $("compatNote"), deviceFrame: $("deviceFrame"),
+    markOverlay: $("markOverlay"), markLabel: $("markLabel"), markTime: $("markTime"),
+    markSave: $("markSave"), markCancel: $("markCancel"),
   };
 
   // ── store ─────────────────────────────────────────────────────────────────
@@ -444,7 +446,7 @@
     const errs = evs.filter((e) => e.isError).slice(0, 200);
     const tick = (ts, cls, title) =>
       '<i class="' + cls + '" style="left:' + (((ts - store.S.start) / store.S.duration) * 100).toFixed(2) + '%"' + (title ? ' title="' + esc(title) + '"' : "") + '></i>';
-    const stars = allMarks().map((m) => tick(m.ts, "star", m.label || "bookmark")).join("");
+    const stars = allMarks().map((m) => tick(m.ts, "star", (m.label || "bookmark") + " · " + (m.severity || "info"))).join("");
     els.scrubTicks.innerHTML = plain.map((e) => tick(e.ts, "", "")).join("") + errs.map((e) => tick(e.ts, "err", "")).join("") + stars;
   }
 
@@ -474,9 +476,11 @@
     let items;
     if (track === "timeline") {
       const markItems = allMarks().map((m) => ({
-        ts: m.ts, isError: false, main: "★ " + (m.label || "bookmark"), sub: m.severity || "",
+        ts: m.ts, isError: false,
+        main: "★ " + (m.label || "bookmark"),
+        sub: (m.local ? "" : "from the recording · ") + (m.severity || "info"),
         tag: "bookmark", text: ("★ " + (m.label || "") + " " + (m.severity || "")).toLowerCase(),
-        _bookmark: true,
+        _bookmark: true, _sev: m.severity || "info", _markId: m.id || null, _local: !!m.local,
       }));
       items = store.S.timeline.map((e) => ({
         ts: e.ts, isError: !!e.isError, main: e.title || "", sub: e.detail || "", tag: e.kind || "",
@@ -532,14 +536,19 @@
     els.trackList.innerHTML = visible.map((i, idx) => {
       const cur = idx === curIdx;
       const future = prefs.follow && i.ts > store.playhead;
-      const bkmrk = i._bookmark ? " row-bookmark" : "";
+      const bkmrk = i._bookmark ? " row-bookmark sev-" + (i._sev || "info") : "";
+      const sevChip = i._bookmark ? '<span class="sev-chip ' + (i._sev || "info") + '">' + esc(i._sev || "info") + '</span>' : "";
+      const del = i._bookmark && i._local
+        ? '<button class="mark-del" data-mark-id="' + esc(i._markId) + '" title="Delete this mark">✕</button>'
+        : "";
       return '<div class="row ' + (i.isError ? "row-err" : "") + bkmrk + (cur ? " row-cur" : "") + (future ? " row-future" : "") + '" data-ts="' + i.ts + '" data-detail="' + (i.detail ? esc(i.detail) : "") + '">' +
         '<div class="row-time">' + fmtFine(i.ts - store.S.start) + '</div>' +
         '<div class="row-body">' +
-          '<div class="row-main">' + (i.pill || "") + (i.tag ? '<span class="kind">' + esc(i.tag) + '</span>' : "") + '<span>' + esc(i.main) + '</span></div>' +
+          '<div class="row-main">' + (i.pill || "") + (i.tag ? '<span class="kind">' + esc(i.tag) + '</span>' : "") + '<span>' + esc(i.main) + '</span>' + sevChip + '</div>' +
           (i.sub ? '<div class="row-sub">' + esc(i.sub) + '</div>' : "") +
           (i.extra || "") +
         '</div>' +
+        del +
         '<button class="row-jump">↧</button>' +
       '</div>';
     }).join("");
@@ -755,19 +764,52 @@
     const marks = allMarks();
     if (marks.length) {
       lines.push("", "**Bookmarks**");
-      marks.forEach((mk) => lines.push("- `t=" + ((mk.ts - store.S.start) / 1000).toFixed(1) + "` ★ " + (mk.label || "bookmark")));
+      marks.forEach((mk) => lines.push("- `t=" + ((mk.ts - store.S.start) / 1000).toFixed(1) + "` ★ " + (mk.label || "bookmark") + " (" + (mk.severity || "info") + ")"));
     }
     const text = lines.join("\n");
     (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
       .then(() => toast("Session summary copied as markdown ✓"))
       .catch(() => { console.log(text); toast("Clipboard blocked — summary printed to console"); });
   }
-  function markNow() {
+  // ── marks: label + severity, dedup, delete ──────────────────────────────
+  function markExistsNear(ts) {
+    return allMarks().some((m) => Math.abs(m.ts - ts) < 300);
+  }
+  function openMarkDialog() {
     if (!store.S) return;
-    store.localMarks.push({ id: "m" + Date.now(), ts: store.playhead, label: "Marked by QA", severity: "info" });
+    els.markTime.textContent = "at " + fmtFine(store.playhead - store.S.start);
+    els.markLabel.value = "";
+    const info = els.markOverlay.querySelector('.mark-sev input[value="info"]');
+    if (info) info.checked = true;
+    els.markOverlay.hidden = false;
+    els.markLabel.focus();
+  }
+  function closeMarkDialog() {
+    els.markOverlay.hidden = true;
+  }
+  function saveMark() {
+    if (!store.S) return;
+    if (markExistsNear(store.playhead)) {
+      closeMarkDialog();
+      toast("This moment is already marked — delete the existing mark first", 3000);
+      return;
+    }
+    const sev = (els.markOverlay.querySelector('input[name="markSev"]:checked') || {}).value || "info";
+    const label = els.markLabel.value.trim() || "Marked by QA";
+    store.localMarks.push({ id: "m" + Date.now(), ts: store.playhead, label: label, severity: sev, local: true });
+    closeMarkDialog();
     renderTicks();
     if (store.track === "timeline") renderTrack();
-    toast("★ Marked " + fmtFine(store.playhead - store.S.start));
+    toast("★ Marked at " + fmtFine(store.playhead - store.S.start) + " (" + sev + ")");
+  }
+  function deleteMark(id) {
+    store.localMarks = store.localMarks.filter((m) => m.id !== id);
+    renderTicks();
+    if (store.track === "timeline") renderTrack();
+    toast("Mark removed");
+  }
+  function markNow() {
+    openMarkDialog();
   }
   function buildWebSummary() {
     const m = store.S.manifest, a = m.app || {}, s = store.S.summary;
@@ -892,6 +934,13 @@
     els.jumpErr.onclick = jumpError;
     els.speedBtn.onclick = cycleSpeed;
     els.markBtn.onclick = markNow;
+    els.markSave.onclick = saveMark;
+    els.markCancel.onclick = closeMarkDialog;
+    els.markOverlay.addEventListener("click", (e) => { if (e.target === els.markOverlay) closeMarkDialog(); });
+    els.markLabel.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); saveMark(); }
+      if (e.key === "Escape") { e.stopPropagation(); closeMarkDialog(); }
+    });
     els.theaterBtn.onclick = () => setTheater(!prefs.theater);
     els.fsBtn.onclick = toggleFullscreen;
     setTheater(prefs.theater);
@@ -909,6 +958,8 @@
       renderTrack();
     };
     els.trackList.onclick = (e) => {
+      const del = e.target.closest(".mark-del");
+      if (del) { deleteMark(del.dataset.markId); return; }
       const jump = e.target.closest(".row-jump");
       if (jump) { const holder = jump.dataset.ts ? jump : jump.closest("[data-ts]"); if (holder) seek(Number(holder.dataset.ts), true); return; }
       const holder = e.target.closest("[data-ts]");
