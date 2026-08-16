@@ -872,8 +872,14 @@
       try {
         const res = await fetch("sample.sal");
         if (!res.ok) throw new Error("not found");
-        onLoaded(await SAL.read(await res.arrayBuffer()), "sample.sal", await res.arrayBuffer());
-      } catch { toast("Serve the folder over http (./demo.sh) or drag web/sample.sal in.", 4500); }
+        // BUGFIX: read the Response body ONCE — a second arrayBuffer() on a consumed body
+        // throws and the session never loaded (parse succeeded, onLoaded never ran).
+        const buf = await res.arrayBuffer();
+        onLoaded(await SAL.read(buf), "sample.sal", buf);
+      } catch (e) {
+        console.error(e);
+        toast("Demo failed to load" + (e && e.message ? ": " + e.message : "") + " — serve the folder (./demo.sh) or drag web/sample.sal in.", 5000);
+      }
     };
     ["dragenter", "dragover"].forEach((ev) => window.addEventListener(ev, (e) => { e.preventDefault(); els.dropzone.classList.add("hot"); }));
     ["dragleave", "drop"].forEach((ev) => window.addEventListener(ev, (e) => { e.preventDefault(); els.dropzone.classList.remove("hot"); }));
