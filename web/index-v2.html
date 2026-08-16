@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QaLens Mission Control v2 — .sal session viewer</title>
+<link rel="stylesheet" href="styles-v2.css" />
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.54.84l10-6.5a1 1 0 0 0 0-1.68l-10-6.5A1 1 0 0 0 8 5.5Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5a1 1 0 0 1 2 0v14a1 1 0 0 1-2 0V5Zm13.5.6a1 1 0 0 1 .5.87v11.06a1 1 0 0 1-1.53.85L10 13.27a1 1 0 0 1 0-1.7l8.47-5.1a1 1 0 0 1 1.03.13Z"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M18 5a1 1 0 0 0-2 0v14a1 1 0 0 0 2 0V5ZM4.5 5.6a1 1 0 0 0-.5.87v11.06a1 1 0 0 0 1.53.85L14 13.27a1 1 0 0 0 0-1.7l-8.47-5.1a1 1 0 0 0-1.03.13Z"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.3 1.9 20.2a1 1 0 0 0 .86 1.5h18.5a1 1 0 0 0 .85-1.5L13.7 3.3a1 1 0 0 0-1.7 0ZM12 9v5m0 3.2v.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Zm7.4-3.2a7.4 7.4 0 0 0-.12-1.32l2.02-1.57-2-3.46-2.38.96a7.4 7.4 0 0 0-2.28-1.32L14.26 2.8H9.74l-.38 2.49A7.4 7.4 0 0 0 7.08 6.6L4.7 5.65l-2 3.46 2.02 1.57a7.4 7.4 0 0 0 0 2.64L2.7 14.89l2 3.46 2.38-.96a7.4 7.4 0 0 0 2.28 1.32l.38 2.49h4.52l.38-2.49a7.4 7.4 0 0 0 2.28-1.32l2.38.96 2-3.46-2.02-1.57c.08-.43.12-.87.12-1.32Z"/></symbol>
+    <symbol id="i-theme" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.5 5.5 0 0 1-7.54-7.54C12.92 3.04 12.46 3 12 3Z"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M8 8V5.5A1.5 1.5 0 0 1 9.5 4h9A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H16M5.5 8h9A1.5 1.5 0 0 1 16 9.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 4 18.5v-9A1.5 1.5 0 0 1 5.5 8Z"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m14 6-6 6 6 6"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M13 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V8.5L13 3Zm0 0v5.5h5.5"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.2 2.6 4.8 13.1a.8.8 0 0 0 .62 1.3h4.83l-1.45 6.55a.8.8 0 0 0 1.4.68l8.4-10.49a.8.8 0 0 0-.62-1.3h-4.83l1.45-6.56a.8.8 0 0 0-1.4-.68Z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M12 3 5 5.8v5.4c0 4.3 2.99 8.33 7 9.8 4.01-1.47 7-5.5 7-9.8V5.8L12 3Z"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 4H4v5m11-5h5v5M9 20H4v-5m11 5h5v-5"/></symbol>
+    <symbol id="i-theater" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 21h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <span class="brand"><span class="brand-mark">◉</span>QaLens <span class="brand-sub">Mission Control v2</span></span>
+    <span class="session-chip" id="sessionChip" hidden>
+      <span class="dot"></span><span id="chipApp"></span><span class="sep">·</span><span id="chipEnv"></span><span class="sep">·</span><span class="score" id="chipScore"></span>
+    </span>
+    <span class="top-actions">
+      <button class="btn" id="exportBtn" hidden title="Copy session summary as markdown"><svg width="13" height="13"><use href="#i-copy"/></svg> Export</button>
+      <button class="btn btn-hook" id="sendBackendBtn" hidden title="Send this session to the configured backend"><svg width="13" height="13"><use href="#i-bolt"/></svg> Send to backend</button>
+      <button class="btn" id="compareBtn" hidden title="Compare with another .sal">Compare</button>
+      <button class="btn" id="exportSalBtn" hidden style="background:var(--ok);color:#04160c" title="Download the original .sal">Export .sal</button>
+      <button class="btn btn-ghost" id="closeSessionBtn" hidden title="Back to sessions"><svg width="13" height="13"><use href="#i-back"/></svg> Sessions</button>
+      <button class="btn btn-ghost btn-icon" id="settingsBtn" title="Settings"><svg width="15" height="15"><use href="#i-gear"/></svg></button>
+      <button class="btn btn-ghost btn-icon" id="themeBtn" title="Toggle theme"><svg width="14" height="14"><use href="#i-theme"/></svg></button>
+    </span>
+  </div>
+</header>
+<input id="fileInput" type="file" accept=".sal,.zip,application/zip" hidden />
+<input id="compareInput" type="file" accept=".sal,.zip,application/zip" hidden />
+
+<section class="landing" id="landing">
+  <div class="dropzone" id="dropzone">
+    <span class="drop-badge"><svg width="11" height="11"><use href="#i-shield"/></svg> 100% local · zero upload unless you opt in</span>
+    <h1>Replay any QA session,<br/><em>frame by frame</em></h1>
+    <p>Drop a <code>.sal</code> recording — screen, timeline, network, logs, state and auto-insights, perfectly synced on one playhead.</p>
+    <div class="drop-cta">
+      <button class="btn btn-primary btn-lg" id="openBtn">Choose .sal file</button>
+      <button class="btn btn-lg" id="sampleBtn">▶ Watch demo session</button>
+    </div>
+    <p class="muted small version-note">New design — the <a href="index.html">classic viewer</a> (and the <a href="index.html?appsal">.appsal editor</a>) still live at the old URL.</p>
+    <p class="muted small" id="compatNote"></p>
+  </div>
+</section>
+
+<main class="stage" id="stage" hidden>
+  <div class="statbar" id="statbar"></div>
+
+  <div class="layout">
+    <!-- player column -->
+    <div class="col-player">
+      <div class="card player-card">
+        <div class="device-frame" id="deviceFrame">
+          <div class="viewport" id="viewport">
+            <video id="video" hidden playsinline></video>
+            <img id="frame" alt="frame" hidden />
+            <div class="no-media" id="noMedia" hidden>No visual track in this recording</div>
+            <div class="screen-name" id="screenName"></div>
+          </div>
+        </div>
+        <div class="filmstrip" id="filmstrip" hidden></div>
+        <div class="transport">
+          <div class="scrub-row">
+            <div class="scrub-wrap"><div class="scrub-ticks" id="scrubTicks"></div><input type="range" id="scrubber" class="scrubber" min="0" max="1000" value="0" step="1" /></div>
+            <div class="time" id="time">00:00 / 00:00</div>
+          </div>
+          <div class="transport-row">
+            <button class="tbtn" id="stepPrev" title="Previous event (←)"><svg width="14" height="14"><use href="#i-prev"/></svg></button>
+            <button class="tbtn tbtn-main" id="playPause" title="Play / Pause (space)"><svg width="16" height="16"><use href="#i-play"/></svg></button>
+            <button class="tbtn" id="stepNext" title="Next event (→)"><svg width="14" height="14"><use href="#i-next"/></svg></button>
+            <button class="tbtn tbtn-err" id="jumpErr" title="Jump to first error (e)"><svg width="14" height="14"><use href="#i-alert"/></svg></button>
+            <button class="tbtn tbtn-mark" id="markBtn" title="Mark this moment (m)">★</button>
+            <button class="tbtn tbtn-speed" id="speedBtn" title="Playback speed (s)">1×</button>
+            <span class="spacer"></span>
+            <button class="tbtn" id="theaterBtn" title="Theatre mode (t)"><svg width="14" height="14"><use href="#i-theater"/></svg></button>
+            <button class="tbtn" id="fsBtn" title="Fullscreen (x)"><svg width="14" height="14"><use href="#i-expand"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- tracks column -->
+    <div class="col-mid">
+      <div class="tracks">
+        <div class="tracks-head">
+          <div class="tabs" id="trackTabs">
+            <button class="tab active" data-track="timeline">Timeline<span class="count" id="cTimeline"></span></button>
+            <button class="tab" data-track="network">Network<span class="count" id="cNetwork"></span></button>
+            <button class="tab" data-track="logs">Logs<span class="count" id="cLogs"></span></button>
+            <button class="tab" data-track="screens">Screens<span class="count" id="cScreens"></span></button>
+            <button class="tab" data-track="insights">Insights<span class="count" id="cInsights"></span></button>
+            <button class="tab" data-track="report">Report</button>
+            <button class="tab" data-track="aibrief">AI Brief</button>
+          </div>
+        </div>
+        <div class="tracks-tools" id="tracksTools">
+          <input type="search" id="search" placeholder="Filter this track…" />
+          <div class="chips" id="logChips" hidden>
+            <button class="chip active" data-level="all">All</button>
+            <button class="chip" data-level="EVENT">Events</button>
+            <button class="chip" data-level="LOG">Logs</button>
+            <button class="chip" data-level="BREADCRUMB">Crumbs</button>
+          </div>
+          <label class="follow"><input type="checkbox" id="followToggle" checked /> follow playhead</label>
+        </div>
+        <div class="substats" id="substats" hidden></div>
+        <div class="ai-bar" id="aiBar" hidden><span class="muted small">for_ai.md — the recording self-describes for AI analysis</span><button class="btn small" id="aiCopy">⧉ Copy AI brief</button></div>
+        <div class="track-list" id="trackList"></div>
+        <pre class="report" id="reportView" hidden></pre>
+      </div>
+    </div>
+
+    <!-- info rail -->
+    <div class="col-info">
+      <section class="card" data-card="summary">
+        <header class="card-head" data-toggle><h3>Summary</h3><span class="chev">▾</span></header>
+        <div class="card-body" id="summaryBody"></div>
+      </section>
+      <section class="card" data-card="state">
+        <header class="card-head" data-toggle><h3>Live State <span id="stateTime"></span></h3><span class="chev">▾</span></header>
+        <div class="card-body" id="stateBody"></div>
+      </section>
+      <section class="card" data-card="device">
+        <header class="card-head" data-toggle><h3>Device &amp; Build</h3><span class="chev">▾</span></header>
+        <div class="card-body" id="deviceBody"></div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<aside class="drawer" id="drawer" hidden>
+  <div class="drawer-head"><h3>Settings</h3><button class="btn btn-ghost btn-icon" id="drawerClose">✕</button></div>
+  <div class="drawer-body">
+    <div class="set-group"><h4>Appearance</h4>
+      <label class="set-row"><span>Theme</span><select id="setTheme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+      <label class="set-row"><span>Compact rows</span><input type="checkbox" id="setDensity" /></label>
+    </div>
+    <div class="set-group"><h4>Playback</h4>
+      <label class="set-row"><span>Default speed</span><select id="setSpeed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label>
+      <label class="set-row"><span>Autoplay on load</span><input type="checkbox" id="setAutoplay" /></label>
+      <label class="set-row"><span>Follow playhead</span><input type="checkbox" id="setFollow" checked /></label>
+    </div>
+    <div class="set-group"><h4>Mission Control backend (optional)</h4>
+      <p class="muted small">Nothing uploads unless you set a URL and press ⇪ Send to backend. Works with the bundled mock backend (python3 backend/server.py) or your real service.</p>
+      <label class="set-row"><span>Backend URL</span><input type="text" id="setBackend" placeholder="http://127.0.0.1:8000" /></label>
+      <div class="set-row"><span class="muted small">Posts to /webhook or /api/ingest</span><button class="btn small" id="backendOpen">Open dashboard ↗</button></div>
+    </div>
+    <div class="set-group"><h4>Keyboard</h4>
+      <div class="kbd-list">
+        <div><kbd>space</kbd> play / pause</div>
+        <div><kbd>←</kbd>/<kbd>→</kbd> prev / next event</div>
+        <div><kbd>e</kbd> first error · <kbd>s</kbd> speed · <kbd>f</kbd> follow</div>
+        <div><kbd>t</kbd> theatre · <kbd>x</kbd> fullscreen · <kbd>m</kbd> ⭐ mark</div>
+        <div><kbd>1–7</kbd> switch track · <kbd>?</kbd> help</div>
+      </div>
+    </div>
+    <p class="muted small">Preferences are stored locally (localStorage). No analytics, no telemetry.</p>
+  </div>
+</aside>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="sal.js"></script>
+<script src="app-v2.js"></script>
+</body>
+</html>

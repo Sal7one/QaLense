@@ -822,7 +822,9 @@
     if (heavy) {
       renderState();
       highlightFilmstrip();
-      if (prefs.follow && activeTrack !== "report" && activeTrack !== "aibrief") renderTrack();
+      // BUGFIX: while the compare/diff view is open, the track list is the diff — playback
+      // must not rebuild it with track rows (which used to silently destroy the diff).
+      if (prefs.follow && activeTrack !== "report" && activeTrack !== "aibrief" && !S2) renderTrack();
     }
   }
 
@@ -1159,6 +1161,9 @@
   }
 
   function setTrack(track) {
+    // BUGFIX: tab switching while the compare view is open used to silently replace the diff
+    // DOM with track rows. Close the compare first — the user asked for a track.
+    if (S2) { revokeS2Urls(); S2 = null; }
     activeTrack = track; prefs.track = track; LS.set("track", track);
     lastRenderSig = "";  // C2: force a rebuild on tab switch
     [...els.trackTabs.children].forEach((b) => b.classList.toggle("active", b.dataset.track === track));

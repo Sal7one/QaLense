@@ -1,5 +1,10 @@
 # QaLens Mission Control (web)
 
+> **v2 released:** the redesigned viewer lives at `index-v2.html` (new design system, modular
+> `app-v2.js` + `styles-v2.css`, sharing the same `sal.js` reader). The classic viewer
+> (`index.html`) and the .appsal editor are preserved unchanged. `demo.sh` opens v2 by default.
+
+
 A zero-dependency, offline web viewer for `.sal` session recordings produced by QaLens.
 
 ## Use it

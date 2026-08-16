@@ -67,7 +67,7 @@ cheat_sheet() {
   echo "  Mock backend dashboard ....... http://127.0.0.1:$BACKEND_PORT/"
   echo "  Showcase landing page ........ http://127.0.0.1:$WEB_PORT/web/landing.html"
   echo "  Integration guide (Kotlin) ... http://127.0.0.1:$WEB_PORT/web/integration.html"
-  echo "  Web player (Mission Control)  http://127.0.0.1:$WEB_PORT/web/index.html?sample&t=24.6   ← opens the demo .sal ON the failing transfer"
+  echo "  Web player (Mission Control v2) http://127.0.0.1:$WEB_PORT/web/index-v2.html?sample&t=24.6   ← the demo .sal ON the failing transfer"
   echo "  Web player → ⚙ Settings → Backend URL = http://127.0.0.1:$BACKEND_PORT  → then ⇪ Send to backend"
   echo "  Android (emulator) .......... adb reverse tcp:8000 tcp:8000"
   echo "  Android webhook URL .......... http://127.0.0.1:$BACKEND_PORT/webhook"
@@ -84,7 +84,7 @@ cmd_quick() {
   cheat_sheet
   open_url "http://127.0.0.1:$BACKEND_PORT/"
   open_url "http://127.0.0.1:$WEB_PORT/web/landing.html"
-  open_url "http://127.0.0.1:$WEB_PORT/web/index.html?sample&t=24.6"
+  open_url "http://127.0.0.1:$WEB_PORT/web/index-v2.html?sample&t=24.6"
   ok "The web player opened the bundled demo session right at the failing transfer (score 58, Backend/API)."
   info "Next: click ⇪ Send to backend in the player → watch the upload appear live on the backend dashboard."
 }
