@@ -10,6 +10,8 @@ player, or CI). Every `.sal` ships with a precomputed `analysis.json` digest and
 QA uses it without Android Studio. Developers integrate it once. Engineers stop asking "what build?",
 "what screen?", "what steps?", "what API failed?", "what flags were on?", and "can you reproduce it?"
 
+> **🤖 AI agents: start at [`HANDOVER.md`](HANDOVER.md)** — repo state, verification matrix, rules, and open work.
+>
 > **⚡ 60-second demo:** `./demo.sh` starts the mock webhook backend + the web player and opens
 > both — then `./demo.sh curl` drives every hook, `./demo.sh android` scripts the full mobile
 > flow, and `./demo.sh test` runs every suite. The full tour is [`DEMO.md`](DEMO.md).
