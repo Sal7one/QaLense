@@ -422,6 +422,7 @@
     saveRecent(session, name, size);
     els.landing.hidden = true;
     els.session.hidden = false;
+    SAL.showRecordingCoverage(session, els.session);
     els.exportBtn.hidden = false;
     els.exportSalBtn.hidden = false;
     els.closeSessionBtn.hidden = false;
@@ -516,6 +517,7 @@
   function renderDiff() {
     if (!S || !S2) return;
     const a = sessionSummary(S), b = sessionSummary(S2);
+    const partialComparison = SAL.recordingCoverage(S).partial || SAL.recordingCoverage(S2).partial;
     const scoreDelta = (b.score ?? 0) - (a.score ?? 0);
     const addedFail = b.failedRequests.filter((f) => !a.failedRequests.includes(f));
     const resolved = a.failedRequests.filter((f) => !b.failedRequests.includes(f));
@@ -525,7 +527,9 @@
     const isRegression = scoreDelta < 0 || addedFail.length > 0 || b.crashCount > a.crashCount;
     const ownerChanged = a.likelyOwner !== b.likelyOwner;
 
-    const regBanner = isRegression
+    const regBanner = partialComparison
+      ? `<div class="diff-banner err">Partial evidence — fixes and regressions cannot be confirmed from this comparison.</div>`
+      : isRegression
       ? `<div class="diff-banner err">⚠ Regression — score ${scoreDelta >= 0 ? "+" : ""}${scoreDelta}, +${addedFail.length} new failures, ${b.crashCount - a.crashCount >= 0 ? "+" : ""}${b.crashCount - a.crashCount} crashes</div>`
       : `<div class="diff-banner ok">✓ No regression — score ${scoreDelta >= 0 ? "+" : ""}${scoreDelta}, ${resolved.length} resolved</div>`;
 
@@ -546,7 +550,7 @@
       lists.push(`<div class="diff-section"><h4>New failures (not in baseline)</h4><ul>${addedFail.map((f) => `<li class="err">${esc(f)}</li>`).join("")}</ul></div>`);
     }
     if (resolved.length) {
-      lists.push(`<div class="diff-section"><h4>Resolved (fixed since baseline)</h4><ul>${resolved.map((f) => `<li class="ok">${esc(f)}</li>`).join("")}</ul></div>`);
+      lists.push(`<div class="diff-section"><h4>${partialComparison ? "Absent from retained evidence (fix unverified)" : "Resolved (fixed since baseline)"}</h4><ul>${resolved.map((f) => `<li class="ok">${esc(f)}</li>`).join("")}</ul></div>`);
     }
     if (addedScreens.length) {
       lists.push(`<div class="diff-section"><h4>New screens</h4><ul>${addedScreens.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>`);
@@ -1232,6 +1236,9 @@
       marks.forEach((mk) => lines.push(`- \`t=${((mk.ts - S.start) / 1000).toFixed(1)}\` ★ ${mk.label || "bookmark"}${mk.severity ? " (" + mk.severity + ")" : ""}`));
     }
     if (S.forAi) lines.push("", "**AI brief** (`for_ai.md`) is embedded in the .sal — paste it into your AI of choice.");
+    const coverage = SAL.recordingCoverage(S);
+    if (coverage.partial) lines.unshift(
+      "> **Partial recording — conclusions cover retained evidence only.**", ...coverage.warnings.map((w) => "> " + w), "");
     const text = lines.join("\n");
     (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
       .then(() => toast("Session summary copied as markdown ✓"))

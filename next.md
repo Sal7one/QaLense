@@ -6,7 +6,7 @@ for the latest verified behavior, commands, and limits.
 
 ## Verified baseline
 
-133 core tests, 5 body/stream tests, 1 no-op parity test, 44 web assertions, 18 backend tests.
+145 core tests, 5 body/stream tests, 1 no-op parity test, 58 web assertions, 20 backend tests.
 Debug and release APKs build; release dependency isolation is enforced by
 `:sample-app:verifyReleaseIsolation`. `./demo.sh test` includes the expanded matrix.
 Use JDK 17 and cached Gradle 9.1.0 as documented in HANDOVER.md.
@@ -26,17 +26,17 @@ Use JDK 17 and cached Gradle 9.1.0 as documented in HANDOVER.md.
 - Overview crashes row, copy-crash-with-evidence action, and jank sample counts.
 - Nearest-rank percentiles (earlier session), all tests retained.
 
+- Recording-owned histories preserve early evidence after UI eviction/clearing. Per-track entry
+  and size budgets, omissions and Android callback drops appear in coverage, replay and reports.
+- A device regression runner verifies actual archive retention and budget warnings.
+
 ## Next — evidence reliability
 
-1. **P1: recording-owned evidence storage.** Live UI buffers evict old items; record independently
-   and include explicit coverage/truncation reasons. Preserve redaction at every export boundary.
-2. **P1: visual privacy.** Raw screenshot/video pixels are not text-redacted. Design masking and
+1. **P1: visual privacy.** Raw screenshot/video pixels are not text-redacted. Design masking and
    test it; distinguish labels, structured tracks and captured pixels in the product contract.
-3. **P1: performance evidence completeness.** Timings and batch aggregation are corrected;
-   record dropped-frame callback counts and sustained history beyond the bounded live buffer.
-4. **P1: instrumented recovery tests.** Rotation, consent denial and late consent, stopped
+2. **P1: instrumented recovery tests.** Rotation, consent denial and late consent, stopped
    projection, backgrounding, disk full, and crash while saving. Emulator plus physical devices.
-5. **A3: facade decomposition.** AnalysisEngine is extracted; recording lifecycle, recording
+3. **A3: facade decomposition.** AnalysisEngine is extracted; recording lifecycle, recording
    window and crash registration now have pure core engines. ObservationCollector,
    RecordingController, PanelStateController, EvidenceService, ActivityBridge and the injected
    backend boundary are still incomplete.

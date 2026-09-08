@@ -469,6 +469,7 @@ object QaLens {
     fun markNetworkAvailable() = uiStateMutable.update { it.copy(networkAvailable = true) }
 
     fun logNetwork(event: NetworkEvent) {
+        QaLensSessionRecorder.evidence?.network(event)
         // OkHttp interceptors run on OkHttp's dispatcher thread; confine the state mutation to main
         // so the read-compute-write in recomputeAnalysis can't race with another concurrent call.
         mainHandler.post {
@@ -778,6 +779,7 @@ object QaLens {
     private fun pushEvent(event: QaEvent) {
         val config = configState.value
         val safe = event.copy(message = config.redact(event.message), tag = event.tag?.let(config::redact))
+        QaLensSessionRecorder.evidence?.event(safe)
         // Confine to main so events appended from coroutines/IO threads can't race the analysis read.
         if (Looper.myLooper() == Looper.getMainLooper()) {
             uiStateMutable.update { old ->
@@ -827,18 +829,21 @@ object QaLens {
 
     /** Drop a bookmark at the current timestamp. Visible in the panel and .sal marks.json track. */
     fun addBookmark(label: String, severity: BookmarkSeverity = BookmarkSeverity.INFO) {
-        val bookmark = Bookmark(label = label, severity = severity)
+        val bookmark = Bookmark(label = configState.value.redact(label), severity = severity)
+        QaLensSessionRecorder.evidence?.bookmark(bookmark)
         uiStateMutable.update { it.copy(bookmarks = (it.bookmarks + bookmark).takeLast(100)) }
         event("bookmark", "★ ${severity.name}: $label")
     }
 
     /** Remove a bookmark by its id. */
     fun removeBookmark(id: String) {
+        QaLensSessionRecorder.evidence?.removeBookmark(id)
         uiStateMutable.update { it.copy(bookmarks = it.bookmarks.filter { b -> b.id != id }) }
     }
 
     /** Clear all bookmarks. */
     fun clearBookmarks() {
+        QaLensSessionRecorder.evidence?.clearBookmarks()
         uiStateMutable.update { it.copy(bookmarks = emptyList()) }
     }
 
@@ -869,6 +874,7 @@ object QaLens {
     fun bridgeCrashes(bridge: QaLensCrashBridge) {
         crashBridge = bridge
         bridge.onCrash { crash ->
+            QaLensSessionRecorder.evidence?.crash(crash)
             // Host-reported crashes come from a vendor thread; hop to main.
             if (Looper.myLooper() == Looper.getMainLooper()) appendCrash(crash)
             else mainHandler.post { appendCrash(crash) }
@@ -889,6 +895,7 @@ object QaLens {
     // ── Connectivity (B5) ──────────────────────────────────────────────────────
     /** Called by [com.qalens.android.QaLensConnectivity] to update the current snapshot + transitions. */
     internal fun appendConnectivity(snapshot: ConnectivitySnapshot) {
+        QaLensSessionRecorder.evidence?.connectivity(snapshot)
         if (Looper.myLooper() == Looper.getMainLooper()) {
             uiStateMutable.update { old ->
                 old.copy(
@@ -913,6 +920,7 @@ object QaLens {
 
     /** Called by [QaLensMemoryMonitor] to append a memory sample (capped at 200). B8. */
     internal fun appendMemorySample(sample: MemorySample) {
+        QaLensSessionRecorder.evidence?.memory(sample)
         if (Looper.myLooper() == Looper.getMainLooper()) {
             uiStateMutable.update { old -> old.copy(memorySamples = (old.memorySamples + sample).takeLast(200)) }
         } else {

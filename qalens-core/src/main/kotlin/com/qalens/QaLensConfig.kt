@@ -156,9 +156,10 @@ data class RedactionRule(
                 Regex("(?i)(access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|password|passwd|secret|token)(\"?\\s*[:=]\\s*\"?)([^\"\\s,&}]+)"),
                 "$1$2[REDACTED]"
             ),
-            // Email addresses
+            // Email addresses. Start only at a local-part boundary; otherwise a long token with
+            // no @ is retried at every character, making body redaction quadratic.
             RedactionRule(
-                Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"),
+                Regex("(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"),
                 "[EMAIL_REDACTED]"
             ),
             // Credit-card-like numbers (13–16 digits, optional spaces/dashes). Runs before

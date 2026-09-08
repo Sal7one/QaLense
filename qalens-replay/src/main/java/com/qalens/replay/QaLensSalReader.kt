@@ -47,7 +47,8 @@ data class PlayerSession(
     val report: String,
     val videoFile: File?,
     /** Epoch-ms when the video track began (consent granted) — video position maps through this. */
-    val videoStartMs: Long? = null
+    val videoStartMs: Long? = null,
+    val recordingWarnings: List<String> = emptyList()
 ) {
     val durationMs: Long get() = (endMs - startMs).coerceAtLeast(1)
 
@@ -106,8 +107,26 @@ object QaLensSalReader {
             summary = parseSummary(dir),
             report = textOf(dir, "report.txt"),
             videoFile = videoFile,
-            videoStartMs = manifest.optLong("videoStartMillis", 0L).takeIf { it > 0L }
+            videoStartMs = manifest.optLong("videoStartMillis", 0L).takeIf { it > 0L },
+            recordingWarnings = parseRecordingWarnings(dir)
         )
+    }
+
+    private fun parseRecordingWarnings(dir: File): List<String> {
+        val text = textOf(dir, "analysis.json").ifBlank { return emptyList() }
+        val recording = JSONObject(text).optJSONObject("coverage")?.optJSONObject("recording")
+            ?: return emptyList() // Older files did not measure retention coverage.
+        val warnings = mutableListOf<String>()
+        val tracks = recording.optJSONObject("tracks")
+        tracks?.keys()?.forEach { name ->
+            val track = tracks.optJSONObject(name)
+            val dropped = track?.optLong("dropped", 0) ?: 0
+            if (dropped > 0) warnings += "$name: $dropped observations omitted."
+        }
+        if (recording.optBoolean("truncated") && warnings.isEmpty()) warnings += "Recording evidence was truncated."
+        val callbacks = recording.optLong("droppedFrameCallbacks", 0)
+        if (callbacks > 0) warnings += "Android dropped $callbacks frame-metrics callbacks."
+        return warnings
     }
 
     private fun parseSummary(dir: File): PSummary? {

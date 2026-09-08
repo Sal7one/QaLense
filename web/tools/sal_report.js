@@ -7,7 +7,9 @@
  * Reuses the same dependency-free reader the web player uses (web/sal.js). Built for CI: attach
  * .sal files as build artifacts and post this report to the PR / ticket automatically.
  * Exit code 1 when the session contains failures (failed requests or error timeline events),
- * so a pipeline step can gate on it. Needs Node 18+ (DecompressionStream).
+ * Exit code 2 for invalid input or reported evidence loss without an observed failure.
+ * A comparison with reported evidence loss cannot certify a fix.
+ * This lets a pipeline step gate on it. Needs Node 18+ (DecompressionStream).
  */
 "use strict";
 const fs = require("fs");
@@ -81,11 +83,14 @@ function insights(s) {
   const failed = s.network.filter((e) => e.error || e.status >= 400);
   const errors = s.timeline.filter((e) => e.isError);
   const ins = insights(s);
+  const coverage = SAL.recordingCoverage(s);
 
   // ── B11/C13: compare mode — diff against a baseline .sal ────────────────
   if (baselineFile) {
     const baseBuf = fs.readFileSync(baselineFile);
     const base = await SAL.read(baseBuf.buffer.slice(baseBuf.byteOffset, baseBuf.byteOffset + baseBuf.byteLength));
+    const baseCoverage = SAL.recordingCoverage(base);
+    const partialComparison = coverage.partial || baseCoverage.partial;
     const baseFailed = base.network.filter((e) => e.error || e.status >= 400).map((e) => `${e.method} ${shortPath(e.url)}`);
     const currFailed = failed.map((e) => `${e.method} ${shortPath(e.url)}`);
     const baseAnomalies = (base.analysis?.anomalies || []).map((x) => x.title || x.kind);
@@ -119,13 +124,17 @@ function insights(s) {
     }
     const resolved = baseFailed.filter((f) => !currFailed.includes(f));
     if (resolved.length) {
-      lines.push("", "**Resolved (fixed since baseline)**");
+      lines.push("", partialComparison ? "**Absent from retained evidence (fix unverified)**" : "**Resolved (fixed since baseline)**");
       resolved.forEach((f) => lines.push(`- \`${f}\``));
     }
-    lines.push("", `**Summary:** score ${scoreDelta >= 0 ? "+" : ""}${scoreDelta}, +${addedFailures.length} failed, -${resolved.length} resolved`);
+    lines.push("", `**Summary:** score ${scoreDelta >= 0 ? "+" : ""}${scoreDelta}, +${addedFailures.length} failed, -${resolved.length} ${partialComparison ? "absent (unverified)" : "resolved"}`);
     if (isRegression) lines.push("> ⚠ **Regression detected** — score dropped, new failures, or new crashes.");
+    const coverageWarnings = [...baseCoverage.warnings.map((w) => "Baseline: " + w),
+      ...coverage.warnings.map((w) => "Current: " + w)];
+    if (coverageWarnings.length) lines.unshift(
+      "> **Partial recording — conclusions cover retained evidence only.**", ...coverageWarnings.map((w) => "> " + w), "");
     console.log(lines.join("\n"));
-    process.exit(isRegression ? 1 : 0);
+    process.exit(isRegression ? 1 : partialComparison ? 2 : 0);
   }
 
   if (asJson) {
@@ -136,6 +145,7 @@ function insights(s) {
       likelyOwner: sum ? { category: sum.category, confidence: sum.confidence } : null,
       anomalies: ins.map((i) => ({ tSec: Number(sec(i.ts - s.start)), title: i.title, detail: i.detail })),
       deviceAnalysis: s.analysis || null,
+      recordingCoverage: coverage,
     }, null, 2));
   } else if (forAi) {
     // C12: AI-optimized output — structured markdown for LLM context windows.
@@ -188,6 +198,9 @@ function insights(s) {
     if (s.forAi) {
       lines.push(``, `## for_ai.md (recorder's self-describing brief)`, ``, s.forAi);
     }
+    const coverageWarnings = coverage.warnings;
+    if (coverageWarnings.length) lines.unshift(
+      "> **Partial recording — conclusions cover retained evidence only.**", ...coverageWarnings.map((w) => "> " + w), "");
     console.log(lines.join("\n"));
   } else {
     const lines = [
@@ -227,6 +240,9 @@ function insights(s) {
       lines.push("", "**Bookmarks**");
       s.marks.forEach((mk) => lines.push(`- \`t=${sec(mk.ts - s.start)}\` ★ ${mk.label || "bookmark"}${mk.severity ? " (" + mk.severity + ")" : ""}`));
     }
+    const coverageWarnings = coverage.warnings;
+    if (coverageWarnings.length) lines.unshift(
+      "> **Partial recording — conclusions cover retained evidence only.**", ...coverageWarnings.map((w) => "> " + w), "");
     console.log(lines.join("\n"));
   }
 
@@ -235,5 +251,5 @@ function insights(s) {
   const deviceFailures = (s.analysis?.anomalies || []).filter((an) =>
     ["failed_request","error_burst","crash","anr","coroutine_exception","connectivity_failure","assertion_failed","memory_spike"].includes(an.kind));
 
-  process.exit(failed.length || errors.length || deviceFailures.length ? 1 : 0);
+  process.exit(failed.length || errors.length || deviceFailures.length ? 1 : coverage.partial ? 2 : 0);
 })().catch((e) => { console.error("ERROR:", e.message || e); process.exit(2); });

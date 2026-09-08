@@ -2,6 +2,16 @@
 
 ## Unreleased — post-0.9.0
 
+### Recording retention — 2026-09-08
+- Preserve early logs, requests, crashes, timings, connectivity, memory, bookmarks and state
+  independently of dashboard history limits and log clearing.
+- Bound each recording track by entries and estimated size; disclose omissions and Android
+  dropped frame callbacks in analysis coverage, replay viewers and exported reports.
+- Block clean CLI/backend conclusions and unverified fixes when recordings report evidence loss.
+- Fix quadratic email redaction on long body tokens, discovered by the device overflow check.
+- Add twelve core tests, fourteen web/CLI assertions, two backend tests and a dependency-free
+  Android instrumentation runner for real archive retention and budget-overflow checks.
+
 ### Reliability audit — 2026-09-08
 - Restore true debug/release SDK separation and enforce the release runtime dependency graph.
 - Fix actual Android v2 archive decoding in web/CLI/backend and the upload digest header.

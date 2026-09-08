@@ -639,6 +639,7 @@
 
     els.landing.hidden = true;
     els.stage.hidden = false;
+    SAL.showRecordingCoverage(session, els.stage);
     els.exportBtn.hidden = false;
     els.sendBackendBtn.hidden = false;
     els.compareBtn.hidden = false;
@@ -703,6 +704,7 @@
   function renderDiff() {
     if (!store.S || !store.S2) return;
     const a = sessionModel(store.S), b = sessionModel(store.S2);
+    const partialComparison = SAL.recordingCoverage(store.S).partial || SAL.recordingCoverage(store.S2).partial;
     const scoreDelta = (b.score ?? 0) - (a.score ?? 0);
     const addedFail = b.failedRequests.filter((f) => !a.failedRequests.includes(f));
     const resolved = a.failedRequests.filter((f) => !b.failedRequests.includes(f));
@@ -722,7 +724,7 @@
       '</tbody></table>';
     const lists = [];
     if (addedFail.length) lists.push('<div class="diff-section"><h4>New failures (not in baseline)</h4><ul>' + addedFail.map((f) => '<li class="err">' + esc(f) + '</li>').join("") + '</ul></div>');
-    if (resolved.length) lists.push('<div class="diff-section"><h4>Resolved (fixed since baseline)</h4><ul>' + resolved.map((f) => '<li class="ok">' + esc(f) + '</li>').join("") + '</ul></div>');
+    if (resolved.length) lists.push('<div class="diff-section"><h4>' + (partialComparison ? "Absent from retained evidence (fix unverified)" : "Resolved (fixed since baseline)") + '</h4><ul>' + resolved.map((f) => '<li class="ok">' + esc(f) + '</li>').join("") + '</ul></div>');
     if (addedScreens.length) lists.push('<div class="diff-section"><h4>New screens</h4><ul>' + addedScreens.map((s) => '<li>' + esc(s) + '</li>').join("") + '</ul></div>');
     if (removedScreens.length) lists.push('<div class="diff-section"><h4>Screens no longer visited</h4><ul>' + removedScreens.map((s) => '<li>' + esc(s) + '</li>').join("") + '</ul></div>');
     if (newAnom.length) lists.push('<div class="diff-section"><h4>New anomalies</h4><ul>' + newAnom.map((an) => '<li class="warn">' + esc(an) + '</li>').join("") + '</ul></div>');
@@ -730,7 +732,7 @@
       '<div class="diff-view">' +
         '<div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0 0 10px">Session Diff</h3>' +
         '<button class="btn small" id="diffClose">✕ Close compare</button></div>' +
-        (isRegression ? '<div class="diff-banner err">⚠ Regression — score ' + (scoreDelta >= 0 ? "+" : "") + scoreDelta + ', +' + addedFail.length + ' new failures</div>' : '<div class="diff-banner ok">✓ No regression — score ' + (scoreDelta >= 0 ? "+" : "") + scoreDelta + ', ' + resolved.length + ' resolved</div>') +
+        (partialComparison ? '<div class="diff-banner err">Partial evidence — fixes and regressions cannot be confirmed from this comparison.</div>' : isRegression ? '<div class="diff-banner err">⚠ Regression — score ' + (scoreDelta >= 0 ? "+" : "") + scoreDelta + ', +' + addedFail.length + ' new failures</div>' : '<div class="diff-banner ok">✓ No regression — score ' + (scoreDelta >= 0 ? "+" : "") + scoreDelta + ', ' + resolved.length + ' resolved</div>') +
         table + lists.join("") +
       '</div>';
     els.trackList.hidden = false;
@@ -766,6 +768,9 @@
       lines.push("", "**Bookmarks**");
       marks.forEach((mk) => lines.push("- `t=" + ((mk.ts - store.S.start) / 1000).toFixed(1) + "` ★ " + (mk.label || "bookmark") + " (" + (mk.severity || "info") + ")"));
     }
+    const coverage = SAL.recordingCoverage(store.S);
+    if (coverage.partial) lines.unshift(
+      "> **Partial recording — conclusions cover retained evidence only.**", ...coverage.warnings.map((w) => "> " + w), "");
     const text = lines.join("\n");
     (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
       .then(() => toast("Session summary copied as markdown ✓"))

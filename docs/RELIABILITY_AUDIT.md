@@ -27,6 +27,27 @@ It is a targeted reliability overhaul, not a claim that every SDK path is now de
 | Frame timing | Nanosecond timings were interpreted as milliseconds, flagging normal frames frozen; updates fed back into rendering | Convert units with boundary tests; batch all observed frames once per second |
 | QA controls | No saving feedback; overview omitted captured crashes | Saving feedback across panels, crash details/copy action, jank sample count |
 
+## Recording retention follow-up
+
+Eight recording-owned tracks now survive dashboard eviction and log clearing. A synchronized
+journal freezes at stop before archive/video finalization and rejects late observations. Independent
+entry and estimated-size budgets preserve earliest admitted evidence and prevent one noisy track
+from evicting another. Explicit annotation removal is respected and counted separately from loss.
+State maps are copied at capture. Frame timings enter directly from the Android listener, before
+UI batching; Android-reported callback drops are counted.
+
+`analysis.json.coverage.recording` exposes retained/observed/dropped/removed counts, budgets and
+callback loss. Web and Android replay show a partial-recording warning; text/AI/JSON reports carry
+coverage. CLI exits 2 on reported loss without an observed failure (1 still indicates a failure).
+Partial comparisons cannot certify a fix. The mock backend returns unknown when evidence is
+partial and no stronger failure signal exists. Older archives remain readable.
+
+The oversized-body device check exposed quadratic scanning in the default email redaction regex.
+A local-part boundary prevents repeated rescans; two tests cover bounded matcher work and continued
+redaction of long addresses. This fixes the observed default-rule stall, not arbitrary custom regexes.
+
+See [the retention contract](RECORDING_RETENTION.md) for bounds and the device test command.
+
 ## Automated verification
 
 ```sh
@@ -36,8 +57,8 @@ python3 backend/tests/test_backend.py
 ./demo.sh test
 ```
 
-Results: 133 core tests, 5 body/stream tests, 1 no-op parity test, 44 web assertions,
-18 backend tests. Both APK variants and release isolation pass. The merged release manifest
+Results: 145 core tests, 5 body/stream tests, 1 no-op parity test, 58 web assertions,
+20 backend tests. Both APK variants and release isolation pass. The merged release manifest
 contains no QaLens control, recording, replay or file-provider components. Existing build-tool
 deprecation warnings remain.
 
@@ -60,14 +81,24 @@ archive with 17 frames, exactly one crash, the shell-induced exception text, and
 in analysis.json. The process terminated normally through Android's handler, and the sample
 relaunched. Crash-during-save, background-thread crashes and video crashes remain separate cases.
 
+## Device retention follow-up
+
+The platform instrumentation runner passed on emulator-5554 with the final APK. One real Android
+archive retained all 600 synthetic requests and all 600 logs after the dashboard was cleared,
+including the first HTTP 500. A second archive observed 100 oversized-body requests, retained 41
+and reported 59 omissions against its 8 MiB estimated network budget. Both archives decoded
+successfully. The same oversized case initially timed out during email redaction and passed after
+the default-pattern fix. The runner returns `INSTRUMENTATION_CODE: -1` on success.
+
+Loaded the actual limited Android archive in both web viewers: each visibly displayed the 59/41
+coverage warning and a partial-comparison notice. The Android replay warning is compiled but was
+not separately exercised on screen. Device artifacts remain outside version control. These short,
+synthetic sessions validate retention and serialization, not sustained rendering performance.
+
 ## Remaining work
 
 - Physical-device video consent, rotation, service termination, and storage exhaustion need a
   repeatable instrumentation matrix. Emulator checks do not establish compatibility across OEMs.
-- Capture buffers remain bounded UI buffers; long/busy sessions can lose earlier events before
-  export. A recording-owned event store and explicit truncation coverage are next.
-- Frame timings are now converted correctly and batched without deliberately favoring slow
-  frames. Dropped callbacks and limited retained history still need explicit coverage accounting.
 - Raw screenshots/video are not text-redacted. Annotation redaction does not mask pixels;
   visual privacy controls and accurate documentation need a dedicated pass.
 - The facade still mixes registration, UI state and Android lifecycle work. The new pure

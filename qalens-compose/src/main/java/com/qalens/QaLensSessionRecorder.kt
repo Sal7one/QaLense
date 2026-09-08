@@ -59,7 +59,10 @@ internal object QaLensSessionRecorder {
     private val mediaLock = Any()
     private var frameCounter = 0
     private val frameIndex = linkedMapOf<Long, String>()
-    private val stateSamples = mutableListOf<StateSample>()
+    @Volatile internal var evidence: RecordingEvidenceStore? = null
+        private set
+    private var capturedEvidence: RecordingEvidenceStore.Snapshot? = null
+    private var stopMs = 0L
     private var sessionDir: File? = null
     private var videoFile: File? = null
 
@@ -111,7 +114,9 @@ internal object QaLensSessionRecorder {
         savingStarted = false
         frameCounter = 0
         frameIndex.clear()
-        stateSamples.clear()
+        evidence = null
+        capturedEvidence = null
+        stopMs = 0L
         sessionDir = File(activity.cacheDir, "qalens/rec_${startMs}_${lifecycle.sessionId}").apply { mkdirs() }
         File(sessionDir, "frames").mkdirs()   // always — video mode keeps frames as a fallback
         videoFile = null
@@ -137,6 +142,7 @@ internal object QaLensSessionRecorder {
 
     /** Go live: hide the QaLens overlay, raise the stop chip, flip UI state, start the sampler. */
     private fun beginCapture(activity: Activity) {
+        startEvidence()
         // The stop chip lives in its OWN window — overlay mode (draw-over-apps) or a permission-free
         // window attached to the activity — so the frame recorder never captures it and nothing
         // blinks per frame. The in-app QaLens overlay is hidden for the whole session.
@@ -146,6 +152,19 @@ internal object QaLensSessionRecorder {
         QaLens.setRecording(true)
         handler.post(tick)
         handler.postDelayed(watchdog, WATCHDOG_TIMEOUT_MS) // A5: start watchdog
+    }
+
+    private fun startEvidence() {
+        startMs = System.currentTimeMillis()
+        evidence = RecordingEvidenceStore(startMs)
+    }
+
+    private fun freezeEvidence() {
+        if (capturedEvidence != null) return
+        val store = evidence ?: return
+        capturedEvidence = store.close()
+        stopMs = System.currentTimeMillis()
+        evidence = null
     }
 
     fun stop(share: Boolean = true) {
@@ -160,6 +179,7 @@ internal object QaLensSessionRecorder {
         restoreOverlay()
         QaLens.setRecording(false)
         QaLens.breadcrumb("■ Recording stopped")
+        freezeEvidence()
         if (videoMode) {
             // Defer packaging until the service finalizes video.mp4 (onVideoComplete). The service
             // stop must never depend on a live activity — fall back to the app context.
@@ -185,6 +205,9 @@ internal object QaLensSessionRecorder {
         if (lifecycle.phase == RecordingLifecycle.Phase.SAVING) return // Never delete media under the writer.
         if (!recording && sessionDir == null) return
         lifecycle.cancel()
+        evidence?.close()
+        evidence = null
+        capturedEvidence = null
         handler.removeCallbacks(tick)
         handler.removeCallbacks(watchdog) // A5: stop watchdog
         QaLensSystemChip.hide()
@@ -225,7 +248,7 @@ internal object QaLensSessionRecorder {
             videoStartMs = System.currentTimeMillis()
             val activity = QaLens.currentActivity ?: activityRef?.get()
             if (activity != null) beginCapture(activity)
-            else { QaLens.setRecording(true); handler.post(tick) }  // no activity (backgrounded)
+            else { startEvidence(); QaLens.setRecording(true); handler.post(tick) }  // no activity (backgrounded)
             QaLens.breadcrumb("● Recording started (video)")
             QaLens.log("Screen recording started")
         }
@@ -264,6 +287,9 @@ internal object QaLensSessionRecorder {
         handler.post {
             if (path == null || !isAwaitingVideo(path)) return@post
             lifecycle.cancel()
+            evidence?.close()
+            evidence = null
+            capturedEvidence = null
             videoMode = false
             handler.removeCallbacks(tick)
             QaLensSystemChip.hide()
@@ -277,13 +303,13 @@ internal object QaLensSessionRecorder {
 
     private fun sampleState() {
         val s = QaLens.state.value
-        synchronized(mediaLock) { stateSamples += StateSample(
+        evidence?.state(StateSample(
             timestampMillis = System.currentTimeMillis(),
             screenName = s.screen.screenName,
             route = s.screen.route,
             featureFlags = s.featureFlags,
             dataSources = s.dataSources
-        ) }
+        ))
     }
 
     private fun captureFrame() {
@@ -347,13 +373,16 @@ internal object QaLensSessionRecorder {
         val activity = activityRef?.get() ?: QaLens.currentActivity
         val cfg = QaLens.config.value
         val id = lifecycle.sessionId
-        val endMs = System.currentTimeMillis()
+        freezeEvidence()
+        val captured = capturedEvidence ?: return
+        capturedEvidence = null
+        val endMs = stopMs
         val startMs = this.startMs
         val frameIndex = synchronized(mediaLock) { this.frameIndex.toMap() }
-        val stateSamples = synchronized(mediaLock) { this.stateSamples.toList() }
+        val stateSamples = captured.stateSamples
         val videoStartMs = this.videoStartMs
         if (Looper.myLooper() == Looper.getMainLooper()) QaLensFrameMetrics.flushPending()
-        val s = RecordingWindow.slice(QaLens.state.value, startMs, endMs)
+        val s = RecordingWindow.slice(captured.applyTo(QaLens.state.value), startMs, endMs)
         val cacheRoot = activity?.cacheDir ?: QaLens.appContext?.cacheDir ?: dir.parentFile
         val save = Runnable {
             try {
@@ -368,7 +397,7 @@ internal object QaLensSessionRecorder {
                 val repro = ReproStepGenerator.generate(timeline)
 
                 // Machine-readable digest + self-describing guide → every .sal is AI-ready on arrival.
-                val sessionCrashes = (s.crashes + listOfNotNull(crash)).distinctBy { it.timestampMillis to it.type }
+                val sessionCrashes = s.crashes
                     .filter { it.timestampMillis in startMs..endMs }
                 val sessionFrameMetrics = s.frameMetrics.filter { it.timestampMillis in startMs..endMs }
                 val sessionConnectivity = s.connectivityTransitions.filter { it.timestampMillis in startMs..endMs }
@@ -385,7 +414,8 @@ internal object QaLensSessionRecorder {
                         connectivityCount = sessionConnectivity.size,
                         networkCaptureEnabled = cfg.captureNetwork,
                         logCaptureEnabled = cfg.captureLogs,
-                        networkFromChucker = cfg.networkFromChucker
+                        networkFromChucker = cfg.networkFromChucker,
+                        recordingRetention = captured.retention
                     ),
                     startMillis = startMs,
                     endMillis = endMs,
@@ -415,7 +445,8 @@ internal object QaLensSessionRecorder {
                     "marks.json" to SalTracks.marks(s.bookmarks.filter { it.timestampMillis in startMs..endMs }),
                     "analysis.json" to analysisJson,
                     "for_ai.md" to QaLensAnalysis.aiGuide(),
-                    "report.txt" to QaLensReports.full(EvidenceBuilder.build(
+                    "report.txt" to (captured.retention.notes().takeIf { it.isNotEmpty() }
+                        ?.joinToString("\n", prefix = "Recording coverage:\n", postfix = "\n\n") ?: "") + QaLensReports.full(EvidenceBuilder.build(
                         snapshot = InspectionSnapshot(screen = s.screen, device = s.device, nodes = s.nodes,
                             warnings = s.warnings, testTags = s.nodes.mapNotNull { it.testTag }, events = windowEvents),
                         network = windowNetwork, config = cfg, featureFlags = s.featureFlags,

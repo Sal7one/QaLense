@@ -319,6 +319,25 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(verdict["severity"], "unknown")
         self.assertIn("Insufficient evidence", verdict["label"])
 
+    def test_19_partial_evidence_cannot_claim_healthy(self):
+        from server import mock_verdict
+        for recording in ({"truncated": True}, {"droppedFrameCallbacks": 4},
+                          {"truncated": False, "tracks": {"network": {"dropped": 3}}}):
+            with self.subTest(recording=recording):
+                verdict = mock_verdict({}, {"summary": {"score": 100},
+                    "analysis": {"coverage": {"recording": recording}}})
+                self.assertEqual(verdict["severity"], "unknown")
+                self.assertIn("omitted observations", verdict["summary"])
+
+    def test_20_known_failure_survives_partial_coverage(self):
+        from server import mock_verdict
+        for stats, expected in (({"crashes": 1}, "critical"), ({"failedRequests": 1}, "warning")):
+            with self.subTest(stats=stats):
+                verdict = mock_verdict({}, {"analysis": {"stats": stats,
+                    "coverage": {"recording": {"truncated": True}}}})
+                self.assertEqual(verdict["severity"], expected)
+                self.assertIn("omitted observations", verdict["summary"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -253,6 +253,9 @@ def mock_verdict(meta: dict, parsed: dict) -> dict:
     summary = parsed.get("summary") or {}
     analysis = parsed.get("analysis") or {}
     stats = analysis.get("stats") or {}
+    recording = (analysis.get("coverage") or {}).get("recording") or {}
+    partial = bool(recording.get("truncated") or recording.get("droppedFrameCallbacks") or
+                   any(track.get("dropped", 0) for track in (recording.get("tracks") or {}).values()))
     anomalies = analysis.get("anomalies") or []
 
     score = summary.get("score") if isinstance(summary.get("score"), int) else None
@@ -275,10 +278,14 @@ def mock_verdict(meta: dict, parsed: dict) -> dict:
         severity, label = "critical", "HIGH RISK — multiple failures"
     elif failed >= 1 or (score is not None and score < 70):
         severity, label = "warning", "Needs attention"
+    elif partial:
+        severity, label = "unknown", "Partial recording — evidence was omitted"
     else:
         severity, label = "ok", "No failures in captured evidence"
 
     evidence = []
+    if partial:
+        evidence.append("recording reports omitted observations; conclusions cover retained evidence only")
     if failed:
         evidence.append(str(failed) + " failed request(s)")
     if top_endpoint:

@@ -1,3 +1,5 @@
+<!-- Latest follow-up: recording-owned retention shipped. See docs/RECORDING_RETENTION.md,
+     docs/RELIABILITY_AUDIT.md and next.md before the historical sections below. -->
 # QaLens — Handover for AI Agents
 
 > **2026-09-08 update:** Read `docs/RELIABILITY_AUDIT.md` and the current `next.md` before relying

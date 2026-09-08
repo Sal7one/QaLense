@@ -223,6 +223,46 @@ function ok(cond, msg) {
   await rejects(badCount, "truncated central directory is rejected");
   await rejects(malformed.subarray(0, 12), "truncated ZIP has a clear error");
 
+  // Retention metadata drives both replay banners and every CLI output mode.
+  const partialAnalysis = { coverage: { recording: { truncated: true, droppedFrameCallbacks: 7,
+    tracks: { network: { observed: 3, retained: 1, dropped: 2 } } } }, stats: {}, anomalies: [] };
+  const partialCoverage = SAL.recordingCoverage({ analysis: partialAnalysis });
+  ok(partialCoverage.partial && partialCoverage.warnings.length === 2, "coverage exposes retention and callback losses");
+  ok(!SAL.recordingCoverage(s).known, "legacy retention coverage remains unknown");
+  ok(!SAL.recordingCoverage({ analysis: { coverage: { recording: { truncated: false, tracks: {} } } } }).partial,
+    "bounded recording with no reported loss stays untruncated");
+  ok(SAL.recordingCoverage({ analysis: { coverage: { recording: { truncated: false,
+    tracks: { logs: { dropped: 1, retained: 1 } } } } } }).partial, "track omissions override a false summary flag");
+  ok(SAL.recordingCoverage({ analysis: { coverage: { recording: { droppedFrameCallbacks: 3 } } } }).partial,
+    "callback loss alone marks performance evidence partial");
+  const tmp = fs.mkdtempSync(path.join(require("os").tmpdir(), "qalens-coverage-"));
+  try {
+    const manifest = Buffer.from(JSON.stringify({ formatVersion: 1, startMillis: 100, endMillis: 200 }));
+    function fixture(name, analysis, network = []) {
+      const target = path.join(tmp, name + ".sal");
+      fs.writeFileSync(target, zipStore([["manifest.json", manifest],
+        ["analysis.json", Buffer.from(JSON.stringify(analysis))],
+        ["network.json", Buffer.from(JSON.stringify(network))]]));
+      return target;
+    }
+    const partial = fixture("partial", partialAnalysis);
+    const clean = fixture("clean", { coverage: { recording: { truncated: false, tracks: {} } } });
+    const failing = fixture("failing", partialAnalysis, [{ method: "GET", url: "/failure", status: 500, ts: 101 }]);
+    const run = (...args) => require("child_process").spawnSync(process.execPath,
+      [path.join(__dirname, "..", "tools", "sal_report.js"), ...args], { encoding: "utf8" });
+    for (const mode of [[], ["--for-ai"], ["--json"]]) {
+      const report = run(partial, ...mode);
+      ok(report.status === 2, "partial evidence blocks clean CI result: " + (mode[0] || "markdown"));
+      ok(mode[0] === "--json" ? JSON.parse(report.stdout).recordingCoverage.partial : report.stdout.includes("Partial recording"),
+        "report displays evidence loss: " + (mode[0] || "markdown"));
+    }
+    ok(run(clean).status === 0, "no reported loss or failure preserves success exit code");
+    ok(run(failing).status === 1, "known failures take precedence over partial-evidence exit code");
+    const diff = run(clean, "--compare", failing);
+    ok(diff.status === 2 && diff.stdout.includes("fix unverified") && !diff.stdout.includes("fixed since baseline"),
+      "partial comparison cannot certify a fix or pass CI");
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+
   console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
   process.exit(failures === 0 ? 0 : 1);
 })().catch((e) => { console.error("ERROR", e); process.exit(1); });

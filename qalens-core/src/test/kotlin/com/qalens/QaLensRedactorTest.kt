@@ -90,4 +90,25 @@ class QaLensRedactorTest {
         val out = redact("user a@b.co and b@c.io both failed")
         assertFalse("@" in out)
     }
+    @Test fun emailRuleDoesLinearWorkOnLongNonEmailTokens() {
+        // Count matcher reads instead of asserting elapsed time (stable on slow CI/emulators).
+        val raw = "x".repeat(20_000)
+        var reads = 0
+        val counted = object : CharSequence {
+            override val length: Int get() = raw.length
+            override fun get(index: Int): Char {
+                check(++reads <= raw.length * 30) { "Email matcher repeatedly rescanned a long token" }
+                return raw[index]
+            }
+            override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = raw.subSequence(startIndex, endIndex)
+            override fun toString(): String = raw
+        }
+        val email = rules.single { it.replacement == "[EMAIL_REDACTED]" }
+        assertEquals(raw, email.pattern.replace(counted, email.replacement))
+    }
+
+    @Test fun emailBoundaryStillRedactsLongAddressesAndPunctuation() {
+        val local = "x".repeat(20_000)
+        assertEquals("Contact <[EMAIL_REDACTED]>, [EMAIL_REDACTED]!", redact("Contact <$local@example.com>, a+b@sub.example.org!"))
+    }
 }

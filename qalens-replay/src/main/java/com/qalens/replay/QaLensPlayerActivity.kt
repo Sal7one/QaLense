@@ -267,6 +267,13 @@ private fun PlayerScreen(session: PlayerSession, onClose: () -> Unit) {
 
         Spacer(Modifier.height(8.dp))
 
+        if (session.recordingWarnings.isNotEmpty()) {
+            Text("Partial recording — " + session.recordingWarnings.joinToString(" "),
+                color = Color(0xFFFFD180), fontSize = 11.sp,
+                modifier = Modifier.fillMaxWidth().heightIn(max = 72.dp)
+                    .verticalScroll(rememberScrollState()).padding(bottom = 8.dp))
+        }
+
         // Viewport — video (ExoPlayer) when present, else the nearest captured frame.
         // Flexible height (not a fixed aspect ratio): it shares the screen with the track pane
         // below, so Summary/Timeline/Logs always stay visible on phones. Media letterboxes inside.

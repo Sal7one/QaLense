@@ -219,5 +219,34 @@
     return parse(files);
   }
 
-  window.SAL = { read, unzip, parse };
+  // Additive metadata: older archives remain readable, with retention coverage unknown.
+  function recordingCoverage(session) {
+    const recording = session.analysis?.coverage?.recording;
+    if (!recording) return { known: false, partial: false, warnings: [] };
+    const warnings = [];
+    for (const [name, track] of Object.entries(recording.tracks || {})) {
+      if (Number(track.dropped) > 0)
+        warnings.push(`${name}: ${track.dropped} observations omitted, ${track.retained} retained.`);
+    }
+    if (recording.truncated && !warnings.length) warnings.push("Recording evidence was truncated.");
+    if (Number(recording.droppedFrameCallbacks) > 0)
+      warnings.push(`Android dropped ${recording.droppedFrameCallbacks} frame-metrics callbacks; performance statistics are partial.`);
+    return { known: true, partial: warnings.length > 0, warnings };
+  }
+
+  function showRecordingCoverage(session, container) {
+    let banner = container.querySelector(".recording-coverage");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.className = "recording-coverage";
+      banner.setAttribute("role", "status");
+      banner.style.cssText = "padding:12px 16px;background:#382b12;color:#ffe4a3;border:1px solid #967039;border-radius:8px;margin:8px;line-height:1.5;grid-column:1/-1";
+      container.prepend(banner);
+    }
+    const coverage = recordingCoverage(session);
+    banner.hidden = !coverage.partial;
+    banner.textContent = coverage.partial ? "Partial recording — " + coverage.warnings.join(" ") + " Conclusions cover captured evidence only." : "";
+  }
+
+  window.SAL = { read, unzip, parse, recordingCoverage, showRecordingCoverage };
 })();

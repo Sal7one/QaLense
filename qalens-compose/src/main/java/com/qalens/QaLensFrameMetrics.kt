@@ -59,6 +59,7 @@ internal object QaLensFrameMetrics {
 
     private val listener = @RequiresApi(Build.VERSION_CODES.N) object : Window.OnFrameMetricsAvailableListener {
         override fun onFrameMetricsAvailable(window: Window?, frameMetrics: FrameMetrics?, additionalData: Int) {
+            QaLensSessionRecorder.evidence?.droppedFrames(additionalData)
             val m = frameMetrics ?: return
             val total = m.getMetric(FrameMetrics.TOTAL_DURATION).toLong()
             if (total <= 0) return
@@ -68,7 +69,9 @@ internal object QaLensFrameMetrics {
             // Android reports nanoseconds. Batch all observed frames once per second;
             // publishing each frame into Compose state creates a render/measurement feedback loop.
             if (pending.isEmpty()) handler.postDelayed(flush, 1_000L)
-            pending += FrameMetricsSample.fromNanoseconds(total, layout, draw, gpu)
+            val sample = FrameMetricsSample.fromNanoseconds(total, layout, draw, gpu)
+            QaLensSessionRecorder.evidence?.frame(sample)
+            pending += sample
             if (pending.size >= 1000) flushPending()
 
         }

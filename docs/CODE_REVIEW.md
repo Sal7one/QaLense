@@ -36,13 +36,16 @@ handover. Detailed fixes, reasoning, verification commands and limits are in
   per second to avoid rendering feedback from per-frame StateFlow updates.
 - **UI:** saving status, recent-crash evidence, and jank sample counts now appear in QA controls.
 
+- **P1: early recording evidence was evicted by live UI limits.** A recording-owned bounded journal
+  now retains all eight tracks independently. Explicit entry/estimated-size budgets disclose omissions;
+  Android frame callback drops are counted. All replay viewers and CLI/backend verdicts flag loss.
+  A device runner exercises 600 requests/logs through the real SDK and deliberately overflows a budget.
+
 ## Open findings, in priority order
 
 | Priority | Finding | Next action |
 |---|---|---|
-| P1 | Recording exports still depend on capped live UI buffers | Recording-owned append store; state truncation explicitly in coverage |
 | P1 | Pixel content is not redacted by text rules | Visual masking/privacy controls; correct any claims that all pixels are redacted |
-| P1 | Dropped frame callbacks and bounded frame history are not described in coverage | Report missing samples and recording-owned performance history |
 | P1 | Android consent/rotation/storage/service recovery lacks full instrumentation coverage | Physical-device and emulator matrix, including interrupted saves |
 | P1 | Facade still owns too many responsibilities | Complete A3 services with injected dependencies and behavioral tests |
 | P2 | Custom regexes run without a time budget | Define bounded redaction policy and test adversarial patterns |

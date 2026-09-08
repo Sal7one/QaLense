@@ -28,7 +28,8 @@ object QaLensAnalysis {
         /** Config-driven capture modes — lets the digest say "disabled by config" vs "not installed". */
         val networkCaptureEnabled: Boolean = true,
         val logCaptureEnabled: Boolean = true,
-        val networkFromChucker: Boolean = false
+        val networkFromChucker: Boolean = false,
+        val recordingRetention: RecordingEvidenceStore.Retention? = null
     )
 
     fun digest(
@@ -51,6 +52,7 @@ object QaLensAnalysis {
 
         // ── Coverage notes: what is missing and why it matters ──────────────
         val notes = mutableListOf<String>()
+        coverage.recordingRetention?.let { notes += it.notes() }
         if (!coverage.networkCaptureEnabled)
             notes += "Network capture DISABLED via QaLensConfig.captureNetwork — network.json is blind by configuration."
         else if (coverage.networkFromChucker)
@@ -193,6 +195,7 @@ object QaLensAnalysis {
         return SalJson.obj(
             "schema" to SCHEMA,
             "coverage" to mapOf(
+                "recording" to coverage.recordingRetention?.asMap(),
                 "frames" to coverage.hasFrames,
                 "video" to coverage.hasVideo,
                 "network" to (coverage.networkCount > 0),
@@ -269,7 +272,9 @@ comparing `ts`. `analysis.json.anomalies[].tMs` are relative to t0.
 | `frames/*.jpg` or `video.mp4` | What the screen showed. Frames are ~2fps — fast glitches can fall between frames. |
 
 ## Rules
-1. **Respect `analysis.json.coverage`.** If a track is missing/empty, say so — do NOT infer health
+1. **Respect `analysis.json.coverage`.** Recording retention limits and Android callback drops
+   are reported in `coverage.recording` when available; any omitted observations limit conclusions.
+   If a track is missing/empty, say so — do NOT infer health
    from absent data (e.g. empty network.json with `networkInterceptorInstalled=false` means blind,
    not "no traffic").
 2. Anchor every claim to evidence: quote `ts`/`tMs`, endpoint, screen, or log line.

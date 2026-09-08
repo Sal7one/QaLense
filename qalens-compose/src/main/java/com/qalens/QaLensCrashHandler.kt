@@ -69,6 +69,7 @@ internal object QaLensCrashHandler {
             lastNetworkSummary = lastNet?.let { "${it.method} ${it.shortUrl} → ${it.statusLabel}" }
         )
         lastCrash = crash
+        QaLensSessionRecorder.evidence?.crash(crash)
         // Emit into the timeline + the crashes list (confined to main).
         mainHandler.post {
             QaLens.appendCrash(crash)
@@ -120,6 +121,7 @@ internal object QaLensCrashHandler {
             lastNetworkSummary = state.networkEvents.lastOrNull()?.let { "${it.method} ${it.shortUrl} → ${it.statusLabel}" }
         )
         lastCrash = crash
+        QaLensSessionRecorder.evidence?.crash(crash)
         mainHandler.post {
             QaLens.appendCrash(crash)
             QaLens.event("anr", "ANR: main thread blocked >${ANR_THRESHOLD_MS}ms on ${state.screen.displayName}")
