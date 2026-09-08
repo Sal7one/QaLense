@@ -46,6 +46,7 @@ import sys
 import threading
 import time
 import zipfile
+import gzip
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -202,29 +203,39 @@ class Store:
 # ---------------------------------------------------------------------------
 
 def parse_sal(payload: bytes) -> dict:
+    """Decode ZIP first, then v2 gzip JSON. Never turn corrupt evidence into a healthy verdict."""
     out = {"manifest": None, "summary": None, "analysis": None, "forAi": None}
     try:
         with zipfile.ZipFile(io.BytesIO(payload)) as zf:
             def read_text(name):
                 try:
-                    return zf.read(name).decode("utf-8", errors="replace")
+                    data = zf.read(name)
                 except KeyError:
                     return None
+                if name.endswith(".json") and data.startswith(b"\x1f\x8b"):
+                    data = gzip.decompress(data)
+                return data.decode("utf-8")
 
             def read_json(name):
                 text = read_text(name)
                 if text is None:
                     return None
-                try:
-                    return json.loads(text)
-                except json.JSONDecodeError:
-                    return {"_parseError": True, "_raw": text[:400]}
+                value = json.loads(text)
+                if not isinstance(value, dict):
+                    raise ValueError("Invalid object in " + name)
+                return value
+
             out["manifest"] = read_json("manifest.json")
+            if out["manifest"] is None:
+                raise ValueError("Missing manifest.json")
+            version = out["manifest"].get("formatVersion", 1)
+            if type(version) is not int or version not in (1, 2):
+                raise ValueError("Unsupported .sal formatVersion: " + str(version))
             out["summary"] = read_json("summary.json")
             out["analysis"] = read_json("analysis.json")
             out["forAi"] = read_text("for_ai.md")
-    except (zipfile.BadZipFile, OSError):
-        out["manifest"] = {"_parseError": True}
+    except (zipfile.BadZipFile, OSError, ValueError, EOFError, RuntimeError, zlib.error) as exc:
+        raise ValueError("Invalid .sal recording: " + str(exc)) from exc
     return out
 
 
@@ -256,14 +267,16 @@ def mock_verdict(meta: dict, parsed: dict) -> dict:
             top_endpoint = ep.get("endpoint")
             break
 
-    if crashes:
+    if not summary and not stats:
+        severity, label = "unknown", "Insufficient evidence"
+    elif crashes:
         severity, label = "critical", "CRASH — likely release blocker"
     elif failed >= 3 or (score is not None and score < 50):
         severity, label = "critical", "HIGH RISK — multiple failures"
     elif failed >= 1 or (score is not None and score < 70):
         severity, label = "warning", "Needs attention"
     else:
-        severity, label = "ok", "Looks healthy"
+        severity, label = "ok", "No failures in captured evidence"
 
     evidence = []
     if failed:
@@ -273,7 +286,7 @@ def mock_verdict(meta: dict, parsed: dict) -> dict:
     if crashes:
         evidence.append(str(crashes) + " crash(es)")
     if not evidence:
-        evidence.append("no failure signal in this session")
+        evidence.append("no analysis or summary available" if severity == "unknown" else "no failure signal in captured evidence")
 
     verdict = {
         "generatedAt": int(time.time() * 1000),
@@ -500,7 +513,10 @@ class Handler(BaseHTTPRequestHandler):
                                       query, source)
 
     def _ingest_sal_bytes(self, payload: bytes, name: str, query: str, source: str):
-        parsed = parse_sal(payload)
+        try:
+            parsed = parse_sal(payload)
+        except ValueError as exc:
+            return self._json(400, {"ok": False, "error": str(exc)})
         manifest = parsed.get("manifest") or {}
         summary = parsed.get("summary") or {}
         analysis = parsed.get("analysis") or {}

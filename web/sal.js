@@ -21,30 +21,45 @@
     const len = dv.byteLength;
     const min = Math.max(0, len - 22 - 0xffff);
     for (let i = len - 22; i >= min; i--) {
-      if (u32(dv, i) === SIG_EOCD) return i;
+      if (u32(dv, i) === SIG_EOCD && i + 22 + u16(dv, i + 20) === len) return i;
     }
     throw new Error("Not a valid .sal/ZIP (no end-of-central-directory record).");
+  }
+
+  function requireRange(dv, offset, size, label, limit = dv.byteLength) {
+    if (offset < 0 || size < 0 || offset > limit || size > limit - offset) {
+      throw new Error("Invalid .sal/ZIP: " + label + " exceeds archive bounds.");
+    }
   }
 
   function readCentralDirectory(dv) {
     const eocd = findEOCD(dv);
     const count = u16(dv, eocd + 10);
-    let ptr = u32(dv, eocd + 16); // central dir offset
-    const entries = [];
+    if (u16(dv, eocd + 4) || u16(dv, eocd + 6) || u16(dv, eocd + 8) !== count) {
+      throw new Error("Unsupported multi-disk .sal/ZIP.");
+    }
+    const size = u32(dv, eocd + 12);
+    let ptr = u32(dv, eocd + 16);
+    requireRange(dv, ptr, size, "central directory", eocd);
+    const end = ptr + size;
+    const entries = [], names = new Set();
     for (let i = 0; i < count; i++) {
-      if (u32(dv, ptr) !== SIG_CEN) break;
+      requireRange(dv, ptr, 46, "central entry", end);
+      if (u32(dv, ptr) !== SIG_CEN) throw new Error("Invalid .sal/ZIP central entry.");
+      if (u16(dv, ptr + 8) & 1) throw new Error("Encrypted .sal/ZIP entries are unsupported.");
       const method = u16(dv, ptr + 10);
-      const compSize = u32(dv, ptr + 20);
-      const uncompSize = u32(dv, ptr + 24);
-      const nameLen = u16(dv, ptr + 28);
-      const extraLen = u16(dv, ptr + 30);
-      const commentLen = u16(dv, ptr + 32);
+      const compSize = u32(dv, ptr + 20), uncompSize = u32(dv, ptr + 24);
+      const nameLen = u16(dv, ptr + 28), extraLen = u16(dv, ptr + 30), commentLen = u16(dv, ptr + 32);
       const localOffset = u32(dv, ptr + 42);
-      const name = td.decode(new Uint8Array(dv.buffer, ptr + 46, nameLen));
+      requireRange(dv, ptr + 46, nameLen + extraLen + commentLen, "entry name", end);
+      const name = td.decode(new Uint8Array(dv.buffer, dv.byteOffset + ptr + 46, nameLen));
+      if (names.has(name)) throw new Error("Duplicate .sal/ZIP entry: " + name);
+      names.add(name);
       entries.push({ name, method, compSize, uncompSize, localOffset });
       ptr += 46 + nameLen + extraLen + commentLen;
     }
-    return entries;
+    if (ptr !== end) throw new Error("Invalid .sal/ZIP central directory size.");
+    return { entries, dataEnd: u32(dv, eocd + 16) };
   }
 
   async function inflate(bytes, format) {
@@ -60,36 +75,37 @@
   // RFC 1952 gzip magic bytes (1f 8b).
   const isGzip = (bytes) => bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
 
-  // Inflate a ZIP method-8 entry body: gzip (v2 JSON tracks) or raw DEFLATE (v1), by magic bytes.
-  async function inflateEntry(bytes) {
-    return inflate(bytes, isGzip(bytes) ? "gzip" : "deflate-raw");
-  }
-
   // Returns Map<name, Uint8Array>
   async function unzip(arrayBuffer) {
     const dv = new DataView(arrayBuffer);
     const u8 = new Uint8Array(arrayBuffer);
-    const entries = readCentralDirectory(dv);
+    const { entries, dataEnd } = readCentralDirectory(dv);
     const out = new Map();
     for (const e of entries) {
       if (e.name.endsWith("/")) continue; // directory
       // Local header: name/extra lengths are reliable even with data descriptors.
       const lo = e.localOffset;
+      requireRange(dv, lo, 30, "local header", dataEnd);
+      if (u32(dv, lo) !== 0x04034b50 || u16(dv, lo + 8) !== e.method) {
+        throw new Error("Invalid .sal/ZIP local header for " + e.name);
+      }
       const nameLen = u16(dv, lo + 26);
       const extraLen = u16(dv, lo + 28);
       const dataStart = lo + 30 + nameLen + extraLen;
+      requireRange(dv, lo + 30, nameLen + extraLen, "local name", dataEnd);
+      requireRange(dv, dataStart, e.compSize, "entry data", dataEnd);
       const comp = u8.subarray(dataStart, dataStart + e.compSize);
       let data;
       if (e.method === 0) {
         data = comp.slice();
-        // v2 gzip-compressed JSON tracks may be STOREd (already compressed); detect via the gzip
-        // magic bytes and inflate. Plain STORE entries (JPEG frames, text) pass through unchanged.
-        if (isGzip(data)) data = await inflate(data, "gzip");
       } else if (e.method === 8) {
-        data = await inflateEntry(comp);
+        data = await inflate(comp, "deflate-raw");
       } else {
         throw new Error("Unsupported ZIP compression method " + e.method + " for " + e.name);
       }
+      if (data.length !== e.uncompSize) throw new Error("Invalid .sal/ZIP entry size for " + e.name);
+      // ZIP compression is the outer layer. Android v2 writes gzip JSON inside DEFLATE entries.
+      if (e.name.endsWith(".json") && isGzip(data)) data = await inflate(data, "gzip");
       out.set(e.name, data);
     }
     return out;
@@ -98,7 +114,7 @@
   function jsonOf(files, name, fallback) {
     const bytes = files.get(name);
     if (!bytes) return fallback;
-    try { return JSON.parse(td.decode(bytes)); } catch (_) { return fallback; }
+    try { return JSON.parse(td.decode(bytes)); } catch (_) { throw new Error("Invalid .sal JSON: " + name); }
   }
   function textOf(files, name) {
     const bytes = files.get(name);
@@ -131,10 +147,16 @@
 
   // Parse the extracted files into a structured session.
   function parse(files) {
-    const manifest = jsonOf(files, "manifest.json", {});
+    const manifest = jsonOf(files, "manifest.json", null);
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+      throw new Error("Invalid .sal: missing or invalid manifest.json.");
+    }
     // C15: Validate formatVersion for forward-compatibility. A newer major version means
     // the archive layout/semantics may have changed — refuse loudly instead of misrendering.
     const fv = manifest.formatVersion;
+    if (fv !== undefined && (!Number.isInteger(fv) || fv < 1)) {
+      throw new Error("Invalid .sal formatVersion.");
+    }
     if (fv !== undefined && fv > 2) {
       throw new Error(`.sal formatVersion ${fv} is newer than this player supports (2). Update the QaLens web player / sal_report.js before opening this recording.`);
     }

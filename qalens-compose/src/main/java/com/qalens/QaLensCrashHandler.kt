@@ -25,16 +25,17 @@ internal object QaLensCrashHandler {
     @Volatile private var mainAlive = false
     @Volatile private var anrMonitoring = false
     @Volatile private var lastCrash: QaLensCrash? = null
-    private var previousHandler: Thread.UncaughtExceptionHandler? = null
+    private val registration = CrashHandlerRegistration(
+        getHandler = Thread::getDefaultUncaughtExceptionHandler,
+        setHandler = Thread::setDefaultUncaughtExceptionHandler
+    ) { thread, throwable ->
+        runCatching { recordCrash(thread, throwable, CrashType.CRASH) }
+        autoFinalizeRecordingIfActive()
+    }
 
-    /** Install the crash + ANR capture. Safe to call once (from QaLens.install). */
+    /** Startup auto-install and explicit install may both run; never chain the handler to itself. */
     fun install() {
-        previousHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            recordCrash(thread, throwable, CrashType.CRASH)
-            autoFinalizeRecordingIfActive()
-            previousHandler?.uncaughtException(thread, throwable)
-        }
+        registration.install()
         startAnrWatchdog()
     }
 
@@ -46,7 +47,7 @@ internal object QaLensCrashHandler {
      */
     private fun autoFinalizeRecordingIfActive() {
         if (!QaLens.state.value.isRecording) return
-        runCatching { QaLensSessionRecorder.autoFinalize() }
+        runCatching { QaLensSessionRecorder.autoFinalize(lastCrash) }
             .onFailure { android.util.Log.w("QaLensCrashHandler", "Recording auto-finalize failed: ${it.message}") }
     }
 

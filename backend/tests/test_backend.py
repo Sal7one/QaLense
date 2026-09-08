@@ -17,6 +17,9 @@ Run:  python3 backend/tests/test_backend.py
 """
 
 import http.client
+import gzip
+import io
+import zipfile
 import json
 import os
 import sys
@@ -272,6 +275,49 @@ class BackendTest(unittest.TestCase):
         self.assertTrue(second["ok"])
         self.assertTrue(second.get("resumed", False))
         self.assertEqual(second["uploadId"], first["uploadId"])
+
+    def test_16_android_v2_deflate_of_gzip_roundtrips(self):
+        out = io.BytesIO()
+        with zipfile.ZipFile(SAMPLE_SAL) as src, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+            for name in src.namelist():
+                data = src.read(name)
+                if name == "manifest.json":
+                    manifest = json.loads(data)
+                    manifest["formatVersion"] = 2
+                    data = json.dumps(manifest).encode()
+                dst.writestr(name, gzip.compress(data) if name.endswith(".json") else data)
+        body = multipart_body("v2-test", "android-v2.sal", out.getvalue())
+        _, data = request("POST", "/webhook", body=body,
+                          headers={"Content-Type": "multipart/form-data; boundary=v2-test"}, expect=200)
+        uid = json.loads(data)["id"]
+        _, data = request("GET", "/api/uploads/" + uid, expect=200)
+        detail = json.loads(data)
+        self.assertEqual(detail["manifest"]["formatVersion"], 2)
+        self.assertEqual(detail["verdict"]["severity"], "warning")
+        self.assertEqual(detail["summary"]["score"], 58)
+        self.assertTrue(detail["analysis"]["coverage"]["network"])
+        request("DELETE", "/api/uploads/" + uid, expect=200)
+
+    def test_17_invalid_archives_are_rejected_without_storing(self):
+        _, before = request("GET", "/api/uploads", expect=200)
+        for manifest in [None, b"not json", b"[]", b'{"formatVersion":3}', b'{"formatVersion":true}']:
+            with self.subTest(manifest=manifest):
+                out = io.BytesIO()
+                with zipfile.ZipFile(out, "w") as dst:
+                    if manifest is not None:
+                        dst.writestr("manifest.json", manifest)
+                body = multipart_body("bad-test", "invalid.sal", out.getvalue())
+                _, data = request("POST", "/webhook", body=body,
+                    headers={"Content-Type": "multipart/form-data; boundary=bad-test"}, expect=400)
+                self.assertIn("Invalid .sal", json.loads(data)["error"])
+        _, after = request("GET", "/api/uploads", expect=200)
+        self.assertEqual(json.loads(before), json.loads(after))
+
+    def test_18_missing_analysis_does_not_claim_healthy(self):
+        from server import mock_verdict
+        verdict = mock_verdict({}, {"manifest": {"formatVersion": 1}})
+        self.assertEqual(verdict["severity"], "unknown")
+        self.assertIn("Insufficient evidence", verdict["label"])
 
 
 if __name__ == "__main__":

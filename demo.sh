@@ -130,10 +130,12 @@ cmd_test() {
     info "cached gradle not found — using the wrapper (first run downloads ~130MB)"
     GRADLE_BIN="$ROOT/gradlew"
   fi
-  (cd "$ROOT" && JAVA_HOME="${JAVA_HOME:-/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home}" "$GRADLE_BIN" :qalens-core:test :sample-app:compileReleaseKotlin --console=plain 2>&1 | tail -6)
+  (cd "$ROOT" && JAVA_HOME="${JAVA_HOME:-/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home}" "$GRADLE_BIN" :qalens-core:test :qalens-compose:testDebugUnitTest :qalens-noop:testDebugUnitTest :qalens-replay:compileDebugKotlin :sample-app:compileDebugKotlin :sample-app:compileReleaseKotlin :sample-app:verifyReleaseIsolation --console=plain 2>&1 | tail -6)
   echo
   say "4/4 CLI smoke (sal_report as a CI gate):"
-  node "$ROOT/web/tools/sal_report.js" "$ROOT/web/sample.sal" > /tmp/qalens-demo-report.md; rc=$?
+  rc=0
+  node "$ROOT/web/tools/sal_report.js" "$ROOT/web/sample.sal" > /tmp/qalens-demo-report.md || rc=$?
+  if [ "$rc" -ne 1 ]; then echo "Unexpected CLI exit: $rc (expected 1)"; exit 1; fi
   echo "  sal_report exit=$rc (1 is CORRECT — the demo session contains failures)"
   head -8 /tmp/qalens-demo-report.md | sed "s/^/  /"
   ok "All suites done."

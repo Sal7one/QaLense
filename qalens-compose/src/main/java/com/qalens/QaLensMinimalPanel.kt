@@ -102,10 +102,11 @@ internal fun QaLensMinimalPanel(
 
         // Big record button
         BigAction(
-            label = if (state.isRecording) "■  STOP & SHARE RECORDING" else "●  RECORD MY SESSION",
-            sub = if (state.isRecording) "recording…" else "captures screen + everything happening",
+            label = if (state.isSavingRecording) "SAVING RECORDING…" else if (state.isRecording) "■  STOP & SHARE RECORDING" else "●  RECORD MY SESSION",
+            sub = if (state.isSavingRecording) "Your session is being saved; you can keep using the app" else if (state.isRecording) "recording…" else "captures screen + everything happening",
             c1 = if (state.isRecording) MRed1 else MGreen1,
-            c2 = if (state.isRecording) MRed2 else MGreen2
+            c2 = if (state.isRecording) MRed2 else MGreen2,
+            enabled = !state.isSavingRecording
         ) { QaLens.toggleRecording() }
 
         Spacer(Modifier.height(10.dp))
@@ -233,11 +234,11 @@ private fun StatusChip(label: String, tint: Color, onTap: () -> Unit = {}) {
 }
 
 @Composable
-private fun BigAction(label: String, sub: String, c1: Color, c2: Color, onClick: () -> Unit) {
+private fun BigAction(label: String, sub: String, c1: Color, c2: Color, enabled: Boolean = true, onClick: () -> Unit) {
     Column(
         Modifier.fillMaxWidth()
             .background(Brush.linearGradient(listOf(c1, c2)), RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {

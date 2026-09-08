@@ -54,18 +54,19 @@ class QaLensProjectionService : Service() {
         val path = intent?.getStringExtra(EXTRA_VIDEO_PATH)
 
         if (resultCode == 0 || data == null || path == null) {
-            QaLensSessionRecorder.onVideoConsentDenied()
+            QaLensSessionRecorder.onVideoConsentDenied(path)
             stopSelf()
             return START_NOT_STICKY
         }
 
+        if (!QaLensSessionRecorder.isAwaitingVideo(path)) { stopSelf(); return START_NOT_STICKY }
         runCatching { startRecording(resultCode, data, File(path)) }
             .onFailure {
                 QaLens.log("Video recording failed to start: ${it.message}")
-                QaLensSessionRecorder.onVideoConsentDenied()
+                QaLensSessionRecorder.onVideoConsentDenied(path)
                 stopSelf()
             }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startRecording(resultCode: Int, data: Intent, output: File) {
@@ -115,7 +116,7 @@ class QaLensProjectionService : Service() {
             rec.surface, null, null
         )
         rec.start()
-        QaLensSessionRecorder.onVideoStarted()
+        QaLensSessionRecorder.onVideoStarted(output.absolutePath)
     }
 
     private var stopped = false

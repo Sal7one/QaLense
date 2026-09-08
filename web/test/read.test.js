@@ -35,39 +35,40 @@ function crc32(buf) {
 function crc32Hex(buf) {
   return crc32(buf).toString(16).padStart(8, "0");
 }
-function zipStore(entries) {
+function zipStore(entries, method = 0) {
   const locals = [], centrals = [];
   let offset = 0;
   for (const [name, data] of entries) {
     const nameB = Buffer.from(name, "utf8");
     const crc = crc32(data);
+    const compressed = method === 8 ? zlib.deflateRawSync(data) : data;
     const lh = Buffer.alloc(30);
     lh.writeUInt32LE(0x04034b50, 0);
     lh.writeUInt16LE(20, 4);
     lh.writeUInt16LE(0, 6);
-    lh.writeUInt16LE(0, 8);
+    lh.writeUInt16LE(method, 8);
     lh.writeUInt32LE(0, 10);
     lh.writeUInt32LE(crc, 14);
-    lh.writeUInt32LE(data.length, 18);
+    lh.writeUInt32LE(compressed.length, 18);
     lh.writeUInt32LE(data.length, 22);
     lh.writeUInt16LE(nameB.length, 26);
     lh.writeUInt16LE(0, 28);
-    locals.push(lh, nameB, data);
+    locals.push(lh, nameB, compressed);
 
     const ch = Buffer.alloc(46);
     ch.writeUInt32LE(0x02014b50, 0);
     ch.writeUInt16LE(20, 4);
     ch.writeUInt16LE(20, 6);
     ch.writeUInt16LE(0, 8);
-    ch.writeUInt16LE(0, 10);
+    ch.writeUInt16LE(method, 10);
     ch.writeUInt32LE(0, 12);
     ch.writeUInt32LE(crc, 16);
-    ch.writeUInt32LE(data.length, 20);
+    ch.writeUInt32LE(compressed.length, 20);
     ch.writeUInt32LE(data.length, 24);
     ch.writeUInt16LE(nameB.length, 28);
     ch.writeUInt32LE(offset, 42);
     centrals.push(Buffer.concat([ch, nameB]));
-    offset += 30 + nameB.length + data.length;
+    offset += 30 + nameB.length + compressed.length;
   }
   const centralBuf = Buffer.concat(centrals);
   const eocd = Buffer.alloc(22);
@@ -83,7 +84,7 @@ function zipStore(entries) {
 // manifest.json with formatVersion 2 and files[] as {name, crc32, compressed} objects.
 // manifest.json is omitted from files[] — its own checksum would be self-referential (the reader
 // treats files[] as informational; the ZIP entry names are authoritative).
-function buildV2(srcFiles, corruptName) {
+function buildV2(srcFiles, corruptName, method = 0) {
   const td = new TextDecoder("utf-8");
   const manifest = JSON.parse(td.decode(srcFiles.get("manifest.json")));
   manifest.formatVersion = 2;
@@ -101,7 +102,7 @@ function buildV2(srcFiles, corruptName) {
   }
   manifest.files = fileObjs;
   entries.push(["manifest.json", new Uint8Array(zlib.gzipSync(new TextEncoder().encode(JSON.stringify(manifest))))]);
-  return zipStore(entries);
+  return zipStore(entries, method);
 }
 function toAB(buf) {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
@@ -165,6 +166,13 @@ function ok(cond, msg) {
   ok(v2.frames.length === 64, "v2: frame index (64 entries)");
   ok(warnPos.length === 0, "v2: no crc32 mismatch warnings (valid checksums)");
 
+  // Android's ZipOutputStream DEFLATEs the already-gzipped JSON bytes.
+  const androidV2 = await SAL.read(toAB(buildV2(files, null, 8)));
+  ok(androidV2.formatVersion === 2, "Android v2: nested DEFLATE + gzip manifest");
+  ok(androidV2.network.length === 6 && androidV2.analysis.stats.failedRequests === s.analysis.stats.failedRequests,
+     "Android v2: evidence survives both compression layers");
+  ok(androidV2.frames.length === 64, "Android v2: JPEG frames survive DEFLATE");
+
   // Negative: corrupt one crc32 → parse still succeeds (warn path, no hard fail).
   const warnBad = [];
   console.warn = (...a) => warnBad.push(a.join(" "));
@@ -186,6 +194,34 @@ function ok(cond, msg) {
   let v3Threw = false;
   try { await SAL.read(toAB(zipStore(v3entries))); } catch (_) { v3Threw = true; }
   ok(v3Threw, "v2: formatVersion 3 throws");
+
+  async function rejects(bytes, message) {
+    let rejected = false;
+    try { await SAL.read(toAB(bytes)); } catch (error) {
+      rejected = error instanceof Error && !(error instanceof RangeError);
+    }
+    ok(rejected, message);
+  }
+  await rejects(zipStore([]), "missing manifest is rejected instead of an empty healthy session");
+  await rejects(zipStore([["manifest.json", Buffer.from("broken")]]), "malformed manifest is rejected");
+  await rejects(zipStore([["manifest.json", Buffer.from("[]")]]), "array manifest is rejected");
+  await rejects(zipStore([["manifest.json", Buffer.from('{"formatVersion":"2"}')]]), "non-integer version is rejected");
+  const duplicate = [["manifest.json", Buffer.from('{}')], ["manifest.json", Buffer.from('{}')]];
+  await rejects(zipStore(duplicate), "duplicate entries are rejected");
+  const malformed = zipStore([["manifest.json", Buffer.from('{}')]]);
+  const eocd = malformed.length - 22;
+  const central = malformed.readUInt32LE(eocd + 16);
+  const badOffset = Buffer.from(malformed);
+  badOffset.writeUInt32LE(0xffffff00, central + 42);
+  await rejects(badOffset, "out-of-range local offset has a clear error");
+  const badSize = Buffer.from(malformed);
+  badSize.writeUInt32LE(0xffffff00, central + 20);
+  await rejects(badSize, "out-of-range entry size has a clear error");
+  const badCount = Buffer.from(malformed);
+  badCount.writeUInt16LE(2, eocd + 8);
+  badCount.writeUInt16LE(2, eocd + 10);
+  await rejects(badCount, "truncated central directory is rejected");
+  await rejects(malformed.subarray(0, 12), "truncated ZIP has a clear error");
 
   console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
   process.exit(failures === 0 ? 0 : 1);

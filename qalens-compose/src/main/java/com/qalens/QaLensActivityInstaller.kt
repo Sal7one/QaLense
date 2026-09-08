@@ -145,7 +145,7 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
         if (isInternal(activity)) return
         liveActivities = (liveActivities - 1).coerceAtLeast(0)
         if (liveActivities == 0 && !activity.isChangingConfigurations) {
-            if (QaLens.state.value.isRecording) QaLensSessionRecorder.cancel()
+            if (QaLens.state.value.isRecording) QaLensSessionRecorder.stop(share = false)
             QaLensSystemChip.hide()
             QaLensNotification.dismiss(activity)
         }

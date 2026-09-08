@@ -1,5 +1,11 @@
 # QaLens — Handover for AI Agents
 
+> **2026-09-08 update:** Read `docs/RELIABILITY_AUDIT.md` and the current `next.md` before relying
+> on the historical snapshot below. The audit found release-isolation and Android v2 archive
+> defects that the old matrix missed. Current baseline: 133 core tests, 5 body tests, 1 no-op
+> test, 44 web assertions, 18 backend tests; debug/release APKs and release isolation pass.
+> Include `:qalens-compose:testDebugUnitTest` and `:sample-app:verifyReleaseIsolation` in checks.
+
 > Read this FIRST when you inherit this repository. It is a snapshot of the state of the repo,
 > how to verify it, the rules you must not break, and where the work should go next.
 

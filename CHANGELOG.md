@@ -2,6 +2,21 @@
 
 ## Unreleased — post-0.9.0
 
+### Reliability audit — 2026-09-08
+- Restore true debug/release SDK separation and enforce the release runtime dependency graph.
+- Fix actual Android v2 archive decoding in web/CLI/backend and the upload digest header.
+  Reject malformed archives and report insufficient evidence instead of a healthy verdict.
+- Guard recording callbacks and saves by lifecycle/session; preserve stalled recordings,
+  follow foreground activities, save off the UI thread, publish atomically, and stream CRCs.
+- Restrict recorded evidence to the session window and include the crash during finalization.
+- Correct Android frame timing units and batch UI updates to avoid a rendering feedback loop.
+- Prevent recursive crash-handler installation; preserve host crash delegation.
+- Bound body previews, skip one-shot/duplex requests, and preserve response streams.
+- Fix screenshot bitmap cleanup and overlay restoration; redact annotation text.
+- Add saving feedback, overview crash evidence/copy action, and jank sample counts.
+- Expand verification with lifecycle, window, crash, stream and actual-layout archive regressions.
+  See docs/RELIABILITY_AUDIT.md for results and remaining limitations.
+
 ### Correctness
 - Use consistent nearest-rank p95/p99 calculations for network health, exported analysis,
   and frame timing. Fix off-by-one ranks at exact percentile boundaries and underestimated

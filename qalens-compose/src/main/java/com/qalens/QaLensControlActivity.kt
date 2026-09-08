@@ -206,7 +206,7 @@ private fun ControlRoom(
 
         // ── Status strip ──
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            StatusPill(if (state.isRecording) "● REC" else "idle", if (state.isRecording) Red else TxtMuted)
+            StatusPill(if (state.isSavingRecording) "saving…" else if (state.isRecording) "● REC" else "idle", if (state.isRecording) Red else TxtMuted)
             StatusPill(if (state.overlayEnabled) "overlay on" else "overlay off", if (state.overlayEnabled) Green else Amber)
             StatusPill(if (notifGranted) "notif ✓" else "notif ✕", if (notifGranted) Green else Red)
             StatusPill(if (drawOverGranted) "float ✓" else "float ✕", if (drawOverGranted) Green else Amber)
@@ -214,7 +214,9 @@ private fun ControlRoom(
 
         // ── Recording ──
         ControlCard("Session Recording") {
-            if (state.isRecording) {
+            if (state.isSavingRecording) {
+                Text("Saving your recording…", color = Accent, fontSize = 12.sp)
+            } else if (state.isRecording) {
                 Text("Recording in progress…", color = Red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 BigButton("■  Stop & Share", Red) { QaLens.stopRecording() }

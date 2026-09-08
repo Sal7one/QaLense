@@ -41,8 +41,24 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.jakewharton.timber:timber:5.0.1")
 
-    implementation(project(":qalens-compose"))
-    implementation(project(":qalens-navigation-compose"))
-    implementation(project(":qalens-replay"))
-//    releaseImplementation(project(":qalens-noop"))
+    debugImplementation(project(":qalens-compose"))
+    debugImplementation(project(":qalens-navigation-compose"))
+    debugImplementation(project(":qalens-replay"))
+    releaseImplementation(project(":qalens-noop"))
 }
+
+// Compilation alone cannot prove release safety: the active SDK also compiles in release.
+tasks.register("verifyReleaseIsolation") {
+    group = "verification"
+    description = "Require the no-op SDK and reject capture/replay modules in release."
+    doLast {
+        val projects = configurations.getByName("releaseRuntimeClasspath")
+            .incoming.resolutionResult.allComponents.mapNotNull {
+                (it.id as? org.gradle.api.artifacts.component.ProjectComponentIdentifier)?.projectPath
+            }.toSet()
+        check(":qalens-noop" in projects) { "Release must include qalens-noop" }
+        val forbidden = projects.intersect(setOf(":qalens-compose", ":qalens-navigation-compose", ":qalens-android", ":qalens-replay"))
+        check(forbidden.isEmpty()) { "Active QaLens modules leaked into release: $forbidden" }
+    }
+}
+tasks.named("check") { dependsOn("verifyReleaseIsolation") }

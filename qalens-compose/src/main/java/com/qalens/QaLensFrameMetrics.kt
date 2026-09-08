@@ -19,6 +19,18 @@ import androidx.annotation.RequiresApi
 internal object QaLensFrameMetrics {
 
     @Volatile private var attached: Boolean = false
+    private val handler = Handler(Looper.getMainLooper())
+    private val pending = mutableListOf<FrameMetricsSample>()
+    private val flush = Runnable { flushPending() }
+
+    fun flushPending() {
+        handler.removeCallbacks(flush)
+        if (pending.isEmpty()) return
+        val samples = pending.toList()
+        pending.clear()
+        QaLens.appendFrameMetrics(samples)
+    }
+
     private var currentActivity: android.app.Activity? = null
 
     fun attach(activity: Activity) {
@@ -32,13 +44,14 @@ internal object QaLensFrameMetrics {
         currentActivity = activity
         activity.window.addOnFrameMetricsAvailableListener(
             listener,
-            Handler(Looper.getMainLooper())
+            handler
         )
     }
 
     fun detach(activity: Activity) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
-        if (!attached) return
+        if (!attached || currentActivity !== activity) return
+        flushPending()
         attached = false
         currentActivity = null
         runCatching { activity.window.removeOnFrameMetricsAvailableListener(listener) }
@@ -52,17 +65,12 @@ internal object QaLensFrameMetrics {
             val layout = runCatching { m.getMetric(FrameMetrics.LAYOUT_MEASURE_DURATION).toLong() }.getOrDefault(0L)
             val draw = runCatching { m.getMetric(FrameMetrics.DRAW_DURATION).toLong() }.getOrDefault(0L)
             val gpu = runCatching { m.getMetric(FrameMetrics.GPU_DURATION).toLong() }.getOrDefault(0L)
-            val jank = total > FrameMetricsSample.JANK_THRESHOLD_MS
-            val frozen = total > FrameMetricsSample.FROZEN_THRESHOLD_MS
-            // Only record frames worth recording: jank, frozen, or sampled (1-in-10) to bound volume.
-            if (jank || frozen || total % 10 == 0L) {
-                QaLens.appendFrameMetrics(
-                    FrameMetricsSample(
-                        totalMs = total, layoutMs = layout, drawMs = draw, gpuMs = gpu,
-                        jank = jank, frozen = frozen
-                    )
-                )
-            }
+            // Android reports nanoseconds. Batch all observed frames once per second;
+            // publishing each frame into Compose state creates a render/measurement feedback loop.
+            if (pending.isEmpty()) handler.postDelayed(flush, 1_000L)
+            pending += FrameMetricsSample.fromNanoseconds(total, layout, draw, gpu)
+            if (pending.size >= 1000) flushPending()
+
         }
     }
 }

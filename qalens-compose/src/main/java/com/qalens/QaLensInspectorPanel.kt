@@ -1068,7 +1068,9 @@ private fun ToolsTab(state: QaLensUiState, context: Context) {
         HorizontalDivider(color = PanelLine)
 
         Text("Session Recording (.sal)", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-        if (state.isRecording) {
+        if (state.isSavingRecording) {
+            Text("Saving recording… You can keep using the app.", color = PanelAccent, fontSize = 12.sp)
+        } else if (state.isRecording) {
             PanelButton("■  Stop & Share Recording", tint = PanelError) { QaLens.stopRecording() }
             Text("● Recording… screen + state + network + logs are being captured.",
                 color = PanelError, fontSize = 11.sp)
@@ -1266,6 +1268,25 @@ private fun OverviewTab(state: QaLensUiState, context: Context, onNavigateTab: (
             }
         }
 
+        if (state.frameMetrics.isNotEmpty() || state.crashes.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                StatChip("Crashes", state.crashes.size, if (state.crashes.isEmpty()) PanelGreen else PanelError, Modifier.weight(1f))
+                if (state.frameMetrics.isNotEmpty()) {
+                    val jank = JankAnalyzer.analyze(state.frameMetrics)
+                    StatChip("Jank samples", jank.jankCount, if (jank.jankCount > 0) PanelWarn else PanelGreen, Modifier.weight(1f))
+                }
+            }
+        }
+        state.crashes.lastOrNull()?.let { crash ->
+            Text("${crash.type.display}: ${QaLens.config.value.redact(crash.throwable.orEmpty())}",
+                color = PanelError, fontSize = 12.sp, maxLines = 3)
+            PanelButton("Copy crash with evidence", tint = PanelError) {
+                val config = QaLens.config.value
+                copy(context, "QaLens Crash", config.redact(
+                    "${crash.type.display}: ${crash.throwable}\n${crash.stackTrace}\n\n${QaLens.buildFullReport()}"))
+            }
+        }
+
         // Likely cause
         state.classification?.let { c ->
             Column(
@@ -1284,7 +1305,9 @@ private fun OverviewTab(state: QaLensUiState, context: Context, onNavigateTab: (
 
         // Primary actions
         Text("Actions", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-        if (state.isRecording) {
+        if (state.isSavingRecording) {
+            Text("Saving recording… You can keep using the app.", color = PanelAccent, fontSize = 12.sp)
+        } else if (state.isRecording) {
             PanelButton("■  Stop & Share Recording", tint = PanelError) { QaLens.stopRecording() }
         } else {
             PanelButton("●  Record Session (.sal)", tint = PanelGreen) { QaLens.startRecording() }

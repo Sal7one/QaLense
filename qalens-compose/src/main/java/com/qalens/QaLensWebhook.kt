@@ -280,7 +280,10 @@ internal object QaLensWebhook {
         runCatching {
             java.util.zip.ZipFile(file).use { zip ->
                 zip.getEntry("analysis.json")?.let { entry ->
-                    val text = zip.getInputStream(entry).bufferedReader().use { it.readText() }
+                    val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                    val decoded = if (bytes.size >= 2 && bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte())
+                        java.util.zip.GZIPInputStream(bytes.inputStream()).use { it.readBytes() } else bytes
+                    val text = decoded.toString(Charsets.UTF_8)
                     org.json.JSONObject(text).optJSONObject("stats")?.toString()
                 }
             }

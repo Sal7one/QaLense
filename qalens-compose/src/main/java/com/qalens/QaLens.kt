@@ -545,6 +545,10 @@ object QaLens {
         if (uiStateMutable.value.isRecording) stopRecording() else startRecording()
     }
 
+    internal fun setSavingRecording(active: Boolean) {
+        uiStateMutable.update { it.copy(isSavingRecording = active) }
+    }
+
     internal fun setRecording(active: Boolean) {
         uiStateMutable.update { it.copy(isRecording = active) }
         // Reflect the record state in the persistent notification action. Use the app context so
@@ -875,10 +879,11 @@ object QaLens {
     fun lastCrash(): QaLensCrash? = QaLensCrashHandler.peekLastCrash() ?: uiStateMutable.value.crashes.lastOrNull()
 
     /** Called by [QaLensFrameMetrics] to append a frame-timing sample (capped at 1000). */
-    internal fun appendFrameMetrics(sample: FrameMetricsSample) {
+    internal fun appendFrameMetrics(samples: List<FrameMetricsSample>) {
         uiStateMutable.update { old ->
-            old.copy(frameMetrics = (old.frameMetrics + sample).takeLast(1000))
+            old.copy(frameMetrics = (old.frameMetrics + samples).takeLast(1000))
         }
+        markAnalysisDirty()
     }
 
     // ── Connectivity (B5) ──────────────────────────────────────────────────────

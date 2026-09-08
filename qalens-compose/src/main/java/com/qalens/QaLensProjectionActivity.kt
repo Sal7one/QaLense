@@ -17,10 +17,10 @@ class QaLensProjectionActivity : ComponentActivity() {
     private val launcher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val data = result.data
         val path = videoPath
-        if (result.resultCode == RESULT_OK && data != null && path != null) {
+        if (result.resultCode == RESULT_OK && data != null && path != null && QaLensSessionRecorder.isAwaitingVideo(path)) {
             QaLensProjectionService.start(this, result.resultCode, data, path)
         } else {
-            QaLensSessionRecorder.onVideoConsentDenied()
+            QaLensSessionRecorder.onVideoConsentDenied(videoPath)
         }
         finish()
     }
@@ -30,7 +30,7 @@ class QaLensProjectionActivity : ComponentActivity() {
         videoPath = intent.getStringExtra(EXTRA_VIDEO_PATH)
         if (videoPath == null) { finish(); return }
         val mpm = getSystemService(MediaProjectionManager::class.java)
-        if (mpm == null) { QaLensSessionRecorder.onVideoConsentDenied(); finish(); return }
+        if (mpm == null) { QaLensSessionRecorder.onVideoConsentDenied(videoPath); finish(); return }
         // API 34+ otherwise shows a "single app / entire screen" chooser — for a QA session
         // recording the whole screen is the point, so pre-select it (one less confusing dialog).
         val consent = if (android.os.Build.VERSION.SDK_INT >= 34) {
@@ -40,8 +40,9 @@ class QaLensProjectionActivity : ComponentActivity() {
         } else {
             mpm.createScreenCaptureIntent()
         }
+        if (savedInstanceState != null) return
         runCatching { launcher.launch(consent) }
-            .onFailure { QaLensSessionRecorder.onVideoConsentDenied(); finish() }
+            .onFailure { QaLensSessionRecorder.onVideoConsentDenied(videoPath); finish() }
     }
 
     companion object {

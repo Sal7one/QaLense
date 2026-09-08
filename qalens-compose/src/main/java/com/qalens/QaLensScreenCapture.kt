@@ -36,8 +36,12 @@ internal object QaLensScreenCapture {
     fun captureFrame(activity: Activity, manageOverlay: Boolean = true, onResult: (Bitmap?) -> Unit) {
         val decor = activity.window.decorView
         val overlay = if (manageOverlay) decor.findViewWithTag<View>(OVERLAY_TAG) else null
+        val previousVisibility = overlay?.visibility
         overlay?.visibility = View.INVISIBLE
-        val finish: (Bitmap?) -> Unit = { bmp -> overlay?.visibility = View.VISIBLE; onResult(bmp) }
+        val finish: (Bitmap?) -> Unit = { bmp ->
+            if (previousVisibility != null) overlay?.visibility = previousVisibility
+            onResult(bmp)
+        }
 
         if (decor.width <= 0 || decor.height <= 0) { finish(null); return }
         val doCapture = Runnable {
@@ -45,9 +49,11 @@ internal object QaLensScreenCapture {
                 val bmp = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
                 try {
                     PixelCopy.request(activity.window, bmp, { result ->
-                        finish(if (result == PixelCopy.SUCCESS) bmp else null)
+                        if (result == PixelCopy.SUCCESS) finish(bmp)
+                        else { bmp.recycle(); finish(null) }
                     }, Handler(Looper.getMainLooper()))
                 } catch (e: Exception) {
+                    bmp.recycle()
                     finish(null)
                 }
             } else {
@@ -68,34 +74,22 @@ internal object QaLensScreenCapture {
         selectedNode: InspectNode? = null,
         share: Boolean = true
     ) {
-        val decor = activity.window.decorView
-        val overlay = decor.findViewWithTag<View>(OVERLAY_TAG)
-
-        overlay?.visibility = View.INVISIBLE
-
-        // Annotate into a copy, then recycle the raw capture bitmap so it isn't leaked per shot.
-        val annotateAndRecycle: (Bitmap) -> Bitmap = { raw ->
-            val annotated = annotate(raw, nodes, selectedNode, activity)
-            if (annotated !== raw) raw.recycle()
-            annotated
-        }
-        val doCapture = Runnable {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val bmp = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
-                PixelCopy.request(activity.window, bmp, { result ->
-                    overlay?.visibility = View.VISIBLE
-                    if (result == PixelCopy.SUCCESS) deliver(activity, annotateAndRecycle(bmp), share) else bmp.recycle()
-                }, Handler(Looper.getMainLooper()))
-            } else {
-                val bmp = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
-                decor.draw(Canvas(bmp))
-                overlay?.visibility = View.VISIBLE
-                deliver(activity, annotateAndRecycle(bmp), share)
+        captureFrame(activity) { raw ->
+            if (raw == null) {
+                QaLens.pushError(ErrorKind.SCREENSHOT, "Screenshot unavailable; the window may be secure or not ready.")
+                return@captureFrame
+            }
+            var annotated: Bitmap? = null
+            try {
+                annotated = annotate(raw, nodes, selectedNode, activity)
+                deliver(activity, annotated, share)
+            } catch (e: Exception) {
+                QaLens.pushError(ErrorKind.SCREENSHOT, "Screenshot failed: ${e.message}")
+            } finally {
+                if (annotated !== raw) annotated?.recycle()
+                raw.recycle()
             }
         }
-
-        // Post so the overlay has one frame to disappear before capture fires.
-        if (overlay != null) decor.post(doCapture) else doCapture.run()
     }
 
     /**
@@ -161,8 +155,8 @@ internal object QaLensScreenCapture {
                 canvas.drawCircle(node.bounds.right.toFloat(), node.bounds.top.toFloat(), 6f * density, dotPaint)
             }
             // Label selected + tagged/named nodes (skip pure-warning nodes to reduce clutter).
-            val lbl = (node.qaName ?: node.testTag)?.take(32)
-                ?: if (isSelected) node.label.take(32) else null
+            val lbl = ((node.qaName ?: node.testTag)
+                ?: if (isSelected) node.label else null)?.let { QaLens.config.value.redact(it).take(32) }
             if (lbl != null) {
                 val tw = labelText.measureText(lbl)
                 val lx = node.bounds.left.toFloat()
@@ -189,7 +183,7 @@ internal object QaLensScreenCapture {
             color = Color.WHITE
             textSize = 26f
         }
-        canvas.drawText(footer, 16f * density, fy + 34f * density, fp)
+        canvas.drawText(QaLens.config.value.redact(footer), 16f * density, fy + 34f * density, fp)
 
         return out
     }
