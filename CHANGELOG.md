@@ -2,6 +2,20 @@
 
 ## Unreleased — post-0.9.0
 
+### OSS integration and Kotlin hardening — 2026-09-08
+- Replace invalid Chucker-as-source reflection with public launcher and interceptor coexistence;
+  legacy configuration no longer silently suppresses network capture. Sample uses Chucker 4.1.0
+  with matching release no-op, verified against the current Kotlin 2.0.21 toolchain.
+- Add dependency-free network sinks, shared redaction/capture limits, declared source coverage,
+  integration diagnostics and an Overview copy action. Deduplicate OkHttp observations per call.
+- Add bounded/redacted external crash input and prevent echoing vendor-reported crashes back.
+- Fix missing network-state permission, default-network transitions, notification permission
+  race handling and Compose settings collection.
+- Fix composite-build coordinates and add an independent consumer with debug/release checks,
+  contribution and migration docs, issue/PR templates and a GitHub verification workflow.
+- Add eleven core and eight real OkHttp tests; extend device regression coverage for Chucker,
+  adapters and crash reporters. See docs/RELIABILITY_AUDIT.md for validation and limits.
+
 ### Recording retention — 2026-09-08
 - Preserve early logs, requests, crashes, timings, connectivity, memory, bookmarks and state
   independently of dashboard history limits and log clearing.

@@ -42,6 +42,9 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.jakewharton.timber:timber:5.0.1")
 
+    // Tested coexistence baseline for this Kotlin 2.0 / compileSdk 35 sample.
+    debugImplementation("com.github.chuckerteam.chucker:library:4.1.0")
+    releaseImplementation("com.github.chuckerteam.chucker:library-no-op:4.1.0")
     debugImplementation(project(":qalens-compose"))
     debugImplementation(project(":qalens-navigation-compose"))
     debugImplementation(project(":qalens-replay"))
@@ -60,6 +63,10 @@ tasks.register("verifyReleaseIsolation") {
         check(":qalens-noop" in projects) { "Release must include qalens-noop" }
         val forbidden = projects.intersect(setOf(":qalens-compose", ":qalens-navigation-compose", ":qalens-android", ":qalens-replay"))
         check(forbidden.isEmpty()) { "Active QaLens modules leaked into release: $forbidden" }
+        val modules = configurations.getByName("releaseRuntimeClasspath").incoming.resolutionResult
+            .allComponents.mapNotNull { it.moduleVersion?.let { id -> "${id.group}:${id.name}" } }.toSet()
+        check("com.github.chuckerteam.chucker:library" !in modules) { "Active Chucker leaked into release" }
+        check("com.github.chuckerteam.chucker:library-no-op" in modules) { "Release must include Chucker's no-op" }
     }
 }
 tasks.named("check") { dependsOn("verifyReleaseIsolation") }

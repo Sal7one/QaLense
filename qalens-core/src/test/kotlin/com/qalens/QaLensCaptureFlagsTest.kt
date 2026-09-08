@@ -67,7 +67,7 @@ class QaLensCaptureFlagsTest {
     }
 
     @Test
-    fun chuckerSourceIsStatedInNotes() {
+    fun legacyChuckerModeDoesNotInventLiveTransactionForwarding() {
         val json = digestWith(
             QaLensAnalysis.Coverage(
                 hasFrames = true, hasVideo = false,
@@ -77,7 +77,7 @@ class QaLensCaptureFlagsTest {
             )
         )
         assertTrue(json.contains("networkFromChucker\":true"), json)
-        assertTrue(json.contains("sourced from Chucker"), json)
+        assertTrue(json.contains("live transaction forwarding is unsupported"), json)
         assertTrue(!json.contains("NOT installed"), json)
     }
 

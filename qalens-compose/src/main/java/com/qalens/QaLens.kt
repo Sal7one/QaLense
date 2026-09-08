@@ -87,10 +87,7 @@ object QaLens {
             return
         }
         currentActivityRef?.get()?.let { updateDeviceAndScreen(it) }
-        // Network source may have been flipped in configure() after install — apply it lazily.
-        if (configState.value.networkFromChucker) {
-            appContext?.let { QaLensChuckerSource.ensureRegistered(it) }
-        }
+        warnLegacyChuckerMode()
         markAnalysisDirty()
     }
 
@@ -291,9 +288,7 @@ object QaLens {
         QaLensCrashHandler.install()
         QaLensConnectivity.start(application)
         QaLensMemoryMonitor.start(application)
-        // Feature flag: networkFromChucker → Chucker's TransactionListener becomes the network
-        // source (QaLensOkHttpInterceptor turns pass-through). Idempotent + logs a fallback note.
-        if (configState.value.networkFromChucker) QaLensChuckerSource.ensureRegistered(application)
+        warnLegacyChuckerMode()
     }
 
     fun setScreen(name: String, route: String? = null) {
@@ -337,6 +332,7 @@ object QaLens {
 
     /** Receives forwarded Timber logs (via QaLensTimberTree). Level is an android.util.Log priority. */
     fun timberLog(priority: Int, tag: String?, message: String) {
+        if (!configState.value.enabled || !configState.value.captureLogs) return
         val level = when (priority) {
             2 -> "VERBOSE"; 3 -> "DEBUG"; 4 -> "INFO"; 5 -> "WARN"; 6 -> "ERROR"; 7 -> "ASSERT"
             else -> "LOG"
@@ -466,16 +462,40 @@ object QaLens {
     fun toggleWatchMode() = setWatchMode(!uiStateMutable.value.isWatchMode)
 
     /** Called by QaLensOkHttpInterceptor's constructor so the Network tab knows capture is live. */
-    fun markNetworkAvailable() = uiStateMutable.update { it.copy(networkAvailable = true) }
+    private val warnedLegacyChucker = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun warnLegacyChuckerMode() {
+        if (configState.value.networkFromChucker && warnedLegacyChucker.compareAndSet(false, true))
+            log("networkFromChucker is unsupported: attach QaLensOkHttpInterceptor alongside ChuckerInterceptor. Network capture remains enabled.")
+    }
+
+    fun markNetworkAvailable() = markNetworkSource("Manual")
+
+    internal fun markNetworkSource(name: String) {
+        uiStateMutable.update { old -> old.copy(networkAvailable = true,
+            networkSources = (old.networkSources + name).take(16).toSet()) }
+    }
+
+    /** Create once per transport/client, then report each completed request once. No body reads. */
+    fun networkSink(source: String): QaLensNetworkSink {
+        val name = QaLensNetworkCapture.sourceName(source)
+        markNetworkSource(name)
+        return QaLensNetworkSink { event -> logNetwork(event) }
+    }
+
+    /** Shareable setup diagnostics without request contents or credentials. */
+    fun integrationReport(): String = QaLensIntegrationDiagnostics.report(configState.value, state.value)
 
     fun logNetwork(event: NetworkEvent) {
-        QaLensSessionRecorder.evidence?.network(event)
+        val safe = runCatching { QaLensNetworkCapture.sanitize(event, configState.value) }.getOrNull() ?: return
+        QaLensSessionRecorder.evidence?.network(safe)
         // OkHttp interceptors run on OkHttp's dispatcher thread; confine the state mutation to main
         // so the read-compute-write in recomputeAnalysis can't race with another concurrent call.
         mainHandler.post {
             uiStateMutable.update { old ->
                 // 250: heavy apps fire 8+ calls per screen; 50 rolled over within a couple of screens.
-                old.copy(networkEvents = (old.networkEvents + event).takeLast(250), networkAvailable = true)
+                old.copy(networkEvents = (old.networkEvents + safe).takeLast(250), networkAvailable = true,
+                    networkSources = old.networkSources.ifEmpty { setOf("Manual") })
             }
             markAnalysisDirty()
         }
@@ -778,6 +798,7 @@ object QaLens {
 
     private fun pushEvent(event: QaEvent) {
         val config = configState.value
+        if (!config.enabled) return
         val safe = event.copy(message = config.redact(event.message), tag = event.tag?.let(config::redact))
         QaLensSessionRecorder.evidence?.event(safe)
         // Confine to main so events appended from coroutines/IO threads can't race the analysis read.
@@ -851,18 +872,20 @@ object QaLens {
     private var crashBridge: QaLensCrashBridge = QaLensNoopCrashBridge
 
     /** Called by [QaLensCrashHandler] to append a captured crash to state + fire the bridge. */
-    internal fun appendCrash(crash: QaLensCrash) {
+    internal fun appendCrash(crash: QaLensCrash, enrich: Boolean = true) {
+        if (!configState.value.enabled) return
+        val safe = runCatching { QaLensCrashEvidence.sanitize(crash, configState.value) }.getOrNull() ?: return
         val s = uiStateMutable.value
-        uiStateMutable.update { old -> old.copy(crashes = (old.crashes + crash).takeLast(10)) }
+        uiStateMutable.update { old -> old.copy(crashes = (old.crashes + safe).takeLast(10)) }
         // Enrich the host crash reporter with QaLens evidence (score, classification, repro).
-        runCatching {
+        if (enrich) runCatching {
             val evidence = buildString {
                 s.classification?.let { append("Likely owner: ${it.category.display} (${it.confidence}). ") }
                 s.score?.let { append("Score: ${it.score}/100. ") }
                 crash.screen?.let { append("Screen: $it. ") }
                 crash.lastNetworkSummary?.let { append("Last network: $it.") }
             }
-            crashBridge.enrich(crash, evidence)
+            crashBridge.enrich(safe, configState.value.redact(evidence))
         }
     }
 
@@ -873,12 +896,18 @@ object QaLens {
      */
     fun bridgeCrashes(bridge: QaLensCrashBridge) {
         crashBridge = bridge
-        bridge.onCrash { crash ->
-            QaLensSessionRecorder.evidence?.crash(crash)
-            // Host-reported crashes come from a vendor thread; hop to main.
-            if (Looper.myLooper() == Looper.getMainLooper()) appendCrash(crash)
-            else mainHandler.post { appendCrash(crash) }
+        runCatching { bridge.onCrash(::reportCrash) }.onFailure {
+            pushError(ErrorKind.OTHER, "Crash bridge registration failed: ${it.javaClass.simpleName}")
         }
+    }
+
+    /** Mirror a crash caught by another reporter without sending it back to that reporter. */
+    fun reportCrash(crash: QaLensCrash) {
+        if (!configState.value.enabled) return
+        val safe = runCatching { QaLensCrashEvidence.sanitize(crash, configState.value) }.getOrNull() ?: return
+        QaLensSessionRecorder.evidence?.crash(safe)
+        if (Looper.myLooper() == Looper.getMainLooper()) appendCrash(safe, enrich = false)
+        else mainHandler.post { appendCrash(safe, enrich = false) }
     }
 
     /** The most recent crash/ANR captured this session, or null. Surfaced in the Overview tab. */

@@ -40,7 +40,7 @@ grep -rn "navigation-compose" app/build.gradle.kts 2>/dev/null
 # 4. OkHttp (L3 network track) — note the version for the Chucker decision
 grep -rn "okhttp" app/build.gradle.kts 2>/dev/null
 
-# 5. Chucker already installed? (L3 — Chucker-as-source option)
+# 5. Chucker already installed? (L3 — Chucker coexistence option)
 grep -rni "chucker" app/build.gradle.kts app/src 2>/dev/null
 
 # 6. Timber already planted? (L3 log track)
@@ -64,7 +64,7 @@ grep -rln "Application()" app/src/main 2>/dev/null
 | Compose | present / absent | absent → overlay SDK cannot attach (see Edge Cases) |
 | Navigation Compose | present / absent | present → L2 wrapper is a drop-in |
 | OkHttp version | e.g. 4.12.0 | L3 interceptor (or Chucker ordering) |
-| Chucker | present / absent | present → offer Chucker-as-source in Q3 |
+| Chucker | present / absent | present → retain Chucker and add QaLens metadata interceptor in Q3 |
 | Timber | planted / absent | planted → add QaLensTimberTree as a second tree |
 | Room / DataStore | present / absent | L4 observers available |
 | Crash reporter | name / none | L4 crash bridge target |
@@ -87,8 +87,7 @@ use BuildConfig values and environment = null.
 where the bug-report value is]. The skill always applies L1 identity if the operator allows it.
 
 **Q3 — Network source.** (a) QaLens interceptor [default] (b) Chucker is already installed — use
-Chucker as the source (`networkFromChucker = true`) and keep the QaLens interceptor out or as a
-pass-through (c) no network capture (`captureNetwork = false`).
+both ChuckerInterceptor and QaLensOkHttpInterceptor on the same client (c) no network capture (`captureNetwork = false`).
 
 **Q4 — Logs.** (a) Plant QaLensTimberTree [default] (b) no automatic log capture
 (`captureLogs = false`).
@@ -159,7 +158,7 @@ QaLens.configure {
     // Capture feature flags (B17) — decide what feeds the tracks:
     captureNetwork = true          // false = interceptor is a pure pass-through
     captureLogs = true             // false = Timber tree drops every line
-    networkFromChucker = false     // true  = Chucker becomes the network source
+    networkFromChucker = false     // legacy flag; do not enable
     captureNetworkBodies = false   // true  = opt-in 64KB redacted body previews
 }
 QaLens.install(this)   // safe even when Startup already installed
@@ -190,15 +189,11 @@ OkHttpClient.Builder()
     .addInterceptor(QaLensOkHttpInterceptor())   // metadata only: method/url/status/latency/sizes
     .build()
 
-// Q3 = (b) Chucker is the source — no QaLens interceptor (or add it: it auto-passes-through)
-QaLens.configure { networkFromChucker = true }
+// Q3 = (b) Keep Chucker's inspector and QaLens metadata on the same client.
+// There is no public Chucker TransactionListener; never disable QaLens interception for it.
 OkHttpClient.Builder()
-    .addInterceptor(ChuckerInterceptor.Builder(context).build())
-    .build()
-
-// Q3 = (b alt) BOTH inspectors on one client — Chucker FIRST (it reads raw bodies)
-OkHttpClient.Builder()
-    .addInterceptor(ChuckerInterceptor.Builder(context).build())
+    .addInterceptor(ChuckerInterceptor.Builder(context)
+        .redactHeaders("Authorization", "Cookie", "Set-Cookie").build())
     .addInterceptor(QaLensOkHttpInterceptor())
     .build()
 

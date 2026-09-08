@@ -318,6 +318,8 @@ data class QaLensUiState(
     val featureFlags: Map<String, Boolean> = emptyMap(),
     val screenQuality: Map<String, ScreenQualitySnapshot> = emptyMap(),
     val networkAvailable: Boolean = false,
+    /** Declared adapter names; not a guarantee of complete network coverage. */
+    val networkSources: Set<String> = emptySet(),
     val deepLinkScenarios: List<DeepLinkScenario> = emptyList(),
     val scenarioRuns: Map<String, ScenarioRun> = emptyMap(),
     val contractResult: ContractResult? = null,

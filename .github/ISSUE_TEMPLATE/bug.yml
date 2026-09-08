@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible SDK, integration or replay problem.
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Smallest reproduction
+      description: Include the steps, debug/release variant and interceptor order. Use synthetic data.
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Environment
+      description: QaLens commit/version, Kotlin, AGP, Android API/device, OkHttp and Chucker versions.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Integration check or relevant error
+      description: Copy the integration check from Overview. Check logs and recordings for personal data before attaching; raw pixels are not text-redacted.

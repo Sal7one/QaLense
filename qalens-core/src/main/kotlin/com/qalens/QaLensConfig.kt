@@ -46,12 +46,9 @@ data class QaLensConfig(
      */
     val captureLogs: Boolean = true,
     /**
-     * Use Chucker as the network source instead of QaLensOkHttpInterceptor. When true (and
-     * Chucker is on the debug classpath), QaLens registers a Chucker TransactionListener via
-     * reflection and converts every collected transaction into a NetworkEvent — no QaLens
-     * interceptor needed (it becomes a pass-through). If Chucker is missing, QaLens logs a
-     * warning and falls back to the QaLens interceptor. Teams already running Chucker get the
-     * full evidence pipeline (Network tab, classifier, .sal) from ONE inspector.
+     * Legacy setting retained for source compatibility. Chucker does not expose a public live
+     * transaction listener. This flag no longer disables QaLensOkHttpInterceptor: install it
+     * alongside ChuckerInterceptor, or report another transport through QaLens.networkSink.
      */
     val networkFromChucker: Boolean = false
 ) {

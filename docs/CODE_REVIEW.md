@@ -4,7 +4,19 @@ Updated 2026-09-08 after reviewing the current implementation rather than trusti
 handover. Detailed fixes, reasoning, verification commands and limits are in
 [the reliability audit](RELIABILITY_AUDIT.md).
 
-## Resolved in this pass
+## OSS follow-up findings resolved
+
+- **P1: Chucker capture could silently disappear.** The old listener used nonexistent public
+  interfaces and silenced the real interceptor. Remove that path, preserve capture under the legacy
+  flag, and verify public launcher plus both interceptors against a real Chucker artifact.
+- **P1: custom network/crash sources bypassed consistent policy.** Shared boundaries now apply
+  capture switches, redaction, body opt-in and bounds before storage/UI; inbound crashes never echo.
+- **P1: integration instructions failed outside the repository.** Set matching project/publication
+  coordinates and compile an independent consumer against both build variants.
+- **P2: missing permission/stale configuration.** Declare normal network-state permission, collect
+  settings in Compose and describe the active network instead of treating every loss as offline.
+
+## Resolved in earlier reliability passes
 
 - **P0: release isolation was not real.** The sample used `implementation` for the active SDK
   and disabled `releaseImplementation(qalens-noop)`. It now selects dependencies by build type;

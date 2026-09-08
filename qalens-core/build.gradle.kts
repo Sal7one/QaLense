@@ -17,9 +17,9 @@ tasks.withType<Test> { useJUnitPlatform() }
 publishing {
     publications {
         register<MavenPublication>("maven") {
-            groupId = "com.qalens"
+            groupId = project.group.toString()
             artifactId = "qalens-core"
-            version = "0.9.0"
+            version = project.version.toString()
             from(components["java"])
         }
     }

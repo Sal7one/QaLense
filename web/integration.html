@@ -175,7 +175,7 @@ QaLens.configure {
     // Capture feature flags — decide what feeds the tracks (all default true/false as shown):
     captureNetwork = true         // false → QaLensOkHttpInterceptor is a pure pass-through
     captureLogs = true            // false → QaLensTimberTree drops every line
-    networkFromChucker = false    // true  → Chucker becomes the network source (no QaLens interceptor)
+    networkFromChucker = false    // legacy flag; leave false
 }
 QaLens.install(this)   // no-op if Startup already installed; safe to call
 </script>
@@ -219,21 +219,26 @@ OkHttpClient.Builder()
 
 Timber.plant(QaLensTimberTree())                 // log track: level, tag, message, exception
 </script>
-  <p class="sub">Already running <b>Chucker</b>? Make Chucker the single source of truth — QaLens
-  registers a TransactionListener and its interceptor becomes a pass-through (nothing double-counted):</p>
+  <p class="sub">Already running <b>Chucker</b>? Keep its inspector and attach QaLens metadata capture
+  to the same client. Chucker has no public live transaction listener; the old networkFromChucker
+  flag no longer disables QaLens capture.</p>
   <script type="text/plain" class="src" data-lang="kotlin">
-// Option A — both inspectors, one client (Chucker first: it needs the raw bodies)
 OkHttpClient.Builder()
-    .addInterceptor(ChuckerInterceptor.Builder(context).build())
-    .addInterceptor(QaLensOkHttpInterceptor())   // metadata only; pass-through when flag is on
+    .addInterceptor(ChuckerInterceptor.Builder(context)
+        .redactHeaders("Authorization", "Cookie", "Set-Cookie").build())
+    .addInterceptor(QaLensOkHttpInterceptor())
     .build()
 
-// Option B — Chucker IS the source, no QaLens interceptor at all
-QaLens.configure { networkFromChucker = true }
-OkHttpClient.Builder()
-    .addInterceptor(ChuckerInterceptor.Builder(context).build())
-    .build()   // QaLens converts every Chucker transaction into a NetworkEvent via reflection
+// Other transports: create once, report each completed request once.
+val sink = QaLens.networkSink("Custom transport")
+sink.record(NetworkEvent(method = "GET", url = url, status = status, latencyMs = elapsedMs))
+
+// Overview also has a Copy integration check button.
+val setup = QaLens.integrationReport()
 </script>
+  <p class="sub">The sample tests Chucker 4.1.0 with Kotlin 2.0.21. Use a Chucker version compatible
+  with your app's Kotlin/AGP toolchain and matching debug/release no-op artifacts.
+  <a href="../docs/OSS_INTEGRATIONS.md">Full OSS integration contract</a>.</p>
   <div class="note"><b>Gate the automatic captures</b> without touching your client code:
   <code>captureNetwork = false</code> (pass-through interceptor) and <code>captureLogs = false</code>
   (silent Timber tree). Explicit <code>QaLens.event()/log()/breadcrumb()</code> calls keep working —

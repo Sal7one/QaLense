@@ -2,11 +2,13 @@
      docs/RELIABILITY_AUDIT.md and next.md before the historical sections below. -->
 # QaLens — Handover for AI Agents
 
-> **2026-09-08 update:** Read `docs/RELIABILITY_AUDIT.md` and the current `next.md` before relying
-> on the historical snapshot below. The audit found release-isolation and Android v2 archive
-> defects that the old matrix missed. Current baseline: 133 core tests, 5 body tests, 1 no-op
-> test, 44 web assertions, 18 backend tests; debug/release APKs and release isolation pass.
-> Include `:qalens-compose:testDebugUnitTest` and `:sample-app:verifyReleaseIsolation` in checks.
+> **2026-09-08 current baseline:** Read `docs/RELIABILITY_AUDIT.md`, `docs/OSS_INTEGRATIONS.md`
+> and `next.md` first; sections below retain historical context. Current checks: 156 core tests,
+> 13 body/OkHttp tests, 1 no-op parity test, 58 web assertions and 20 backend tests. Debug/release
+> APKs, four Android lint gates (zero errors), independent consumer builds and release isolation
+> pass. The emulator runner passes real Chucker 4.1.0 coexistence, adapter privacy, crash bridge
+> non-echo and recording retention. Chucker-as-source was invalid and has been removed; use both
+> interceptors. CI configuration is added but has not yet run on GitHub.
 
 > Read this FIRST when you inherit this repository. It is a snapshot of the state of the repo,
 > how to verify it, the rules you must not break, and where the work should go next.
@@ -61,7 +63,7 @@ qalens-android/         device/build info, shake, notification, FileProvider, pr
 qalens-compose/         THE debug implementation: QaLens facade, overlay + panels (incl. B14
                         global search), recorder (A5 watchdog, R9 v2 writer, R10 auto-finalize),
                         OkHttp interceptor (R8 bodies, capture flags), Timber tree, Chucker
-                        bridge + Chucker-as-source listener, webhook client (bounded pool,
+                        public launcher + generic transport sink, webhook client (bounded pool,
                         retry, chunked/resumable, offline queue), crash handler, connectivity,
                         memory monitor, Control Room, macros runner (B15 assertions)
 qalens-navigation-compose  QaLensNavHost route tracking
@@ -115,7 +117,7 @@ python3 backend/tests/test_backend.py      # backend e2e (stdlib only, Python 3.
 2. **Redaction is a choke-point.** Nothing leaves the device without `QaLensRedactor`/
    `config.redact`. New exports route through `QaLensReports` or the redactor directly.
 3. **`.sal` honesty.** `analysis.json.coverage` must say what is missing and WHY (not installed vs
-   disabled-by-config vs sourced-from-Chucker). Never infer health from absent tracks.
+   disabled-by-config and declared network sources). Never infer health from absent tracks.
 4. **Schema discipline.** `.sal` is versioned (`formatVersion` 1 and 2 both supported by all
    readers; >2 is refused loudly). Breaking changes bump the version and update writer + both
    readers + CLI + spec (docs/replay_backlog.md) together.
@@ -139,7 +141,7 @@ python3 backend/tests/test_backend.py      # backend e2e (stdlib only, Python 3.
 | Change the web player (new) | web/app-v2.js (modular: util/prefs/store/media/derive/render/wiring) |
 | Change the web player (classic) | web/app.js (kept for .appsal editor + fallback) |
 | Change the webhook contract | qalens-compose …/QaLensWebhook.kt + backend/server.py + tests |
-| Change capture flags | qalens-core …/QaLensConfig.kt (B17) + interceptor + timber tree + Chucker source |
+| Change capture flags | qalens-core …/QaLensConfig.kt (B17) + interceptor + timber tree + generic network capture policy |
 | Macro DSL/assertions | qalens-core …/QaLensMacros.kt (engine+parser) + compose …/QaLensMacros.kt (runner) |
 
 ## 7. Known deferred / open work (prioritized)

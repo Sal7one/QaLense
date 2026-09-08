@@ -5,6 +5,47 @@ network body observation, screenshot handling, archive readers, backend verdicts
 scripts. It replaces the earlier assumption that a green compile matrix proved release safety.
 It is a targeted reliability overhaul, not a claim that every SDK path is now defect-free.
 
+## OSS and Kotlin follow-up — 2026-09-08
+
+This pass reviewed the integration boundaries across Kotlin core, Android lifecycle/notifications,
+Compose facade/UI, navigation, replay, no-op and the sample, and reran web/backend regressions.
+It is a targeted code audit plus module-wide automated checks, not proof that every code path is
+bug-free. The implementation and migration contract are in [OSS integrations](OSS_INTEGRATIONS.md).
+
+Concrete fixes: invalid Chucker listener/launcher reflection, silent interception disable under
+its legacy flag, duplicate OkHttp observations, inconsistent custom-network/crash privacy,
+crash-vendor echo, missing network-state permission, incorrect default-network transitions,
+notification permission race handling and unobserved Compose configuration reads. New capabilities
+include generic network sinks, declared network source coverage, integration diagnostics and an
+Overview copy action/public Chucker launcher. Composite consumers now resolve the same coordinates
+used by publications, and an independent app compiles public APIs against active/no-op variants.
+
+Validation on the final implementation:
+
+- **156 core tests, 13 body/OkHttp tests, 1 no-op parity test:** zero failures/errors/skips.
+- **58 web assertions and 20 backend tests:** pass.
+- Debug/release sample and independent consumer APKs build; the instrumented APK builds.
+- Both release dependency gates pass. The sample requires QaLens and Chucker no-op artifacts and
+  rejects active capture/replay/Chucker modules. The consumer checks QaLens isolation separately.
+- Lint passes for compose, android, navigation-compose and replay with **zero errors**. There are
+  25 warnings and 3 informational findings, including dependency upgrades, lifecycle/static
+  references, an API-level metric warning, notification navigation and text/allocation suggestions.
+  No new lint baseline/suppression was introduced to hide these findings.
+- Emulator-5554 returns `INSTRUMENTATION_CODE: -1`: real Chucker 4.1.0 launcher intent, loopback
+  response preservation, exactly one observation under duplicate interceptor installation,
+  generic adapter redaction/disable behavior, crash bridge non-echo and both retention cases pass.
+  The final limited archive observed 100 requests, retained 63 and disclosed 37 omissions; the
+  first retained all 600. The limited archive also decoded through the actual CLI reader.
+  The merged release manifest contains no SDK/Chucker components or debug cleartext override.
+- CI, issue/PR templates and contribution instructions are added. Workflow commands pass locally;
+  the GitHub workflow itself has not been executed remotely. No artifacts were published.
+
+Chucker 4.2.0 failed compilation with this repo's Kotlin 2.0.21 because its published metadata is
+2.2.0. The executed sample baseline is 4.1.0; do not bypass metadata checks or claim 4.2/4.3 runtime
+coverage. Generic callbacks support host-owned integrations; native Ktor/Cronet/Apollo plugins and
+an actual Sentry dependency/example are not shipped. Runtime full observer teardown, binary API
+compatibility and the physical-device recovery/privacy matrix remain open.
+
 ## Confirmed defects fixed
 
 | Area | Reproduced defect / code finding | Result |

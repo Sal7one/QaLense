@@ -5,7 +5,10 @@ QaLens is a **debug-only** QA evidence SDK for Android Jetpack Compose apps: flo
 session recording to a portable `.sal` file, raw-SQL/data tooling, macros, webhook upload for AI
 analysis, and a release build that is a guaranteed no-op.
 
-Requirements: Android app with Jetpack Compose, `minSdk >= 23`, Kotlin, AGP 8+.
+Requirements: Android app with Jetpack Compose and `minSdk >= 23`. The tested build baseline is
+Kotlin 2.0.21, AGP 8.7.3, JDK 17, SDK 35 and Gradle 9.1.0. Check host toolchain compatibility
+before choosing newer optional-library versions. Composite consumers also need
+`android.useAndroidX=true` in their own `gradle.properties`.
 
 ---
 
@@ -15,8 +18,11 @@ Option A (this repo as included builds / module projects):
 
 ```kotlin
 // settings.gradle.kts of your app — adjust the path
-includeBuild("../qalens-compose-overlay")   // or copy the qalens-* modules in
+includeBuild("../QaLense")   // or copy the qalens-* modules in
 ```
+
+The repository sets `com.qalens` coordinates on its projects so composite substitution works.
+The separate `integration-tests/consumer` app verifies this path in debug and release.
 
 Option B (mavenLocal — run once in this repo: `./gradlew publishToMavenLocal`):
 
@@ -118,30 +124,39 @@ Three `QaLensConfig` flags decide which automatic captures run (explicit
 QaLens.configure {
     captureNetwork = true        // default: QaLensOkHttpInterceptor logs metadata
     captureLogs = true           // default: QaLensTimberTree mirrors Timber lines
-    networkFromChucker = false   // opt-in: Chucker becomes the network source instead
+    networkFromChucker = false   // legacy flag; leave false (see Chucker below)
 }
 ```
 
 - **`captureNetwork = false`** — the interceptor becomes a pure pass-through (zero reads).
 - **`captureLogs = false`** — the Timber tree drops every line.
-- **`networkFromChucker = true`** — if your app already runs Chucker, QaLens registers a
-  Chucker `TransactionListener` (reflection, optional dependency) and converts every transaction
-  into a NetworkEvent. No `QaLensOkHttpInterceptor` needed — it auto-passes-through so nothing
-  is double-counted. If Chucker is missing, QaLens logs a warning and falls back to the
-  interceptor. Recommended Chucker setup (both inspectors, one client):
+- **Chucker coexistence:** attach both interceptors to the client that makes the request. Chucker
+  owns its full-body inspector; QaLens captures its own metadata. Chucker has no public live
+  transaction listener. The old `networkFromChucker` setting is retained for compatibility and
+  no longer disables QaLens capture.
 
 ```kotlin
 OkHttpClient.Builder()
-    .addInterceptor(ChuckerInterceptor.Builder(context).build())  // first — full bodies
-    .addInterceptor(QaLensOkHttpInterceptor())                    // second — metadata (or omitted
-                                                                  //           when networkFromChucker)
+    .addInterceptor(ChuckerInterceptor.Builder(context)
+        .redactHeaders("Authorization", "Cookie", "Set-Cookie")
+        .build())
+    .addInterceptor(QaLensOkHttpInterceptor())
     .build()
 ```
 
-Either way the `.sal` stays honest: `analysis.json.coverage` records
-`networkCaptureEnabled` / `logCaptureEnabled` / `networkFromChucker` and its notes say
-"DISABLED via QaLensConfig…" instead of "not installed" — so AI analysis can tell a gated track
-from a missing one.
+Use matching Chucker debug/release artifacts. The sample pins **4.1.0** for this repository's
+Kotlin 2.0.21 toolchain; 4.2.0 ships Kotlin 2.2 metadata and fails with this compiler. Existing host
+apps should keep a Chucker version compatible with their own Kotlin/AGP toolchain. QaLens does not
+add Chucker transitively. [Compatibility details and other OSS adapters](docs/OSS_INTEGRATIONS.md).
+
+For another transport, create `val sink = QaLens.networkSink("Ktor")` once and call
+`sink.record(NetworkEvent(...))` from the completed-request/error callback. No extra dependency is
+needed. Capture switches, redaction and body opt-in apply to all adapter events. Do not mirror
+traffic already observed by QaLensOkHttpInterceptor.
+
+Open Overview → **Copy integration check**, or call `QaLens.integrationReport()`, to inspect declared
+sources and settings without exposing request contents. `analysis.json.coverage.networkSources`
+records declared adapter names; declaration alone does not prove complete capture.
 
 ## Step 6 — Enrichment (L4, all optional)
 

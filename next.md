@@ -6,7 +6,7 @@ for the latest verified behavior, commands, and limits.
 
 ## Verified baseline
 
-145 core tests, 5 body/stream tests, 1 no-op parity test, 58 web assertions, 20 backend tests.
+156 core tests, 13 body/OkHttp tests, 1 no-op parity test, 58 web assertions, 20 backend tests.
 Debug and release APKs build; release dependency isolation is enforced by
 `:sample-app:verifyReleaseIsolation`. `./demo.sh test` includes the expanded matrix.
 Use JDK 17 and cached Gradle 9.1.0 as documented in HANDOVER.md.
@@ -30,6 +30,18 @@ Use JDK 17 and cached Gradle 9.1.0 as documented in HANDOVER.md.
   and size budgets, omissions and Android callback drops appear in coverage, replay and reports.
 - A device regression runner verifies actual archive retention and budget warnings.
 
+## Shipped in the OSS integration pass
+
+- Replace invalid Chucker transaction reflection with supported interceptor coexistence and its
+  public launcher. Real device baseline: Chucker 4.1.0, Kotlin 2.0.21; newer metadata requires
+  a host-compatible toolchain. Legacy mode no longer silently disables capture.
+- Add a generic network sink, shared privacy/capture policy, declared source diagnostics and
+  an Overview integration check. Deduplicate repeated OkHttp interceptors per call.
+- Bound/redact external crash evidence and prevent vendor callback echo loops.
+- Fix network-state permission, default-network handling and stale Compose settings reads.
+- Add independent debug/release consumer builds, a public contribution guide, issue/PR templates
+  and GitHub CI. CI commands pass locally; the remote workflow has not yet run.
+
 ## Next — evidence reliability
 
 1. **P1: visual privacy.** Raw screenshot/video pixels are not text-redacted. Design masking and
@@ -47,7 +59,11 @@ Use JDK 17 and cached Gradle 9.1.0 as documented in HANDOVER.md.
 - Webhook query encoding/fragment handling and backend mock access defaults.
 - Web escaping regression tests and load/compare race tests in both players.
 - Error-buffer eviction and background logging concurrency tests.
-- Jank sparkline, accurate connectivity-estimate labels, reference Sentry bridge.
+- Jank sparkline and a versioned, native Sentry integration example.
+- Runtime enable/disable teardown and complete public API/binary compatibility checks.
+- Native Ktor/Cronet/Apollo adapters beyond the generic transport callback.
+- Resolve lifecycle/static-reference lint warnings with rotation/leak instrumentation; update
+  Kotlin/AGP/dependencies as a coordinated compatibility pass, not isolated version bumps.
 - **R9-WebP:** video/frame format remains unchanged; JPEG frames, gzip tracks, CRC32, v1/v2 readers.
 - iOS capture remains unimplemented; format/replay/backend are platform-neutral.
 

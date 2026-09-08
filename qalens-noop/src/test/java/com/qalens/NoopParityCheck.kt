@@ -51,6 +51,8 @@ object NoopParityCheck {
         q.selectNode(null)
 
         // Network
+        q.networkSink("Custom").record(NetworkEvent(method = "GET", url = "http://test"))
+        check(q.integrationReport().contains("no-op"))
         q.markNetworkAvailable()
         q.logNetwork(NetworkEvent(method = "GET", url = "http://test"))
         q.clearNetworkLog()
@@ -99,6 +101,7 @@ object NoopParityCheck {
             override fun enrich(crash: QaLensCrash, evidence: String) {}
             override fun onCrash(callback: (QaLensCrash) -> Unit) {}
         })
+        q.reportCrash(QaLensCrash(type = CrashType.CRASH, thread = "test", throwable = null, stackTrace = ""))
         q.lastCrash()
 
         // B5: connectivity

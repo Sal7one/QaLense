@@ -414,7 +414,8 @@ internal object QaLensSessionRecorder {
                         connectivityCount = sessionConnectivity.size,
                         networkCaptureEnabled = cfg.captureNetwork,
                         logCaptureEnabled = cfg.captureLogs,
-                        networkFromChucker = cfg.networkFromChucker,
+                        networkFromChucker = false,
+                        networkSources = s.networkSources.toList(),
                         recordingRetention = captured.retention
                     ),
                     startMillis = startMs,

@@ -60,6 +60,7 @@ object QaLens {
     fun clearBookmarks() = Unit
 
     fun bridgeCrashes(bridge: QaLensCrashBridge) = Unit
+    fun reportCrash(crash: QaLensCrash) = Unit
     fun lastCrash(): QaLensCrash? = null
     fun currentConnectivity(): ConnectivitySnapshot? = null
 
@@ -90,6 +91,8 @@ object QaLens {
     fun notifyDataChange(source: String, tableName: String, changeType: ChangeType) = Unit
     fun notifyDataError(source: String, error: String) = Unit
 
+    fun networkSink(source: String): QaLensNetworkSink = QaLensNetworkSink { }
+    fun integrationReport(): String = "QaLens disabled (release no-op)"
     fun markNetworkAvailable() = Unit
     fun logNetwork(event: NetworkEvent) = Unit
     fun clearNetworkLog() = Unit

@@ -35,9 +35,9 @@ afterEvaluate {
     publishing {
         publications {
             register<MavenPublication>("release") {
-                groupId = "com.qalens"
+                groupId = project.group.toString()
                 artifactId = "qalens-navigation-compose"
-                version = "0.9.0"
+                version = project.version.toString()
                 from(components["release"])
             }
         }

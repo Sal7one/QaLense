@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -98,6 +99,7 @@ internal fun QaLensInspectorPanel(
     onToggleInspect: () -> Unit,
     onSelectNode: (InspectNode?) -> Unit
 ) {
+    val config by QaLens.config.collectAsState()
     var tab by remember { mutableStateOf(lastInspectorTab) }
     var customTabTitle by remember { mutableStateOf<String?>(null) }
     var globalSearch by remember { mutableStateOf("") }
@@ -355,7 +357,7 @@ internal fun QaLensInspectorPanel(
             } else {
                 val activeCustom = customTabs.firstOrNull { it.title == customTabTitle }
                 if (activeCustom != null) {
-                    ScrollContent { activeCustom.Content(state, QaLens.config.value) }
+                    ScrollContent { activeCustom.Content(state, config) }
                 } else when (tab) {
                     InspectorTab.OVERVIEW      -> ScrollContent { OverviewTab(state, context) { select(it) } }
                     InspectorTab.BUNDLE        -> ScrollContent { BugBundleTab(state, context) }
@@ -835,6 +837,7 @@ private fun LogChip(label: String, active: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun NetworkTab(state: QaLensUiState) {
+    val cfg by QaLens.config.collectAsState()
     val events = state.networkEvents.asReversed()
     val health = remember(state.networkEvents) {
         NetworkHealthEngine.summarize(state.networkEvents)
@@ -857,7 +860,7 @@ private fun NetworkTab(state: QaLensUiState) {
                         com.qalens.ConnectivityType.CELLULAR -> "cell"
                         com.qalens.ConnectivityType.ETHERNET -> "eth"
                         com.qalens.ConnectivityType.UNKNOWN -> "?"
-                    } + (if (conn.strengthBars > 0) " ${conn.strengthBars}▮" else "")
+                    } + (if (conn.strengthBars > 0) " · bandwidth ${conn.strengthBars}/4 (est.)" else "")
                     Text(connLabel, color = connColor, fontSize = 10.sp,
                         modifier = Modifier.background(connColor.copy(alpha = 0.12f), MaterialTheme.shapes.extraSmall)
                             .padding(horizontal = 5.dp, vertical = 1.dp))
@@ -869,12 +872,11 @@ private fun NetworkTab(state: QaLensUiState) {
         Spacer(Modifier.height(6.dp))
 
         if (events.isEmpty()) {
-            val cfg = QaLens.config.value
             val hint = when {
                 !cfg.captureNetwork ->
                     "Network capture disabled (QaLensConfig.captureNetwork = false)."
                 cfg.networkFromChucker ->
-                    "Waiting for Chucker transactions — source is Chucker (TransactionListener)."
+                    "Attach QaLensOkHttpInterceptor alongside ChuckerInterceptor; automatic Chucker transaction forwarding is unsupported."
                 else ->
                     "No requests yet. Add QaLensOkHttpInterceptor to your OkHttpClient."
             }
@@ -1236,8 +1238,18 @@ internal fun QaLensWatchHud(
 
 @Composable
 private fun OverviewTab(state: QaLensUiState, context: Context, onNavigateTab: (InspectorTab) -> Unit) {
+    val config by QaLens.config.collectAsState()
     val score = state.score
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+        Text("Network sources: " + state.networkSources.sorted().joinToString().ifEmpty { "none declared" },
+            color = PanelMuted, fontSize = 11.sp)
+        PanelButton("Copy integration check", tint = PanelAccent) {
+            copy(context, "QaLens integration", QaLens.integrationReport())
+        }
+        if (QaLensChuckerBridge.isAvailable(context)) {
+            PanelButton("Open Chucker", tint = PanelAccent) { QaLensChuckerBridge.launch(context) }
+        }
 
         // Build safety banner
         state.buildSafety?.let { bs ->
@@ -1278,7 +1290,7 @@ private fun OverviewTab(state: QaLensUiState, context: Context, onNavigateTab: (
             }
         }
         state.crashes.lastOrNull()?.let { crash ->
-            Text("${crash.type.display}: ${QaLens.config.value.redact(crash.throwable.orEmpty())}",
+            Text("${crash.type.display}: ${config.redact(crash.throwable.orEmpty())}",
                 color = PanelError, fontSize = 12.sp, maxLines = 3)
             PanelButton("Copy crash with evidence", tint = PanelError) {
                 val config = QaLens.config.value

@@ -12,6 +12,9 @@ plugins {
 // Ship that folder (or scripts/release_internal.sh's zip of it) to your internal hosting;
 // consumers add it as a maven repo — see integration_llm.md.
 subprojects {
+    // Composite builds substitute com.qalens:<module> without publishing first.
+    group = "com.qalens"
+    version = providers.gradleProperty("qalensVersion").orElse("0.9.0").get()
     plugins.withId("maven-publish") {
         configure<PublishingExtension> {
             repositories {

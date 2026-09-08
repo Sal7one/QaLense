@@ -179,7 +179,7 @@ object SalTracks {
                 "latencyMs" to it.latencyMs,
                 "requestBytes" to it.requestBodyBytes,
                 "responseBytes" to it.responseBodyBytes,
-                "error" to it.error,
+                "error" to it.error?.let(config::redact),
                 // R8: re-redact body previews at encode time (belt-and-suspenders on top of the
                 // capture-time redaction in the interceptor).
                 "requestBodyPreview" to it.requestBodyPreview?.let(config::redact),

@@ -62,7 +62,9 @@ character-read budget and preservation of long-address masking. Custom regex tim
 The Android runner uses platform Instrumentation without third-party test dependencies. Run it on
 a **disposable sample-app emulator**: it launches the sample, generates synthetic evidence, opens
 the normal share chooser, and saves two recordings under the app's usual retention policy (which
-keeps five files). It does not send HTTP requests to the fixture hostname or share files externally.
+keeps five files). It does not send HTTP requests to the fixture hostname or share files externally. The OSS
+extension makes one loopback HTTP request through Chucker and QaLens. Cleartext is allowed only
+for local hosts in the sample debug manifest, never in the SDK or release manifest.
 
 ```sh
 # Use JDK 17 / Gradle 9.1.0 as documented in HANDOVER.md.
@@ -77,3 +79,9 @@ message. The runner checks that the early HTTP 500 and every synthetic log survi
 clearing, then exceeds the network byte budget and checks omitted counts against the actual ZIP
 track plus a warning in report.txt. This is a retention regression test, not a performance benchmark
 or a video/rotation/storage-failure compatibility test.
+
+The same runner now verifies Chucker 4.1.0 detection and launcher intent, preserved HTTP response,
+one observation under duplicate interceptor installation, generic adapter gating/redaction and
+no crash-vendor echo. The oversized-body case opts into body capture explicitly; shared capture
+policy now caps supplied previews before the recording byte budget is applied, so retained/dropped
+counts can differ from the original 41/59 run while the accounting invariant remains the same.

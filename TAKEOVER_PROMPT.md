@@ -1,5 +1,9 @@
 # Takeover Prompt — for the AI agent continuing QaLens
 
+> This prompt contains a historical matrix. Use HANDOVER.md’s current baseline and
+> docs/RELIABILITY_AUDIT.md, docs/OSS_INTEGRATIONS.md and CONTRIBUTING.md for the current
+> verification commands. Chucker-as-source was removed; the supported path uses both interceptors.
+
 > Paste this whole file into a fresh agent/session. It is self-contained: identity, first
 > actions, environment, rules, the open work, and a definition of done for your first session.
 
@@ -51,7 +55,7 @@ node web/tools/sal_report.js web/sample.sal   # exit 1 is CORRECT (the demo has 
 2. **Redaction is a choke-point** — nothing leaves the device without `QaLensRedactor` /
    `config.redact`; new exports route through it.
 3. **`.sal` honesty** — `analysis.json.coverage` must state what is missing and WHY (not
-   installed / disabled-by-config / sourced-from-Chucker). Never infer health from absent tracks.
+   installed / disabled-by-config / declared network sources). Never infer health from absent tracks.
 4. **Schema discipline** — `.sal` formatVersion 1 and 2 are both supported by all readers
    (Android, web, CLI); >2 is refused loudly. Breaking changes update writer + readers + CLI +
    spec together.
@@ -67,7 +71,7 @@ node web/tools/sal_report.js web/sample.sal   # exit 1 is CORRECT (the demo has 
 
 - Engines (score, classifier, redaction, reports, `.sal` encoders, AI digest, macros):
   `qalens-core/src/main/kotlin/com/qalens/`
-- Overlay, panels, recorder, webhook client, Chucker source, capture flags (B17):
+- Overlay, panels, recorder, webhook client, Chucker coexistence, capture flags (B17):
   `qalens-compose/src/main/java/com/qalens/`
 - Web player v2 modules: `web/app-v2.js` (util / prefs / store / media / derive / render / wiring)
 - Mock backend: `backend/server.py` (+ chunk protocol, dashboard, verdict)

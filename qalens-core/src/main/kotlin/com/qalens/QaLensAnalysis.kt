@@ -29,7 +29,8 @@ object QaLensAnalysis {
         val networkCaptureEnabled: Boolean = true,
         val logCaptureEnabled: Boolean = true,
         val networkFromChucker: Boolean = false,
-        val recordingRetention: RecordingEvidenceStore.Retention? = null
+        val recordingRetention: RecordingEvidenceStore.Retention? = null,
+        val networkSources: List<String> = emptyList()
     )
 
     fun digest(
@@ -56,9 +57,9 @@ object QaLensAnalysis {
         if (!coverage.networkCaptureEnabled)
             notes += "Network capture DISABLED via QaLensConfig.captureNetwork — network.json is blind by configuration."
         else if (coverage.networkFromChucker)
-            notes += "Network sourced from Chucker (TransactionListener) — no QaLensOkHttpInterceptor in the pipeline."
+            notes += "Legacy Chucker-source flag is set, but live transaction forwarding is unsupported. Verify the actual interceptor or adapter wiring."
         else if (!coverage.networkInterceptorInstalled)
-            notes += "Network capture NOT installed (QaLensOkHttpInterceptor missing) — network.json is blind, do not infer 'no traffic'."
+            notes += "Network capture NOT installed (no interceptor or external source declared) — network.json is blind, do not infer 'no traffic'."
         else if (coverage.networkCount == 0)
             notes += "Interceptor installed but no requests in the window — screens may be cached/offline."
         if (!coverage.logCaptureEnabled)
@@ -200,6 +201,7 @@ object QaLensAnalysis {
                 "video" to coverage.hasVideo,
                 "network" to (coverage.networkCount > 0),
                 "networkInterceptorInstalled" to coverage.networkInterceptorInstalled,
+                "networkSources" to coverage.networkSources.map(config::redact),
                 "networkCaptureEnabled" to coverage.networkCaptureEnabled,
                 "networkFromChucker" to coverage.networkFromChucker,
                 "logs" to (coverage.logCount > 0),

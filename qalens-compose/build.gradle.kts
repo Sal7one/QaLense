@@ -27,6 +27,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:okhttp:4.12.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
@@ -51,8 +52,7 @@ dependencies {
     // Room opt in. (observeDataStore needs only a kotlinx Flow, so it requires no extra dependency.)
     compileOnly("androidx.room:room-runtime:2.6.1")
 
-    // B5: QaLensChuckerBridge launches Chucker via reflection (no compileOnly dep needed — Chucker
-    // is on JitPack, and the bridge works whether or not the app ships it). See QaLensChuckerBridge.
+    // Chucker is optional. Its launcher uses the public API via reflection; no transitive dependency.
 }
 
 // Local/team integration: ./gradlew publishToMavenLocal →
@@ -64,9 +64,9 @@ afterEvaluate {
     publishing {
         publications {
             register<MavenPublication>("release") {
-                groupId = "com.qalens"
+                groupId = project.group.toString()
                 artifactId = "qalens-compose"
-                version = "0.9.0"
+                version = project.version.toString()
                 from(components["release"])
             }
         }

@@ -54,6 +54,13 @@ dependencies {
 }
 ```
 
+For another app, use [the tested integration guide](integration.md). Composite builds and a local
+Maven repository are supported; these coordinates are not claimed to be published on Maven Central.
+
+New integration tools: `QaLens.networkSink("transport")` for external request observations,
+`QaLens.reportCrash(crash)` for vendor-caught failures, and `QaLens.integrationReport()` for setup
+diagnostics. See [OSS integrations](docs/OSS_INTEGRATIONS.md) and [contributing](CONTRIBUTING.md).
+
 ## Integration levels (minimal developer impact)
 
 - **L0 — dependency only:** AndroidX Startup installs the overlay; lifecycle, semantics scan,
@@ -187,8 +194,7 @@ Timber.plant(QaLensTimberTree())
 // Capture feature flags (optional) — decide what feeds the tracks:
 //   captureNetwork = false   → interceptor becomes a pure pass-through
 //   captureLogs = false      → the Timber tree drops every line
-//   networkFromChucker = true → Chucker is the network source (TransactionListener),
-//                              no QaLens interceptor needed, nothing double-counted
+//   Chucker coexistence: add both interceptors; leave networkFromChucker false.
 // analysis.json.coverage records each mode so the .sal stays honest either way.
 
 // App-owned data → reports + .sal

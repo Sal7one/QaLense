@@ -3,8 +3,7 @@ package com.qalens.sample
 import android.app.Instrumentation
 import android.content.Intent
 import android.os.Bundle
-import com.qalens.NetworkEvent
-import com.qalens.QaLens
+import com.qalens.*
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -31,6 +30,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
                 check((0 until logs.length()).count { logs.getJSONObject(it).getString("message").startsWith("retention-log-") } == 600)
                 check(!coverage(zip).getBoolean("truncated"))
             }
+            verifyOssIntegrations()
             val limited = record("budget", 100, "x".repeat(100_000), clearUi = false)
             ZipFile(limited).use { zip ->
                 val coverage = coverage(zip)
@@ -41,7 +41,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
                 check(network.getLong("retained") == JSONArray(read(zip, "network.json")).length().toLong())
                 check(read(zip, "report.txt").contains("observations omitted"))
             }
-            result.putString("stream", "\nOK: 600 requests and logs survived UI clearing; byte-budget loss is disclosed.\n")
+            result.putString("stream", "\nOK: 600 requests and logs survived UI clearing; byte-budget loss is disclosed; Chucker coexistence, adapters and crash bridge pass.\n")
             result.putString("retainedArchive", retained.name)
             result.putString("limitedArchive", limited.name)
             finish(android.app.Activity.RESULT_OK, result)
@@ -57,7 +57,10 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         waitForIdleSync()
         val dir = File(targetContext.cacheDir, "qalens")
         val previous = dir.listFiles()?.map { it.name }?.toSet().orEmpty()
-        runOnMainSync { QaLens.startRecording() }
+        runOnMainSync {
+            QaLens.configure { captureNetworkBodies = body != null }
+            QaLens.startRecording()
+        }
         check(QaLens.state.value.isRecording) { "Recording did not start: ${QaLens.state.value.errors.map { it.message }}" }
         repeat(count) { n ->
             QaLens.logNetwork(NetworkEvent(method = "GET", url = "https://retention.test/$label/$n",
@@ -74,6 +77,65 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             Thread.sleep(100)
         }
         error("Recording did not finish saving")
+    }
+
+    private fun verifyOssIntegrations() {
+        check(QaLensChuckerBridge.isAvailable(targetContext)) { "Real Chucker was not detected" }
+        var launchIntent: Intent? = null
+        val launchContext = object : android.content.ContextWrapper(targetContext) {
+            override fun startActivity(intent: Intent) { launchIntent = intent }
+        }
+        check(QaLensChuckerBridge.launch(launchContext)) { "Public Chucker launcher failed" }
+        check(launchIntent?.component?.className?.startsWith("com.chuckerteam.chucker.") == true)
+
+        runOnMainSync { QaLens.configure { networkFromChucker = true; captureNetworkBodies = false } }
+        val payload = "{\"result\":\"preserved\"}"
+        java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
+            server.soTimeout = 5_000
+            val worker = java.util.concurrent.FutureTask {
+                server.accept().use { socket ->
+                    socket.soTimeout = 5_000
+                    val input = socket.getInputStream().bufferedReader()
+                    while (!input.readLine().isNullOrEmpty()) { /* consume request headers */ }
+                    socket.getOutputStream().write(("HTTP/1.1 201 Created\r\nContent-Type: application/json\r\n" +
+                        "Content-Length: ${payload.toByteArray().size}\r\nConnection: close\r\n\r\n" + payload).toByteArray())
+                }
+            }
+            Thread(worker, "qalens-fixture-http").start()
+            val client = SampleOssTools.httpClient(targetContext).newBuilder()
+                .addInterceptor(QaLensOkHttpInterceptor()).build() // accidental duplicate
+            val url = "http://127.0.0.1:${server.localPort}/oss-check?token=fixture-secret"
+            client.newCall(okhttp3.Request.Builder().url(url).build()).execute().use {
+                check(it.code == 201 && it.body?.string() == payload) { "Inspector altered the response" }
+            }
+            worker.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            waitForIdleSync()
+            val events = QaLens.state.value.networkEvents.filter { it.url.contains("/oss-check") }
+            check(events.size == 1 && events.single().status == 201) { "Chucker coexistence lost or duplicated the request" }
+            check(!events.single().url.contains("fixture-secret") && events.single().responseBodyPreview == null)
+        }
+        val sink = QaLens.networkSink("Test transport")
+        sink.record(NetworkEvent(method = "GET", url = "https://example.test/adapter", error = "person@example.test"))
+        waitForIdleSync()
+        check(QaLens.state.value.networkEvents.last().error == "[EMAIL_REDACTED]")
+        val count = QaLens.state.value.networkEvents.size
+        runOnMainSync { QaLens.configure { captureNetwork = false } }
+        sink.record(NetworkEvent(method = "GET", url = "https://example.test/disabled"))
+        waitForIdleSync()
+        check(QaLens.state.value.networkEvents.size == count)
+        runOnMainSync { QaLens.configure { captureNetwork = true; networkFromChucker = false } }
+
+        var echoed = 0
+        var inbound: ((QaLensCrash) -> Unit)? = null
+        QaLens.bridgeCrashes(object : QaLensCrashBridge {
+            override fun enrich(crash: QaLensCrash, evidence: String) { echoed++ }
+            override fun onCrash(callback: (QaLensCrash) -> Unit) { inbound = callback }
+        })
+        inbound!!(QaLensCrash(type = CrashType.CRASH, thread = "vendor", throwable = "person@example.test", stackTrace = "fixture"))
+        waitForIdleSync()
+        check(echoed == 0) { "Inbound crash was echoed back to the vendor" }
+        check(QaLens.state.value.crashes.last().throwable == "[EMAIL_REDACTED]")
+        QaLens.bridgeCrashes(QaLensNoopCrashBridge)
     }
 
     private fun read(zip: ZipFile, name: String): String {
