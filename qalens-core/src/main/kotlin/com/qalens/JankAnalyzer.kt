@@ -25,15 +25,10 @@ object JankAnalyzer {
             sampleCount = samples.size,
             jankCount = samples.count { it.jank },
             frozenCount = samples.count { it.frozen },
-            p95TotalMs = percentile(sorted, 95),
-            p99TotalMs = percentile(sorted, 99),
+            p95TotalMs = nearestRankPercentile(sorted, 95),
+            p99TotalMs = nearestRankPercentile(sorted, 99),
             worstFrameMs = sorted.last()
         )
     }
 
-    private fun percentile(sorted: List<Long>, pct: Int): Long {
-        if (sorted.isEmpty()) return 0
-        val idx = ((pct / 100.0) * sorted.size).toInt().coerceAtMost(sorted.size - 1)
-        return sorted[idx]
-    }
 }

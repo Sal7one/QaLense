@@ -83,8 +83,6 @@ object QaLensAnalysis {
             it.message.contains("error", true) || it.message.contains("[ERROR]") || it.message.contains("exception", true)
         }
         val latencies = network.filter { it.error == null }.map { it.latencyMs }.sorted()
-        fun p(pct: Int): Long =
-            if (latencies.isEmpty()) 0 else latencies[((pct / 100.0) * latencies.size).toInt().coerceAtMost(latencies.size - 1)]
 
         // ── Per-endpoint aggregates (redacted method+path, query stripped) ──
         fun endpointKey(e: NetworkEvent): String {
@@ -220,7 +218,7 @@ object QaLensAnalysis {
                 "errorLogs" to errorLogs.size,
                 "crashes" to crashes.size,
                 "avgLatencyMs" to (latencies.takeIf { it.isNotEmpty() }?.average()?.toLong() ?: 0L),
-                "p95LatencyMs" to p(95)
+                "p95LatencyMs" to nearestRankPercentile(latencies, 95)
             ).apply {
                 if (assertionFailures > 0) this["assertionFailures"] = assertionFailures
             },

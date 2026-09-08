@@ -30,10 +30,7 @@ object NetworkHealthEngine {
         val slow = network.count { !it.isError && it.latencyMs >= slowThresholdMs }
         val latencies = network.filter { !it.isError }.map { it.latencyMs }.sorted()
         val avg = if (latencies.isEmpty()) 0L else latencies.average().toLong()
-        val p95 = if (latencies.isEmpty()) 0L else {
-            val idx = ((latencies.size - 1) * 0.95).toInt().coerceIn(0, latencies.lastIndex)
-            latencies[idx]
-        }
+        val p95 = nearestRankPercentile(latencies, 95)
         val health = (100 - failed * P_FAILED - slow * P_SLOW).coerceIn(0, 100)
         return NetworkHealth(network.size, failed, slow, avg, p95, health)
     }

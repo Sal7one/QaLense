@@ -2,6 +2,12 @@
 
 ## Unreleased — post-0.9.0
 
+### Correctness
+- Use consistent nearest-rank p95/p99 calculations for network health, exported analysis,
+  and frame timing. Fix off-by-one ranks at exact percentile boundaries and underestimated
+  network p95 for small samples. Add seven core regression tests; preserve sample inclusion
+  rules, public APIs, and archive schemas.
+
 ### Backlog completion, hooks & mock backend
 - **Backlog completion.** Phases 2–5 shipped: B3 (pluggable tabs), B4 (GitHub/Linear/Markdown
   exports), B5 (connectivity + Chucker coexistence), B7 (coroutine exception handler), B8 (memory

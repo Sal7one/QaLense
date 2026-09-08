@@ -29,7 +29,7 @@ strikethrough headers for the record):
   retry (no retry on 4xx), chunked/resumable uploads, and an offline retry queue all landed.
 
 Nothing open today rises above **P2**. Verified numbers for this pass: `:qalens-core:test` =
-**110 tests / 0 failures**; `node web/test/read.test.js` = **32 assertions** (ALL PASS);
+**122 tests / 0 failures**; `node web/test/read.test.js` = **32 assertions** (ALL PASS);
 `python3 backend/tests/test_backend.py` = **15 tests** (OK); full Gradle run = **BUILD SUCCESSFUL,
 163 tasks**, including `:sample-app:compileReleaseKotlin` no-op parity.
 
@@ -114,14 +114,15 @@ over-broad rule silently over-redacts evidence. The default rules are safe and o
 *user-supplied* surface is unbounded. Consider anchoring defaults, documenting the risk, or capping
 the rule count.
 
-### P2 — Percentiles use a floor-index approximation (p95 ≈ max on small samples)
+### ~~P2 — Percentiles use a floor-index approximation~~ ✅ RESOLVED (2026-09-08)
 
-Both `QaLensAnalysis.digest`'s `fun p(pct)` and `JankAnalyzer.percentile` compute
-`sorted[((pct/100.0)*size).toInt().coerceAtMost(size-1)]` — a floor index, not nearest-rank
-(`ceil(pct/100*n)`) and not linear interpolation. For the sample sizes in play (a recording's
-latency list, a few hundred frame samples) p95 often resolves to the *max*. It's a documented
-approximation and fine for "is this session healthy?", but it slightly over-states tail latency and
-the code doesn't call the approximation out in a comment.
+`QaLensAnalysis`, `JankAnalyzer`, and `NetworkHealthEngine` now use one internal core
+nearest-rank helper: `ceil(percent * count / 100) - 1` as the zero-based index, calculated
+with integer arithmetic. For samples 1–20, p95 is 19; for 1–100, p95/p99 are 95/99.
+Small samples can correctly return the maximum. Empty input still returns zero.
+Seven regression tests cover boundaries and all consumers, preserving their existing
+sample populations (network health excludes HTTP failures; the digest includes measured
+HTTP failures but excludes transport errors). No public API or `.sal` schema change.
 
 ### P2 — `EvidenceBuilder` default `slowThresholdMs = 2000L` (drift risk only)
 
@@ -196,7 +197,7 @@ does the "stop came from outside QaLens" bookkeeping so `isRecording` can't stic
 | 3 | P1 | Global search across tracks | B14 |
 | 4 | P2 | Anchor/document user `addRedaction` regexes; cap rule count; note ReDoS risk | — |
 | 5 | P2 | Bounds-check `web/sal.js` central-directory sizes | C15 hardening |
-| 6 | P2 | Comment the percentile approximation in `QaLensAnalysis` + `JankAnalyzer` | — |
+| 6 | P2 | ✅ Shared nearest-rank percentiles with seven regression tests | Resolved 2026-09-08 |
 | 7 | P2 | Revisit `peekBodyText()` when okhttp exposes `peekBody` | — |
 | 8 | P2 | Optional body capture w/ redaction + size caps | R8 |
 | 9 | P2 | `formatVersion: 2` (gzip tracks, WebP frames, checksums) | R9 |

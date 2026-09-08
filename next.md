@@ -20,8 +20,8 @@ Status legend: ✅ **DONE** · 🚧 **IN PROGRESS** · ⏳ **NEXT** · ⬜ **PLA
 
 Priority legend: **P0** (correctness/reliability) · **P1** (high-value) · **P2** (polish).
 
-> **Build status (verified 2026-08, full matrix):** JAVA_HOME=temurin-17 + Gradle 9.1 ->
-> **BUILD SUCCESSFUL (163 tasks)**: `:qalens-core:test` = **110 tests, 0 failures**, `:qalens-noop:`
+> **Build status (verified 2026-09-08, full matrix):** JAVA_HOME=temurin-17 + Gradle 9.1 ->
+> **BUILD SUCCESSFUL (163 tasks)**: `:qalens-core:test` = **122 tests, 0 failures**, `:qalens-noop:`
 > `testDebugUnitTest` = **1 executed parity test** (A7 now RUNS, not only compiles), `:qalens-compose:`
 > `compileDebugKotlin`, `:qalens-replay:compileDebugKotlin`, `:sample-app:compileReleaseKotlin` all
 > green. `node web/test/read.test.js` = **ALL PASS (32 assertions**, incl. v2 gzip/CRC32 coverage);
@@ -31,6 +31,15 @@ Priority legend: **P0** (correctness/reliability) · **P1** (high-value) · **P2
 > (tour: `DEMO.md`, showcase page: `web/landing.html`).
 
 ---
+
+## P2 — Percentile correctness ✅ (2026-09-08)
+
+Network health, the exported analysis digest, and jank p95/p99 now share a pure core
+nearest-rank implementation (`ceil(percent * count / 100)`, converted to a zero-based index).
+Seven regression tests cover exact/fractional ranks, empty/singleton/repeated samples,
+invalid percentages, and all three consumers. Existing sample inclusion rules are preserved;
+there is no public API or archive schema change. A3 full decomposition remains next.
+
 
 ## Phase 1 — ✅ SHIPPED
 
