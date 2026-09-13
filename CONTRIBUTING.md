@@ -1,6 +1,6 @@
 # Contributing to QaLens
 
-Start with the [integration guide](integration.md), [current backlog](next.md) and
+Start with [HANDOVER.md](HANDOVER.md), the [integration guide](integration.md), [current backlog](next.md) and
 [OSS integration contract](docs/OSS_INTEGRATIONS.md). A small reproduction and regression test are
 more useful than a broad rewrite. Use synthetic data in public issues and fixtures.
 

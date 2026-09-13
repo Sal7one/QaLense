@@ -48,7 +48,8 @@ carry coverage, and text archives include warning notes. The CLI returns 1 for a
 exit behavior. Comparisons involving reported loss use “absent, fix unverified” instead of “fixed.”
 The mock backend marks partial evidence unknown unless a known failure warrants warning/critical.
 
-Configured structured-text redaction still runs at export. This change does not mask raw pixels.
+Configured structured-text redaction runs at export. Pixel masking and privacy defaults are
+separate controls documented in [client fixes](CLIENT_SAFETY_FIXES.md).
 
 ## Verification
 
@@ -61,9 +62,10 @@ character-read budget and preservation of long-address masking. Custom regex tim
 
 The Android runner uses platform Instrumentation without third-party test dependencies. Run it on
 a **disposable sample-app emulator**: it launches the sample, generates synthetic evidence, opens
-the normal share chooser, and saves two recordings under the app's usual retention policy (which
+the normal share chooser, and saves synthetic recordings under the app's usual retention policy (which
 keeps five files). It does not send HTTP requests to the fixture hostname or share files externally. The OSS
-extension makes one loopback HTTP request through Chucker and QaLens. Cleartext is allowed only
+extension makes a loopback HTTP request through Chucker and QaLens; the client-safety extension
+also tests upload queue pressure and transient failures on loopback servers. Cleartext is allowed only
 for local hosts in the sample debug manifest, never in the SDK or release manifest.
 
 ```sh
@@ -74,8 +76,8 @@ adb -s emulator-5554 install -r sample-app/build/outputs/apk/androidTest/debug/s
 adb -s emulator-5554 shell am instrument -w -r com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
 ```
 
-Success requires `INSTRUMENTATION_CODE: -1` and the `OK: 600 requests and logs survived UI clearing`
-message. The runner checks that the early HTTP 500 and every synthetic log survive dashboard
+Success requires the `OK: 600 requests and logs survived UI clearing` message (with raw
+instrumentation output, the successful result code is -1). Do not accept adb exit zero alone. The runner checks that the early HTTP 500 and every synthetic log survive dashboard
 clearing, then exceeds the network byte budget and checks omitted counts against the actual ZIP
 track plus a warning in report.txt. This is a retention regression test, not a performance benchmark
 or a video/rotation/storage-failure compatibility test.

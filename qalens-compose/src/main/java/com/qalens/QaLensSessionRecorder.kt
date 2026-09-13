@@ -23,7 +23,7 @@ import java.util.zip.ZipOutputStream
  *    dialog + foreground service). Needs on-device validation.
  *
  * Both modes capture the redacted timeline / network / logs / state tracks and a derived summary,
- * then package everything (see docs/replay_backlog.md, R2 + R5).
+ * then package everything (see docs/SAL_FORMAT.md).
  */
 internal object QaLensSessionRecorder {
 

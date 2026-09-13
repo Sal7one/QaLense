@@ -3,7 +3,8 @@
 This file is written to be followed mechanically — every step is copy-pasteable and verifiable.
 QaLens is a **debug-only** QA evidence SDK for Android Jetpack Compose apps: floating QA panel,
 session recording to a portable `.sal` file, raw-SQL/data tooling, macros, webhook upload for AI
-analysis, and a release build that is a guaranteed no-op.
+analysis, and a separate no-op artifact for release. Verify the release dependency graph as well
+as compilation; merely compiling release does not prove active capture was excluded.
 
 Requirements: Android app with Jetpack Compose and `minSdk >= 23`. The tested build baseline is
 Kotlin 2.0.21, AGP 8.7.3, JDK 17, SDK 35 and Gradle 9.1.0. Check host toolchain compatibility
@@ -65,13 +66,13 @@ dependencies {
 
 Nothing. AndroidX Startup auto-installs the overlay in debug builds. Build, run the debug variant:
 you get the floating QA bubble, shake-to-open, the persistent notification, and a second launcher
-icon **"QaLens Control"** (the Control Room). Verify: `adb shell ams package …` not needed — just
-look for the bubble.
+icon **"QaLens Control"** (the Control Room). Verify the bubble on a running debug build.
 
 Manifest merging adds (debug only): `POST_NOTIFICATIONS` (requested at runtime),
 `SYSTEM_ALERT_WINDOW` (optional floating stop chip), `INTERNET` (webhook), a FileProvider under
 `${applicationId}.qalens.fileprovider`, the Control Room + player activities (own task affinities)
-and two services. No action needed unless you have manifest conflicts.
+and two services. Check the merged manifest for your variant; optional modules contribute only their own entries.
+`ACCESS_NETWORK_STATE` supports connectivity observation.
 
 ## Step 3 — Identify the build (L1, strongly recommended)
 
@@ -99,8 +100,8 @@ setContent { QaLensRoot { App() } }
 
 ## Step 4 — Screens & navigation (L2)
 
-Navigation Compose: replace `NavHost` with `QaLensNavHost` (same parameters, plus an optional
-`routeNameMapper: (String?) -> String`). Every route change lands in the timeline, screen-visit
+Navigation Compose: use `QaLensNavHost` with its supported parameters and optional
+`routeNameMapper: (String?) -> String?`; compare its signature with your existing NavHost first. Every route change lands in the timeline, screen-visit
 map, and recordings. Not using Navigation Compose? Call `QaLens.setScreen("Checkout", route)`
 yourself on screen changes.
 
@@ -113,12 +114,13 @@ Timber.plant(QaLensTimberTree())                                          // log
 
 Both are `compileOnly` deps of QaLens — it never forces OkHttp/Timber on you. Without the
 interceptor the network tab and `.sal` network track stay empty, and `analysis.json.coverage`
-explicitly says so (so AI analysis won't infer "no traffic").
+describes the declared sources. A generic sink can also supply observations; absence of events
+does not establish absence of traffic.
 
 ### Capture feature flags (what feeds the tracks — and what doesn't)
 
 Three `QaLensConfig` flags decide which automatic captures run (explicit
-`QaLens.event()/log()/breadcrumb()` calls always work — only automatic capture is gated):
+`QaLens.event()/log()/breadcrumb()` calls remain available while the master `enabled` flag is true):
 
 ```kotlin
 QaLens.configure {
@@ -222,26 +224,56 @@ The minimal QA panel surfaces the **5 most recently used macros** at the top. Ve
 ## Verification checklist (run these)
 
 1. `./gradlew :app:assembleDebug` → install → QA bubble visible, "QaLens Control" icon exists.
-2. `./gradlew :app:compileReleaseKotlin` → compiles against the no-op (API parity proof).
+2. `./gradlew :app:assembleRelease` → builds; inspect `releaseRuntimeClasspath` and the merged
+   manifest to confirm `qalens-noop` is present and active capture/replay modules are absent.
+   In this repository run `:sample-app:verifyReleaseIsolation` and the separate consumer gate.
 3. Record 10s, stop via the REC chip → `.sal` appears in Control Room → ▶ Play works.
 4. If you set a webhook: **Test endpoint** returns your backend's response in the card.
 
 ## Hard rules (do not violate)
 
 - Never ship `qalens-compose` in a release build — the `releaseImplementation(qalens-noop)` line
-  is mandatory, and release behavior must be verified with `compileReleaseKotlin`.
+  is mandatory. Build both variants and verify their resolved dependencies and merged manifests.
 - Don't put real bearer tokens in `.appsal` files you commit — export with secrets masked
   (default) and let each tester store their token in their on-device QA Profile.
-- All exports are redacted by QaLens defaults (JWTs, auth headers, cookies, emails, cards,
-  phones, long IDs) — add `addRedaction(...)` rules for your domain-specific secrets.
+- Structured exports use configured redaction rules; custom data, macro/SQL literals and pixels
+  need explicit privacy review. Add domain-specific rules and use secure windows/hidden regions.
 
 ## Known limits (set expectations)
 
 - Compose-first: semantics inspection covers Compose UI; classic Views appear only as frames.
 - The timeline never fabricates events: no interceptor → no network rows; no Timber → no logs.
-- Frame recording is ~2fps (permission-free); choose HD video (MediaProjection consent) for
-  animation-level detail. `FLAG_SECURE` windows black out captures.
+- Frame recording is ~2fps (permission-free). HD video requires `allowUnmaskedVideo=true` plus
+  Android consent and has no per-node masks. Secure windows are refused by screenshot/frame capture.
 - `tap`/`type` need semantics: tag your interactive elements (`Modifier.qaTag`) or they fall back
   to text matching.
 
-Client privacy defaults and migration: see [Android client fixes](docs/CLIENT_SAFETY_FIXES.md).
+## Privacy defaults and AI integration procedure
+
+Read [Android client fixes](docs/CLIENT_SAFETY_FIXES.md) for migration details. Keep these defaults
+unless the host explicitly chooses otherwise:
+
+```kotlin
+QaLens.configure {
+    enabled = BuildConfig.DEBUG
+    captureNetworkBodies = false
+    saveScreenshotsToGallery = false
+    allowUnmaskedVideo = false
+}
+```
+
+`takeScreenshot(share=false)` uses private cache. Compose password/hidden/redaction-matched regions
+are masked; arbitrary pixels are not. Coroutine helpers delegate uncaught failures in debug and
+release; they do not suppress exceptions. Imported webhook origin changes clear the local credential.
+A secret-free `.appsal` may still contain literal passwords in macro steps or SQL: review before sharing.
+
+An AI integrating another app should inspect its module names, Kotlin/AGP/Compose versions,
+Application, navigation, actual HTTP client, logging, crash vendor and existing build variants first.
+Use existing project identity/configuration when available; ask only for missing decisions that
+matter, such as an endpoint or additional sensitive capture. Do not invent BuildConfig fields,
+force optional tools, replace existing Chucker/Timber handlers, or assume all NavHost overloads match.
+
+Apply the smallest useful integration, keep privacy defaults, run both builds and dependency checks,
+then verify one synthetic request/report/frame recording on a disposable device if available.
+State exactly what was wired and tested. For SDK development, start at [HANDOVER.md](HANDOVER.md)
+instead. The independent consumer fixture is the executable example for external dependency setup.

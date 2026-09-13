@@ -2,6 +2,13 @@
 
 ## Unreleased — post-0.9.0
 
+### Handover consolidation — 2026-09-13
+- Replace conflicting onboarding snapshots with one self-contained HANDOVER and a short takeover
+  prompt; add root AGENTS navigation and a single current backlog.
+- Preserve archive details in docs/SAL_FORMAT.md; correct architecture, privacy, retry, integration
+  and verification guidance. Remove six superseded guides/snapshots; Git retains their history.
+- Refresh documentation links, including the landing-page footer. No runtime behavior changed.
+
 ### Android client safety — 2026-09-13
 - Preserve coroutine crash delivery in active and no-op SDKs; redact complete authorization values.
 - Make runtime disable stop capture/collectors/uploads, finalize recording and detach overlays.
@@ -28,7 +35,7 @@
 - Fix composite-build coordinates and add an independent consumer with debug/release checks,
   contribution and migration docs, issue/PR templates and a GitHub verification workflow.
 - Add eleven core and eight real OkHttp tests; extend device regression coverage for Chucker,
-  adapters and crash reporters. See docs/RELIABILITY_AUDIT.md for validation and limits.
+  adapters and crash reporters. See HANDOVER.md for validation and limits.
 
 ### Recording retention — 2026-09-08
 - Preserve early logs, requests, crashes, timings, connectivity, memory, bookmarks and state
@@ -53,7 +60,7 @@
 - Fix screenshot bitmap cleanup and overlay restoration; redact annotation text.
 - Add saving feedback, overview crash evidence/copy action, and jank sample counts.
 - Expand verification with lifecycle, window, crash, stream and actual-layout archive regressions.
-  See docs/RELIABILITY_AUDIT.md for results and remaining limitations.
+  See HANDOVER.md for results and remaining limitations.
 
 ### Correctness
 - Use consistent nearest-rank p95/p99 calculations for network health, exported analysis,
@@ -74,7 +81,7 @@
 - **Mock backend.** Stdlib-only `backend/server.py` (webhook + ingest + dashboard + uploads store +
   deterministic mock AI verdict) + `backend/tests/test_backend.py` (11 e2e tests) +
   `backend/README.md`.
-- **Review.** `docs/CODE_REVIEW.md` added — a frank engineering review of core/compose/web/backend.
+- **Review.** An engineering review of core/compose/web/backend was added; current work is tracked in `next.md`.
 
 ## 0.9.0 — 2026-06
 
@@ -138,4 +145,4 @@
 
 ### Distribution
 - `maven-publish` on all library modules: `./gradlew publishToMavenLocal` →
-  `com.qalens:qalens-*:0.9.0`. See [`integration_skill.md`](integration_skill.md) (AI agents) and [`integration.md`](integration.md) (humans).
+  `com.qalens:qalens-*:0.9.0`. See [`integration.md`](integration.md) for developer and AI-agent integration instructions.

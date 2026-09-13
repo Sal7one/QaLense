@@ -2,7 +2,7 @@ package com.qalens
 
 /**
  * The `.sal` session format (v1). A `.sal` is a ZIP containing JSON tracks + frame images; see
- * docs/replay_backlog.md. This file owns the *pure* parts: the data models and a small,
+ * docs/SAL_FORMAT.md. This file owns the *pure* parts: the data models and a small,
  * dependency-free JSON encoder used to write the manifest and track files. Decoding happens on the
  * Android side (the player) with `org.json`, so core stays dependency-free.
  *

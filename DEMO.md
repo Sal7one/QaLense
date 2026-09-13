@@ -84,16 +84,16 @@ The scripted **wow flow**:
   │ data sources    │     └──────────────────────┘    └────────────────────────┘
   └─────────────────┘              │                              │
                                    ▼                              ▼
-                    everything redacted at every export boundary — plus hooks:
+                    structured text redacted at export boundaries — plus hooks:
                     mobile → POST /webhook      web player → POST /api/ingest
                     (multipart .sal)            (JSON session summary)
 ```
 
 QaLens is a **debug-only** Android SDK for Jetpack Compose apps. Release builds link a no-op with
-the identical API, so it costs nothing in production. It never invents data it did not observe —
-the timeline is built only from navigation, network, Timber logs, and explicit events — and every
-byte that leaves the device passes one redaction choke-point (JWTs, bearer tokens, cookies, emails,
-cards, phone numbers, long IDs).
+the corresponding API, with no capture in production. It never invents data it did not observe —
+the timeline is built only from navigation, network, Timber logs, and explicit events — and structured reports pass configured text redaction. Screenshots default to private cache and
+mask known sensitive Compose regions; unmasked full-display video and gallery copies require host
+opt-in. See [client privacy](docs/CLIENT_SAFETY_FIXES.md).
 
 **Integration is four lines and stops where you want:**
 
@@ -140,7 +140,7 @@ failures, so a pipeline can gate on uploaded artifacts).
 The mobile hook retries flaky Wi-Fi (3 attempts, backoff, no retry on 4xx), queues uploads while
 offline, and switches to **chunked/resumable** transfer for large recordings. The mock backend is
 stdlib-only Python (`backend/server.py`) — run it anywhere, then swap its deterministic verdict for
-your real AI call. It ships with 11+ end-to-end tests (`python3 backend/tests/test_backend.py`).
+your real AI call. It ships with end-to-end tests (`python3 backend/tests/test_backend.py`).
 
 ---
 
@@ -155,25 +155,23 @@ your real AI call. It ships with 11+ end-to-end tests (`python3 backend/tests/te
 | **Tools** | deep-link scenarios, macros (with assertions), saved SQL |
 | **Inspect / Tag** | semantics bounds + warnings; every test tag drawn on its component |
 | **Logs** | filterable, level chips, duplicate collapsing |
-| **Record** | frames or HD video → `.sal` → share / replay / webhook |
+| **Record** | frames or explicitly enabled HD video → `.sal` → share / replay / webhook |
 | **Web player** | synced tracks, filmstrip, marks, AI Brief, compare two sessions, theatre mode |
 | **CLI** | `sal_report.js` markdown / `--json` / `--for-ai` / `--compare baseline.sal` |
 
 ---
 
-## 7. Prove it: every test suite
+## 7. Verify the demo
 
-```bash
-./demo.sh test       # or, individually:
-node web/test/read.test.js                       # web .sal reader regression (32 assertions)
-python3 backend/tests/test_backend.py            # mock backend end-to-end (15)
-./gradlew :qalens-core:test                      # 69+ pure-engine unit tests
-./gradlew :sample-app:compileReleaseKotlin       # THE no-op parity proof
-node web/tools/sal_report.js web/sample.sal      # CI gate — exits 1 on the demo failure
+```sh
+./demo.sh test                           # convenience Kotlin/web/backend/CLI checks
+node web/tools/sal_report.js web/sample.sal # expected exit 1: demo contains known failures
 ```
 
-(Build note: use JDK 17 — the repo pins Kotlin 2.0.21, which cannot parse newer JDKs. If the
-Gradle wrapper is downloading slowly, any cached Gradle 9.x binary works.)
+Use [CONTRIBUTING.md](CONTRIBUTING.md) for the complete Android test/lint/APK/consumer matrix and
+instrumented device runner. [HANDOVER.md](HANDOVER.md) records the dated baseline. Release safety
+requires a no-op dependency graph, not just a successful release compile. Use JDK 17 and the tested
+Gradle 9.1.0 binary; other 9.x versions are not automatically verified.
 
 ---
 
@@ -188,16 +186,17 @@ sample-app/             the banking demo — Settings → QaLens Demos drives ev
 web/                    Mission Control: zero-dependency player + sal_report CLI
 backend/                the mock webhook backend + dashboard + e2e tests
 demo.sh                 this tour, one command
-docs/CODE_REVIEW.md     the frank engineering review (findings + next steps)
-next.md                 the living backlog (most items now shipped)
+HANDOVER.md             current project state and incoming-agent instructions
+next.md                 the single prioritized backlog
 ```
 
 ---
 
 ## FAQ
 
-**Does it upload anything by itself?** No. Nothing leaves the device unless QA shares, copies, or
-configures a webhook URL. Reports and `.sal` tracks are redacted by default.
+**Does it upload anything by itself?** There is no configured destination by default. QA can
+explicitly share or upload; failed uploads may retry later against their recorded destination.
+Configured text redaction and limited pixel masks do not make arbitrary evidence safe to share.
 
 **What if my screen has no test tags?** QaLens scores *missing* tags as a testability finding —
 that is signal, not noise. `Modifier.qaTag/qaName` fixes it in one line.
