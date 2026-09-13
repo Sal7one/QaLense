@@ -2,6 +2,25 @@
 
 ## Unreleased — post-0.9.0
 
+### Overlay design tokens — 2026-09-13
+- Add `QaLensTokens`: one host-adaptive palette replacing the eight hard-coded palettes
+  scattered across the overlay, panel, sheet, canvases and Control Room. A light host gets the
+  dark overlay panel; a dark host gets an opaque light panel. The selector reads the
+  configuration night mask because the overlay attaches at decor level, outside the host
+  Material theme.
+- Fix a real contradiction: `#E53935` meant "accessibility warning" in the inspect canvas and
+  "untagged interactive component" in the tag canvas. Warning and untagged are now distinct.
+- Add `QaLensTokensTest`, which recomputes WCAG contrast and fails below AA 4.5:1. Measuring the
+  first draft showed its quoted 4.6–5.4:1 ratios were actually 2.2–3.8:1, because the signal
+  colours had been chosen against a light surface and drawn on a dark one; all values were
+  recomputed for the surface they are used on.
+- Migrate the QA bubble, inspect and tag canvases, panel scrim, tag chip and tag-mode legend to
+  tokens. The bubble keeps its original crisp white ring. Add `QaLensDimens` (4dp scale, one
+  radius family, 48dp touch minimum) and `QaLensType`.
+- Document the system, contrast tables and adoption order in docs/OVERLAY_DESIGN.md. The
+  inspector panel, minimal sheet, Control Room and REC chip still use their own literals and are
+  the remaining migration.
+
 ### Handover consolidation — 2026-09-13
 - Replace conflicting onboarding snapshots with one self-contained HANDOVER and a short takeover
   prompt; add root AGENTS navigation and a single current backlog.
