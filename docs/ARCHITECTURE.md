@@ -1,87 +1,89 @@
-# QaLens Architecture
+# QaLens architecture
 
-## Design principle
+Current at the client-fix baseline `7a05bee`. Start with [HANDOVER.md](../HANDOVER.md) for product
+context and verification. [next.md](../next.md) owns unresolved work.
 
-QaLens must make QA bug reports better without coupling the app to a heavy automation stack.
-Debug-only by construction: release builds link `qalens-noop` (identical public API, zero behavior).
+## Module boundaries
 
-## Component map (service-first since the 2026-06 overhaul)
+| Module | Responsibility and principal files |
+|---|---|
+| `qalens-core` | Pure Kotlin models/config/redaction; `QaLensRules`, `QaLensScore`, `QaLensBugClassifier`, `QaLensEvidence`, reports, contracts/macros, `QaLensSalFormat`, `QaLensAnalysis`; recording lifecycle/window/journal and capture/upload policies |
+| `qalens-android` | Device/build context, shake, notifications, FileProvider, persisted settings, `.appsal`, QA profiles |
+| `qalens-compose` | Active `QaLens` facade, `AnalysisEngine`, lifecycle installer, overlay/panels, screenshot/session capture, MediaProjection, OkHttp/Timber adapters, Chucker launcher, crash/connectivity/memory observers, macro driver, SQL and uploader |
+| `qalens-navigation-compose` | Navigation Compose wrappers and route reporting |
+| `qalens-replay` | Independent Android archive reader and Compose/Media3 player; does not depend on the active facade |
+| `qalens-noop` | Release API mirrors; no capture or UI; coroutine helpers still preserve host failure delivery |
+| `sample-app` | Banking demo, debug Chucker coexistence, release no-op dependencies, instrumented regression runner |
+| `integration-tests/consumer` | Separate composite-build application using normal coordinates; checks both API visibility and release isolation |
+| `web` | v2 and classic viewers, shared `sal.js` reader, sample fixtures/generator and CLI |
+| `backend` | Python stdlib mock upload/chunk server, persistence, dashboard and deterministic verdict |
 
-```text
-qalens-core            pure Kotlin/JVM — models, config, redaction, rules, engines (timeline,
-                       repro, classifier, network health, contracts, scenarios), .sal encoders
-                       (QaLensSalFormat) and the AI digest layer (QaLensAnalysis).
-qalens-android         device/build info, shake detector, notification, FileProvider,
-                       persisted prefs (QaLensPrefs).
-qalens-compose         the in-app layer:
-                       ├─ QaLens                  facade + StateFlow state
-                       ├─ QaLensActivityInstaller lifecycle hooks, overlay injection, healing,
-                       │                          notification-permission request, armed recordings
-                       ├─ QaLensOverlay           bubble / panel / inspect canvas / TAG canvas /
-                       │                          watch HUD / in-window REC chip
-                       ├─ QaLensInspectorPanel    the tabbed panel
-                       ├─ QaLensSessionRecorder   .sal recorder (frames or MediaProjection video)
-                       ├─ QaLensSystemChip        floating stop chip (draw-over-apps, optional)
-                       ├─ QaLensControlService    manifest-declared command service — ALL
-                       │                          notification actions route here (never dies
-                       │                          with an activity)
-                       ├─ QaLensControlActivity   "Control Room": own task + launcher icon;
-                       │                          recording controls, panic restore, overlay
-                       │                          kill-switch, recordings manager, webhook
-                       └─ QaLensWebhook           multipart .sal upload to an analysis backend
-qalens-navigation-compose  QaLensNavHost route tracking
-qalens-replay          on-device .sal player (own task, no launcher icon; opened from the
-                       Control Room or a shared file)
-qalens-noop            release-safe mirror of every public API
-web/                   offline web player + sal_report CLI + sample generator
-backend/               mock Python webhook backend (stdlib-only): POST /webhook (mobile) +
-                       /api/ingest (web player), dashboard, uploads store, deterministic mock AI
-                       verdict — lets you test the webhook without a real server (see backend/README.md)
-```
+Main dependency direction is core → Android → active Compose → navigation wrappers. Replay is
+standalone. No-op shares core and UI/navigation types needed for its API; it is not dependency-free.
+Coroutines are exposed by active/no-op modules because Flow/StateFlow/exception handlers are public.
+OkHttp, Timber and Room are compile-only integration dependencies; Chucker stays optional.
 
-### Task model (load-bearing — do not regress)
+## Observation and analysis
 
-`QaLensControlActivity` and `QaLensPlayerActivity` run in their **own tasks**
-(`taskAffinity` + `singleTask`). History: when the player shared the app's task, both launcher
-icons resumed whatever was on top ("two icons, same activity" bug). The installer's
-`isInternal()` list keeps the overlay out of QaLens-owned screens.
+`QaLens.kt` owns public entry points and a `StateFlow<QaLensUiState>`. Its responsibility is still
+broad: extracting internal services remains unfinished. `AnalysisEngine` already separates derived
+analysis; avoid claiming a service-oriented rewrite is complete.
 
-### Recording stop controls (layered — never strand QA)
+- Startup installs lifecycle observation once. Host activity resume tracks the activity, attaches
+  the overlay and frame observers; internal Control Room/player/projection screens are excluded.
+- `ComposeSemanticsReader` inside `QaLensActivityInstaller.kt` uses `RootForTest.semanticsOwner`
+  and `getAllSemanticsNodes`, not the removed private-method reflection path. Legacy config naming
+  (`enableSemanticsReflection`) remains. Route changes clear old nodes; layout/manual changes
+  schedule coalesced inspection. Changes without layout still need broader validation.
+- Network/log/crash adapters apply shared gating/redaction and feed bounded dashboard histories.
+  Declared network sources describe wiring intent, not proof all traffic was observed.
+- Dirty/debounced analysis derives warnings, score, likely owner, build safety, screen quality,
+  flags and provider data. Providers are host code and should be lightweight.
+- On-demand `EvidenceBuilder`/reports use the same scoring inputs, including frame metrics.
+  Snapshot macros in core validate state; the Android named macro driver performs real semantics
+  actions and waits for asynchronous outcomes. These are different APIs.
 
-1. Floating system chip (`TYPE_APPLICATION_OVERLAY`, when granted) — own window, never in frames.
-2. In-window REC chip rendered by the overlay (fallback; hidden per-frame during PixelCopy).
-3. Notification action → `QaLensControlService` (manifest-declared, survives activity churn).
-4. Shake = emergency stop while recording.
-5. Control Room / panic restore (also discards stuck sessions and re-attaches the overlay).
+## Recording and media
 
-## Inspection data sources
+`RecordingLifecycle` governs starting, awaiting consent, active capture, saving and cancellation.
+Session identity rejects late callbacks. `RecordingEvidenceStore` retains session observations
+independently of dashboard clearing/eviction. [Retention](RECORDING_RETENTION.md) defines its budgets.
 
-1. **Manual metadata** via `Modifier.qaTag` and `Modifier.qaName`.
-2. **Compose semantics** via debug-only reflection into `AndroidComposeView.getSemanticsOwner()` —
-   contained in one reader object; acceptable because release is a no-op.
-3. **Opt-in capture**: OkHttp interceptor (network), Timber tree (logs), feature-flag provider,
-   DataStore/Room observers, screen contracts, deep-link scenarios.
+Frame mode captures the current window approximately twice per second. It masks sensitive Compose
+bounds before/after asynchronous capture and refuses `FLAG_SECURE`. Main owns View/semantics work;
+frame scaling/JPEG writes run on the serialized writer. Screenshot PNG/storage uses a bounded
+worker and atomic file publication; sharing/UI completion returns to main.
 
-## The `.sal` artifact
+Video mode requires host `allowUnmaskedVideo=true` and Android consent. The projection service
+encodes full-display H.264 without per-node masks. Sidecar frames provide a fallback if video is
+unusable. Video consent/start time and session start time must remain distinct where applicable.
+Stop freezes evidence and packages a v2 archive off main, publishing it atomically. Handled crashes
+attempt finalization before delegating; abrupt process death can still lose the in-memory journal.
 
-One ZIP per QA session: media (frames or video) + synced JSON tracks + `analysis.json`
-(precomputed digest, schema `qalens-analysis/1`) + `for_ai.md` (the archive explains itself to
-any AI). Spec and backlog: [`replay_backlog.md`](replay_backlog.md).
+Stop controls include the optional system overlay chip, in-window control, notification command
+service, shake and Control Room. `QaLensControlActivity` and `QaLensPlayerActivity` have separate
+task affinities/singleTask behavior: putting them back in the host task regresses launcher behavior.
 
-## Trust boundaries — what QaLens does and does not do
+## Shutdown and external effects
 
-- Debug builds only; release is a hard no-op.
-- **Nothing leaves the device unless QA explicitly acts**: the share sheet, or the Control Room
-  webhook (off until a URL is configured by the QA engineer; auth header + endpoint are theirs).
-- Every export path (clipboard, screenshot, `.sal`, webhook) runs through `QaLensRedactor`
-  (JWTs, auth headers, cookies, emails, cards, phones, long IDs).
-- Network bodies are **not** captured — only method/url(redacted)/status/latency/sizes.
-- "Draw over other apps" is **optional** (floating stop chip); everything works without it.
-- No root, no AccessibilityService, no global tap capture — the timeline never fabricates
-  events it didn't observe.
+Runtime disable gates new input, advances capture generation, stops/finalizes recording, cancels
+macros/uploads, detaches UI/frame/shake listeners and suspends watchdog, memory, connectivity,
+Room and DataStore collection. Re-enable restores registered observers. The installed exception
+chain preserves the host handler even while capture is disabled.
 
-## Where the old phase backlog went
+`QaLensWebhook` uses two workers and an eight-item queue, with visible rejection, in-flight dedupe,
+transient retry persistence and endpoint-bound queued items. Settings are captured per submission;
+auth does not follow redirects or an imported origin change. Configured retries may run later;
+“no automatic network calls ever” is not the contract. Full protocol: [backend](../backend/README.md).
 
-Phases 1–3 of the original plan shipped (panel, reports, network/flags/state adapters), the
-replay/AI work is tracked in [`replay_backlog.md`](replay_backlog.md), and stress tooling /
-baseline diffs remain future ideas.
+Text redaction is a boundary policy, not a guarantee about arbitrary pixels. Screenshot gallery
+copies and unmasked video are separate opt-ins. Chucker's storage is independent. `.appsal` can
+contain user-authored SQL/macro literals even when webhook secrets are omitted. See
+[client migration](CLIENT_SAFETY_FIXES.md) before changing these behaviors.
+
+## Replay and format
+
+The producer and readers share the [SAL contract](SAL_FORMAT.md). Android applies bounded ZIP/gzip
+extraction, canonical path validation, streaming CRC checks and session-cache cleanup. Frame decode
+is downsampled on IO, and event rows use lazy rendering. Web/backend do not yet share all Android
+limits or CRC rejection behavior; do not assume uniform guarantees across readers.
