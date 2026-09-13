@@ -44,7 +44,11 @@ class QaLensProjectionService : Service() {
             stopRecording()
             return START_NOT_STICKY
         }
-        startForegroundCompat()
+        try { startForegroundCompat() } catch (failure: Exception) {
+            QaLensSessionRecorder.onVideoConsentDenied(intent?.getStringExtra(EXTRA_VIDEO_PATH))
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
         @Suppress("DEPRECATION")
@@ -90,6 +94,7 @@ class QaLensProjectionService : Service() {
 
         val rec = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(this)
                   else @Suppress("DEPRECATION") MediaRecorder()
+        recorder = rec // release even if prepare fails
         rec.apply {
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)

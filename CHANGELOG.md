@@ -2,6 +2,20 @@
 
 ## Unreleased — post-0.9.0
 
+### Android client safety — 2026-09-13
+- Preserve coroutine crash delivery in active and no-op SDKs; redact complete authorization values.
+- Make runtime disable stop capture/collectors/uploads, finalize recording and detach overlays.
+- Move JPEG/PNG file work off main; atomically publish screenshots; add Compose privacy masks,
+  secure-window guards, private-cache defaults and explicit gallery/unmasked-video opt-ins.
+- Skip streaming response previews; isolate imported webhook credentials; handle queue pressure,
+  cancellation and persistent transient retries with settings captured per upload.
+- Bound Android replay extraction, text decoding and CRC work; clean session caches and decode
+  downsampled frames off main. Refresh route inspection, bound background SQL and report macro
+  failures accurately. Wire periodic memory sampling and preserve frame penalties in exports.
+- Export public coroutine types to consumers from both active and no-op artifacts.
+- Add fourteen JVM regressions and expand device coverage. See docs/CLIENT_SAFETY_FIXES.md for
+  migration behavior, executed checks and remaining validation limits.
+
 ### OSS integration and Kotlin hardening — 2026-09-08
 - Replace invalid Chucker-as-source reflection with public launcher and interceptor coexistence;
   legacy configuration no longer silently suppresses network capture. Sample uses Chucker 4.1.0

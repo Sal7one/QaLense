@@ -1,8 +1,13 @@
 # QaLens — current code review
 
-Updated 2026-09-08 after reviewing the current implementation rather than trusting the prior
+Updated 2026-09-13 after reviewing the current implementation rather than trusting the prior
 handover. Detailed fixes, reasoning, verification commands and limits are in
 [the reliability audit](RELIABILITY_AUDIT.md).
+
+## Android client findings addressed
+
+See [the client fix report](CLIENT_SAFETY_FIXES.md) for all fourteen findings, migration changes,
+regression coverage and remaining device-validation limits.
 
 ## OSS follow-up findings resolved
 
@@ -57,11 +62,11 @@ handover. Detailed fixes, reasoning, verification commands and limits are in
 
 | Priority | Finding | Next action |
 |---|---|---|
-| P1 | Pixel content is not redacted by text rules | Visual masking/privacy controls; correct any claims that all pixels are redacted |
+| P1 | Custom pixel content and opt-in video remain outside Compose masks | Use secure windows/hidden regions; extend device privacy coverage |
 | P1 | Android consent/rotation/storage/service recovery lacks full instrumentation coverage | Physical-device and emulator matrix, including interrupted saves |
 | P1 | Facade still owns too many responsibilities | Complete A3 services with injected dependencies and behavioral tests |
 | P2 | Custom regexes run without a time budget | Define bounded redaction policy and test adversarial patterns |
-| P2 | ZIP/gzip decoding lacks total expanded-byte budgets | Streaming limits across web, backend and Android readers |
+| P2 | Web/backend ZIP/gzip decoding lacks total expanded-byte budgets | Extend Android bounded-reader policy to the other readers |
 | P2 | Webhook extra query input is appended raw | Define encoding contract and handle existing queries/fragments |
 | P2 | Backend mock is unauthenticated | Keep development scope explicit and audit bind/access defaults |
 | P2 | Web HTML escaping relies on convention | Add hostile-recording UI regression coverage |

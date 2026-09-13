@@ -1,15 +1,22 @@
 # QaLens — current backlog
 
-Updated 2026-09-08. This replaces duplicated sections with contradictory shipped/open statuses.
+Updated 2026-09-13. This replaces duplicated sections with contradictory shipped/open statuses.
 See [HANDOVER.md](HANDOVER.md) for product context and [the audit](docs/RELIABILITY_AUDIT.md)
 for the latest verified behavior, commands, and limits.
 
 ## Verified baseline
 
-156 core tests, 13 body/OkHttp tests, 1 no-op parity test, 58 web assertions, 20 backend tests.
+162 core tests, 15 Compose/OkHttp tests, 2 no-op tests, 5 Android replay tests, 58 web assertions, 20 backend tests.
 Debug and release APKs build; release dependency isolation is enforced by
 `:sample-app:verifyReleaseIsolation`. `./demo.sh test` includes the expanded matrix.
 Use JDK 17 and cached Gradle 9.1.0 as documented in HANDOVER.md.
+
+## Shipped in the client audit pass
+
+Fourteen findings addressed: exception delegation, credential redaction/import isolation, runtime
+shutdown, screenshot/frame privacy and background encoding, stream-safe previews, bounded Android
+replay, refreshed inspection, background limited SQL, honest macros/uploads, periodic memory and
+consistent exported frame scores. See [migration and checks](docs/CLIENT_SAFETY_FIXES.md).
 
 ## Shipped in the reliability pass
 
@@ -44,8 +51,9 @@ Use JDK 17 and cached Gradle 9.1.0 as documented in HANDOVER.md.
 
 ## Next — evidence reliability
 
-1. **P1: visual privacy.** Raw screenshot/video pixels are not text-redacted. Design masking and
-   test it; distinguish labels, structured tracks and captured pixels in the product contract.
+1. **P1: expand visual privacy validation.** Compose masks and private-cache defaults now ship.
+   Validate password/custom content, multiple windows, rotation and opt-in full-display video
+   on physical devices; arbitrary pixels remain outside text redaction.
 2. **P1: instrumented recovery tests.** Rotation, consent denial and late consent, stopped
    projection, backgrounding, disk full, and crash while saving. Emulator plus physical devices.
 3. **A3: facade decomposition.** AnalysisEngine is extracted; recording lifecycle, recording
@@ -55,12 +63,12 @@ Use JDK 17 and cached Gradle 9.1.0 as documented in HANDOVER.md.
 
 ## Next — hardening and experience
 
-- Bounded custom regex policy and archive expanded-byte limits.
-- Webhook query encoding/fragment handling and backend mock access defaults.
+- Bounded custom regex policy and web/backend archive expanded-byte limits (Android now bounded).
+- Webhook query encoding contract and backend mock access defaults.
 - Web escaping regression tests and load/compare race tests in both players.
 - Error-buffer eviction and background logging concurrency tests.
 - Jank sparkline and a versioned, native Sentry integration example.
-- Runtime enable/disable teardown and complete public API/binary compatibility checks.
+- Room and concurrent enable/disable stress tests; complete public API/binary compatibility checks.
 - Native Ktor/Cronet/Apollo adapters beyond the generic transport callback.
 - Resolve lifecycle/static-reference lint warnings with rotation/leak instrumentation; update
   Kotlin/AGP/dependencies as a coordinated compatibility pass, not isolated version bumps.

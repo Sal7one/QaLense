@@ -211,7 +211,7 @@ The minimal QA panel surfaces the **5 most recently used macros** at the top. Ve
 |---|---|
 | `.sal` recording | ZIP of frames-or-video + synced timeline/network/logs/state + `analysis.json` (precomputed digest) + `for_ai.md` (self-describing for AI). Record from the panel/notification/Control Room. Replay on-device, in `web/index.html`, or `node web/tools/sal_report.js file.sal` (exit 1 on failures — CI gate). |
 | Webhook upload | Control Room → per recording **⇪ Webhook**: multipart `file` + `X-QaLens-App/-Version/-Env/-Device/-Platform/-User/-Sal-Name/-Sal-Size/-Digest` headers + query params. Your backend's response body is shown to the tester. |
-| Screenshots | Annotated, auto-saved to **Photos → Pictures/QaLens** (Android 10+), share optional. |
+| Screenshots | Annotated, saved to private app cache; sharing and Photos copies are opt-in. |
 | Bug reports | Redacted Jira/Slack/repro text via one-tap copy (`QaLens.buildJiraReport()` etc.). |
 
 > **Testing against the mock backend** — no real server needed. Run `python3 backend/server.py`,
@@ -243,3 +243,5 @@ The minimal QA panel surfaces the **5 most recently used macros** at the top. Ve
   animation-level detail. `FLAG_SECURE` windows black out captures.
 - `tap`/`type` need semantics: tag your interactive elements (`Modifier.qaTag`) or they fall back
   to text matching.
+
+Client privacy defaults and migration: see [Android client fixes](docs/CLIENT_SAFETY_FIXES.md).

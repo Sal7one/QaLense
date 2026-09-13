@@ -109,3 +109,10 @@ names in `analysis.json.coverage.networkSources`. Source names are capped at 16 
 - The device runner in [recording retention](RECORDING_RETENTION.md) also checks the real Chucker
   launcher intent, a loopback HTTP exchange through Chucker plus duplicated QaLens interceptors,
   adapter gating/redaction and absence of crash-vendor echo. It does not send data externally.
+
+## Client safety defaults
+
+See [client audit fixes](CLIENT_SAFETY_FIXES.md) for screenshot masking/private storage,
+full-display video opt-in, runtime shutdown and coroutine exception delivery. Opt-in OkHttp response
+previews read only known-length bodies of at most 64 KiB; SSE, larger and unknown-length responses
+remain metadata-only. QaLens never opens those response sources just to generate a preview.

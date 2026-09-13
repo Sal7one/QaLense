@@ -58,6 +58,7 @@ import com.qalens.android.QaLensPrefs
 import com.qalens.android.QaLensProfiles
 import com.qalens.android.QaProfile
 import java.io.File
+import kotlinx.coroutines.launch
 
 private val Bg        = Color(0xFF0B0F17)
 private val Card      = Color(0xFF151B26)
@@ -380,16 +381,17 @@ private fun ControlRoom(
             Spacer(Modifier.height(10.dp))
             // key(profilesVersion): switching profile re-seeds every field from the new prefs.
             androidx.compose.runtime.key(profilesVersion) {
-                SettingField("Endpoint URL", webhookUrl, "https://qa.example.com/api/sal") {
-                    webhookUrl = it
-                    QaLensPrefs.setWebhookUrl(context, it)
-                    QaLensProfiles.syncActiveFromPrefs(context)
-                }
-
                 var headerName by remember { mutableStateOf(QaLensPrefs.webhookHeaderName(context)) }
                 var headerValue by remember { mutableStateOf(QaLensPrefs.webhookHeaderValue(context)) }
                 var params by remember { mutableStateOf(QaLensPrefs.webhookParams(context)) }
                 var includeMeta by remember { mutableStateOf(QaLensPrefs.webhookIncludeMeta(context)) }
+                SettingField("Endpoint URL", webhookUrl, "https://qa.example.com/api/sal") {
+                    webhookUrl = it
+                    QaLensPrefs.setWebhookUrl(context, it)
+                    headerValue = QaLensPrefs.webhookHeaderValue(context)
+                    QaLensProfiles.syncActiveFromPrefs(context)
+                }
+
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.weight(0.45f)) {
@@ -705,6 +707,24 @@ private fun DatabaseSection(context: Context) {
     var result by remember { mutableStateOf<QaLensDataTools.QueryResult?>(null) }
     var queries by remember { mutableStateOf(QaLensAppSal.queries(context)) }
     var saveName by remember { mutableStateOf("") }
+    val queryScope = androidx.compose.runtime.rememberCoroutineScope()
+    var queryJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var cancellation by remember { mutableStateOf<android.os.CancellationSignal?>(null) }
+    var queryRunning by remember { mutableStateOf(false) }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { cancellation?.cancel(); queryJob?.cancel() } }
+    fun runQuery(db: String, query: String) {
+        if (queryRunning || query.isBlank()) return
+        val signal = android.os.CancellationSignal()
+        cancellation = signal
+        queryRunning = true
+        queryJob = queryScope.launch {
+            try {
+                result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    QaLensDataTools.runQuery(context.applicationContext, db, query, signal)
+                }
+            } finally { queryRunning = false }
+        }
+    }
 
     if (dbs.isEmpty()) {
         Text("No SQLite databases in this app yet.", color = TxtMuted, fontSize = 11.sp)
@@ -733,8 +753,9 @@ private fun DatabaseSection(context: Context) {
         "SELECT * FROM accounts LIMIT 10", singleLine = false) { sql = it }
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         SmallButton("▶ Run", Green) {
-            if (sql.isNotBlank()) result = QaLensDataTools.runQuery(context, selectedDb, sql)
+            runQuery(selectedDb, sql)
         }
+        if (queryRunning) SmallButton("Cancel") { cancellation?.cancel(); queryJob?.cancel() }
         SmallButton("Save as…", Accent) {
             if (saveName.isNotBlank() && sql.isNotBlank()) {
                 queries = queries.filterNot { it.name == saveName } + AppSalQuery(saveName.trim(), selectedDb, sql.trim())
@@ -761,7 +782,7 @@ private fun DatabaseSection(context: Context) {
                     .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(8.dp))
                     .padding(8.dp)
             ) {
-                Text("${r.totalRows} row(s) · ${r.durationMs}ms", color = Green, fontSize = 11.sp)
+                Text("${r.totalRows} rows shown (limit 100) · ${r.durationMs}ms", color = Green, fontSize = 11.sp)
                 Spacer(Modifier.height(4.dp))
                 Text(r.columns.joinToString(" │ "), color = Accent, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 r.rows.take(12).forEach { row ->
@@ -789,7 +810,7 @@ private fun DatabaseSection(context: Context) {
                 SmallButton("▶") {
                     selectedDb = q.db.ifBlank { selectedDb }
                     sql = q.sql
-                    result = QaLensDataTools.runQuery(context, selectedDb, q.sql)
+                    runQuery(selectedDb, q.sql)
                 }
                 Spacer(Modifier.width(4.dp))
                 SmallButton("✕", Red) {

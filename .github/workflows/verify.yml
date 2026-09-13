@@ -25,7 +25,7 @@ jobs:
           gradle-version: '9.1.0'
       - name: Kotlin tests, Android lint, both APKs and release isolation
         run: >-
-          gradle :qalens-core:test :qalens-compose:testDebugUnitTest :qalens-noop:testDebugUnitTest
+          gradle :qalens-core:test :qalens-compose:testDebugUnitTest :qalens-replay:testDebugUnitTest :qalens-noop:testDebugUnitTest
           :qalens-compose:lintDebug :qalens-android:lintDebug :qalens-navigation-compose:lintDebug
           :qalens-replay:lintDebug :sample-app:assembleDebug :sample-app:assembleRelease
           :sample-app:assembleDebugAndroidTest :sample-app:verifyReleaseIsolation

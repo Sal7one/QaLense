@@ -41,6 +41,26 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     // Live host-activity count → detect when the app is fully gone (vs. just rotating/backgrounded)
     // so QaLens tears down with it instead of leaving an orphaned ongoing notification.
     private var liveActivities = 0
+    private val resumed = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Activity, Boolean>())
+    private val activities = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Activity, Boolean>())
+
+    private val layoutListeners = java.util.WeakHashMap<Activity, android.view.ViewTreeObserver.OnGlobalLayoutListener>()
+    private fun observeLayout(activity: Activity) {
+        if (layoutListeners.containsKey(activity)) return
+        val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener { QaLens.scheduleInspection() }
+        layoutListeners[activity] = listener
+        activity.window.decorView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+    }
+    private fun stopLayout(activity: Activity) {
+        layoutListeners.remove(activity)?.let { activity.window.decorView.viewTreeObserver.removeOnGlobalLayoutListener(it) }
+    }
+
+    fun suspendCapture() {
+        activities.toList().forEach { stopLayout(it); detachOverlay(it); QaLensFrameMetrics.detach(it); stopShake(it) }
+    }
+
+    fun resumeCapture() { resumed.toList().forEach(::onActivityResumed) }
+
 
     // One shake detector per process
     private var shakeDetector: QaLensShakeDetector? = null
@@ -60,7 +80,7 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     }
 
     fun attachOverlay(activity: Activity) {
-        if (isInternal(activity)) return
+        if (isInternal(activity) || !QaLens.config.value.enabled) return
         if (!QaLens.state.value.overlayEnabled) return
         val decor = activity.window.decorView as? ViewGroup ?: return
         if (decor.findViewWithTag<View>(OVERLAY_TAG) != null) return
@@ -96,13 +116,19 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     fun rawSemanticsNodes(activity: Activity): List<SemanticsNode> =
         ComposeSemanticsReader.rawNodes(activity.window.decorView)
 
+    /** Capture must fail closed if a Compose root cannot be read. */
+    fun captureSemanticsNodes(activity: Activity): List<SemanticsNode> =
+        ComposeSemanticsReader.rawNodes(activity.window.decorView, strict = true)
+
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
-        if (!isInternal(activity)) liveActivities++
+        if (!isInternal(activity)) { liveActivities++; activities += activity }
     }
     override fun onActivityStarted(activity: Activity) = Unit
 
     override fun onActivityResumed(activity: Activity) {
         if (isInternal(activity)) return
+        resumed += activity
+        QaLens.trackActivity(activity)
         // Master run-condition (`QaLens.configure { enabled = false }`): fully inert — no overlay,
         // no notification, no shake. Cleans up anything attached before the app configured it off.
         if (!QaLens.config.value.enabled) {
@@ -111,6 +137,7 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
             return
         }
         QaLens.onActivityResumed(activity)
+        observeLayout(activity)
         attachOverlay(activity)
         QaLensFrameMetrics.attach(activity)
         healOverlayVisibility(activity)
@@ -127,6 +154,8 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
 
     override fun onActivityPaused(activity: Activity) {
         if (isInternal(activity)) return
+        resumed -= activity
+        stopLayout(activity)
         QaLens.onActivityPaused(activity)
         QaLensFrameMetrics.detach(activity)
         stopShake(activity)
@@ -143,6 +172,8 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
      */
     override fun onActivityDestroyed(activity: Activity) {
         if (isInternal(activity)) return
+        activities -= activity
+        resumed -= activity
         liveActivities = (liveActivities - 1).coerceAtLeast(0)
         if (liveActivities == 0 && !activity.isChangingConfigurations) {
             if (QaLens.state.value.isRecording) QaLensSessionRecorder.stop(share = false)
@@ -216,11 +247,11 @@ private object ComposeSemanticsReader {
      * public `getAllSemanticsNodes`). The previous reflection on internal members silently broke
      * against newer Compose (1.8+/BOM 2025.x name-mangles them) — no reflection, no breakage.
      */
-    fun rawNodes(rootView: View): List<SemanticsNode> =
+    fun rawNodes(rootView: View, strict: Boolean = false): List<SemanticsNode> =
         findComposeRoots(rootView).flatMap { root ->
             runCatching {
                 root.semanticsOwner.getAllSemanticsNodes(mergingEnabled = false)
-            }.getOrDefault(emptyList())
+            }.getOrElse { if (strict) throw it else emptyList() }
         }
 
     private fun findComposeRoots(view: View): List<androidx.compose.ui.node.RootForTest> {

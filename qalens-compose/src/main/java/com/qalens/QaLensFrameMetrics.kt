@@ -34,7 +34,7 @@ internal object QaLensFrameMetrics {
     private var currentActivity: android.app.Activity? = null
 
     fun attach(activity: Activity) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+        if (!QaLens.config.value.enabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
         // If the activity changed (rotation, recreation), detach from the old one first.
         if (attached && currentActivity !== activity) {
             detach(currentActivity ?: return)
@@ -59,13 +59,15 @@ internal object QaLensFrameMetrics {
 
     private val listener = @RequiresApi(Build.VERSION_CODES.N) object : Window.OnFrameMetricsAvailableListener {
         override fun onFrameMetricsAvailable(window: Window?, frameMetrics: FrameMetrics?, additionalData: Int) {
+            if (!QaLens.config.value.enabled || !attached) return
             QaLensSessionRecorder.evidence?.droppedFrames(additionalData)
             val m = frameMetrics ?: return
             val total = m.getMetric(FrameMetrics.TOTAL_DURATION).toLong()
             if (total <= 0) return
             val layout = runCatching { m.getMetric(FrameMetrics.LAYOUT_MEASURE_DURATION).toLong() }.getOrDefault(0L)
             val draw = runCatching { m.getMetric(FrameMetrics.DRAW_DURATION).toLong() }.getOrDefault(0L)
-            val gpu = runCatching { m.getMetric(FrameMetrics.GPU_DURATION).toLong() }.getOrDefault(0L)
+            val gpu = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                runCatching { m.getMetric(FrameMetrics.GPU_DURATION) }.getOrDefault(0L) else 0L
             // Android reports nanoseconds. Batch all observed frames once per second;
             // publishing each frame into Compose state creates a render/measurement feedback loop.
             if (pending.isEmpty()) handler.postDelayed(flush, 1_000L)

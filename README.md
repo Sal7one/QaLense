@@ -27,6 +27,9 @@ QA uses it without Android Studio. Developers integrate it once. Engineers stop 
 
 ---
 
+Client privacy and migration: [Android audit fixes](docs/CLIENT_SAFETY_FIXES.md). Screenshots now
+default to private app cache; full-display video requires explicit host opt-in.
+
 ## Modules
 
 ```text

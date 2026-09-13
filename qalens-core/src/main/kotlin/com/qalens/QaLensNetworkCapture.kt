@@ -51,6 +51,6 @@ object QaLensIntegrationDiagnostics {
         if (config.networkFromChucker)
             appendLine("ACTION: networkFromChucker is unsupported. Keep both ChuckerInterceptor and QaLensOkHttpInterceptor; Chucker has no public transaction listener.")
         appendLine("A declared source is not proof of traffic. Exercise a real request and check its network row.")
-        appendLine("Raw screenshots and video are not masked by text redaction.")
+        appendLine("Screenshots mask known sensitive Compose regions; custom pixels and full-display video are not masked automatically.")
     }
 }

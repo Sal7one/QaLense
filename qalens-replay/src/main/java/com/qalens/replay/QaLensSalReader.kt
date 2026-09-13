@@ -5,9 +5,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
-import java.util.zip.CRC32
-import java.util.zip.GZIPInputStream
-import java.util.zip.ZipInputStream
 
 // ── Player-side models (decoded from a .sal) ───────────────────────────────────
 
@@ -69,48 +66,63 @@ data class PlayerSession(
 object QaLensSalReader {
 
     fun read(context: Context, input: InputStream): PlayerSession {
-        val dir = File(context.cacheDir, "qalens_player/${System.currentTimeMillis()}").apply { mkdirs() }
-        unzip(input, dir)
+        val root = File(context.cacheDir, "qalens_player").apply { mkdirs() }
+        // Clean abandoned imports from earlier processes; active/recent sessions are released by UI.
+        root.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 86_400_000L }?.forEach { it.deleteRecursively() }
+        val dir = File(root, java.util.UUID.randomUUID().toString()).apply { check(mkdirs()) }
+        try {
+            BoundedArchive.extract(input, dir)
 
-        val manifest = runCatching { JSONObject(textOf(dir, "manifest.json")) }.getOrDefault(JSONObject())
-        val formatVersion = manifest.optInt("formatVersion", 1)
-        if (formatVersion > 2) {
-            throw IllegalArgumentException(
-                "Unsupported .sal formatVersion $formatVersion — this player supports versions 1 and 2."
+            val manifest = JSONObject(BoundedArchive.text(BoundedArchive.file(dir, "manifest.json"), 1024 * 1024L))
+            val formatVersion = manifest.optInt("formatVersion", 1)
+            if (formatVersion !in 1..2) {
+                throw IllegalArgumentException(
+                    "Unsupported .sal formatVersion $formatVersion — this player supports versions 1 and 2."
+                )
+            }
+            verifyChecksums(manifest, dir)
+            val app = manifest.optJSONObject("app")
+            val appLabel = buildString {
+                append(app?.optString("name") ?: "App")
+                app?.optString("version")?.takeIf { it.isNotBlank() }?.let { append(" $it") }
+                manifest.optString("environment").takeIf { it.isNotBlank() }?.let { append(" · $it") }
+            }
+
+            val frames = parseFrames(manifest, dir)
+            val start = manifest.optLong("startMillis", frames.firstOrNull()?.ts ?: 0L)
+            val end = manifest.optLong("endMillis", frames.lastOrNull()?.ts ?: (start + 1))
+            require(start >= 0 && end >= start && end - start <= 86_400_000L) { "Invalid recording time range" }
+            val videoName = manifest.optString("video").ifBlank { null }
+            val videoFile = videoName?.let { BoundedArchive.file(dir, it) }?.takeIf { it.exists() }
+
+            return PlayerSession(
+                rootDir = dir,
+                appLabel = appLabel,
+                startMs = start,
+                endMs = end,
+                fps = manifest.optInt("fps", 2),
+                frames = frames,
+                timeline = parseTimeline(arrayOf(dir, "timeline.json")),
+                network = parseNetwork(arrayOf(dir, "network.json")),
+                logs = parseLogs(arrayOf(dir, "logs.json")),
+                state = parseState(arrayOf(dir, "state.json")),
+                summary = parseSummary(dir),
+                report = textOf(dir, "report.txt"),
+                videoFile = videoFile,
+                videoStartMs = manifest.optLong("videoStartMillis", 0L).takeIf { it > 0L },
+                recordingWarnings = parseRecordingWarnings(dir)
             )
+        } catch (failure: Throwable) {
+            dir.deleteRecursively()
+            throw failure
         }
-        verifyChecksums(manifest, dir)
-        val app = manifest.optJSONObject("app")
-        val appLabel = buildString {
-            append(app?.optString("name") ?: "App")
-            app?.optString("version")?.takeIf { it.isNotBlank() }?.let { append(" $it") }
-            manifest.optString("environment").takeIf { it.isNotBlank() }?.let { append(" · $it") }
-        }
-
-        val frames = parseFrames(manifest, dir)
-        val start = manifest.optLong("startMillis", frames.firstOrNull()?.ts ?: 0L)
-        val end = manifest.optLong("endMillis", frames.lastOrNull()?.ts ?: (start + 1))
-        val videoName = manifest.optString("video").ifBlank { null }
-        val videoFile = videoName?.let { File(dir, it) }?.takeIf { it.exists() }
-
-        return PlayerSession(
-            rootDir = dir,
-            appLabel = appLabel,
-            startMs = start,
-            endMs = end,
-            fps = manifest.optInt("fps", 2),
-            frames = frames,
-            timeline = parseTimeline(arrayOf(dir, "timeline.json")),
-            network = parseNetwork(arrayOf(dir, "network.json")),
-            logs = parseLogs(arrayOf(dir, "logs.json")),
-            state = parseState(arrayOf(dir, "state.json")),
-            summary = parseSummary(dir),
-            report = textOf(dir, "report.txt"),
-            videoFile = videoFile,
-            videoStartMs = manifest.optLong("videoStartMillis", 0L).takeIf { it > 0L },
-            recordingWarnings = parseRecordingWarnings(dir)
-        )
     }
+
+    private val cleanup = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "qalens-replay-cleanup").apply { isDaemon = true }
+    }
+    fun release(session: PlayerSession) { cleanup.execute { session.rootDir.deleteRecursively() } }
+
 
     private fun parseRecordingWarnings(dir: File): List<String> {
         val text = textOf(dir, "analysis.json").ifBlank { return emptyList() }
@@ -166,7 +178,7 @@ object QaLensSalReader {
         return index.keys().asSequence().mapNotNull { key ->
             val ts = key.toLongOrNull() ?: return@mapNotNull null
             val rel = index.optString(key)
-            val f = File(dir, rel)
+            val f = BoundedArchive.file(dir, rel)
             if (f.exists()) FrameRef(ts, f) else null
         }.sortedBy { it.ts }.toList()
     }
@@ -215,10 +227,9 @@ object QaLensSalReader {
         val dir = loc[0] as File
         val name = loc[1] as String
         val text = textOf(dir, name).ifBlank { return emptyList() }
-        return runCatching {
-            val arr = JSONArray(text)
-            (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(map) }
-        }.getOrDefault(emptyList())
+        val arr = JSONArray(text)
+        require(arr.length() <= 40_000) { "Too many track observations" }
+        return (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(map) }
     }
 
     /**
@@ -226,73 +237,22 @@ object QaLensSalReader {
      * 0x1f 0x8b). v1 entries (plain text) pass through unchanged.
      */
     private fun textOf(dir: File, name: String): String {
-        val f = File(dir, name)
-        if (!f.exists()) return ""
-        return runCatching {
-            val raw = f.readBytes()
-            val content = if (isGzip(raw)) gunzip(raw) else raw
-            String(content, Charsets.UTF_8)
-        }.getOrDefault("")
+        val file = BoundedArchive.file(dir, name)
+        return if (file.exists()) BoundedArchive.text(file) else ""
     }
 
-    private fun isGzip(bytes: ByteArray): Boolean =
-        bytes.size >= 2 && bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte()
-
-    private fun gunzip(bytes: ByteArray): ByteArray =
-        GZIPInputStream(bytes.inputStream()).use { it.readBytes() }
-
-    private fun crc32Hex(bytes: ByteArray): String {
-        val crc = CRC32()
-        crc.update(bytes)
-        return "%08x".format(crc.value)
-    }
-
-    /**
-     * R9: verify per-entry CRC-32 (of *uncompressed* content) when present in manifest.files.
-     * files may be an array of strings (v1) or objects {name, crc32, compressed} (v2) — accept
-     * both. Mismatches only warn (never hard-fail), and missing entries are skipped.
-     */
     private fun verifyChecksums(manifest: JSONObject, dir: File) {
         val files = manifest.optJSONArray("files") ?: return
+        require(files.length() <= 4096) { "Excessive manifest entries" }
         for (i in 0 until files.length()) {
             val item = files.opt(i) ?: continue
-            val name: String
-            val expected: String?
-            when (item) {
-                is JSONObject -> {
-                    name = item.optString("name")
-                    expected = item.optString("crc32").takeIf { it.isNotBlank() }
-                }
-                is String -> { name = item; expected = null }
-                else -> continue
-            }
-            if (name.isBlank() || expected == null) continue
-            val f = File(dir, name)
-            if (!f.exists()) continue
-            val actual = runCatching {
-                val raw = f.readBytes()
-                crc32Hex(if (isGzip(raw)) gunzip(raw) else raw)
-            }.getOrNull() ?: continue
-            if (!actual.equals(expected, ignoreCase = true)) {
-                android.util.Log.w("QaLensSalReader", "CRC32 mismatch for " + name + ": expected " + expected + ", got " + actual)
-            }
-        }
-    }
-
-    private fun unzip(input: InputStream, dir: File) {
-        ZipInputStream(input).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
-                val out = File(dir, entry.name)
-                // Guard against zip path traversal.
-                if (!out.canonicalPath.startsWith(dir.canonicalPath)) { entry = zip.nextEntry; continue }
-                if (entry.isDirectory) {
-                    out.mkdirs()
-                } else {
-                    out.parentFile?.mkdirs()
-                    out.outputStream().use { zip.copyTo(it) }
-                }
-                entry = zip.nextEntry
+            val name = if (item is JSONObject) item.getString("name") else item.toString()
+            val file = BoundedArchive.file(dir, name)
+            require(file.isFile) { "Missing archive entry: $name" }
+            if (item is JSONObject && item.has("crc32")) {
+                val expected = item.getString("crc32")
+                val actual = BoundedArchive.checksum(file, decode = name.endsWith(".json"))
+                require(actual.equals(expected, ignoreCase = true)) { "Archive checksum mismatch: $name" }
             }
         }
     }

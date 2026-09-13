@@ -25,7 +25,7 @@ internal data class MacroRunResult(val passed: Boolean, val assertionFailures: I
  *   tap <target>           tap a component (target = test tag, else visible text/description)
  *   type <target> <text>   set a text field's value (target = test tag, else label)
  *   record [video]         start a recording        stop          stop it
- *   screenshot             save annotated screenshot to Photos
+ *   screenshot             save annotated screenshot to private app cache
  *   mark <text>            starred breadcrumb in the timeline
  *
  * `tap`/`type` drive the real Compose semantics actions — the same handlers UI tests invoke — so
@@ -40,6 +40,8 @@ internal object QaLensMacros {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     @Volatile private var running = false
+    private var job: kotlinx.coroutines.Job? = null
+    fun cancel() { job?.cancel() }
 
     /** In-memory record of each macro's most recent run (no persistence). */
     private val lastRun = mutableMapOf<String, MacroRunResult>()
@@ -47,11 +49,12 @@ internal object QaLensMacros {
     internal fun lastRunResult(name: String): MacroRunResult? = lastRun[name]
 
     fun run(macro: AppSalMacro) {
+        if (!QaLens.config.value.enabled) return
         if (running) { QaLens.log("Macro already running"); return }
         running = true
         QaLens.appContext?.let { QaLensAppSal.recordMacroUse(it, macro.name) }
         QaLens.breadcrumb("▶ Macro started: ${macro.name}")
-        scope.launch {
+        job = scope.launch {
             var assertionFailures = 0
             var stoppedStep: String? = null
             try {
@@ -64,9 +67,12 @@ internal object QaLensMacros {
                     if (verb == "assert" || verb == "if") {
                         val parsed = parseMacroLine(step)
                         if (parsed == null) {
-                            QaLens.log("Macro '${macro.name}': unknown assertion '$step' (skipped)")
-                            continue
+                            stoppedStep = step
+                            assertionFailures++
+                            QaLens.log("Macro '${macro.name}': invalid assertion '$step'")
+                            break@loop
                         }
+                        QaLens.refreshInspection()
                         val result = MacroEngine.execute(listOf(parsed), QaLens.state.value, QaLens.config.value)
                         val stepResult = result.steps.firstOrNull()
                         val detail = stepResult?.message?.takeIf { it.isNotBlank() }
@@ -87,15 +93,27 @@ internal object QaLensMacros {
                     // Interaction step — unchanged driver behavior.
                     val arg = step.substringAfter(' ', "").trim()
                     val ok = when (verb) {
-                        "deeplink" -> { QaLens.navigate(arg); true }
+                        "deeplink" -> QaLens.navigateObserved(arg)
                         "wait" -> { delay(arg.toLongOrNull()?.coerceIn(0, 30_000) ?: 500L); true }
                         "tap" -> tap(arg)
                         "type" -> type(arg.substringBefore(' '), arg.substringAfter(' ', "").trim())
-                        "record" -> { QaLens.startRecording(video = arg.equals("video", ignoreCase = true)); true }
-                        "stop" -> { QaLens.stopRecording(); true }
-                        "screenshot" -> { QaLens.takeScreenshot(share = false); true }
+                        "record" -> {
+                            val video = arg.equals("video", ignoreCase = true)
+                            if (QaLens.state.value.isRecording || QaLens.state.value.isSavingRecording ||
+                                QaLens.currentActivity == null || (video && !QaLens.config.value.allowUnmaskedVideo)) false
+                            else { QaLens.startRecording(video); awaitOutcome(30_000) { QaLens.state.value.isRecording } }
+                        }
+                        "stop" -> {
+                            if (!QaLens.state.value.isRecording) false
+                            else {
+                                val before = QaLens.state.value.recordings.map { it.path }.toSet()
+                                QaLens.stopRecording()
+                                awaitOutcome(30_000) { !QaLens.state.value.isSavingRecording && QaLens.state.value.recordings.any { it.path !in before } }
+                            }
+                        }
+                        "screenshot" -> captureScreenshot()
                         "mark" -> { QaLens.breadcrumb("⭐ ${arg.ifBlank { "Marked by QA" }}"); true }
-                        else -> { QaLens.log("Macro '${macro.name}': unknown step '$step' (skipped)"); true }
+                        else -> { QaLens.log("Macro '${macro.name}': unknown step '$step'"); false }
                     }
                     if (!ok) {
                         stoppedStep = step
@@ -119,10 +137,34 @@ internal object QaLensMacros {
                     QaLens.log("Macro '${macro.name}' failed: interaction step '$stoppedStep' failed")
                     lastRun[macro.name] = MacroRunResult(passed = false, assertionFailures = 0)
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                lastRun[macro.name] = MacroRunResult(false, assertionFailures)
+                throw cancelled
+            } catch (failure: Exception) {
+                lastRun[macro.name] = MacroRunResult(false, assertionFailures)
+                QaLens.log("Macro failed: ${failure.javaClass.simpleName}")
             } finally {
                 running = false
             }
         }
+    }
+
+    private suspend fun awaitOutcome(timeoutMs: Long, check: () -> Boolean): Boolean =
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            while (QaLens.config.value.enabled) { if (check()) return@withTimeoutOrNull true; delay(100) }
+            false
+        } ?: false
+
+    private suspend fun captureScreenshot(): Boolean {
+        val activity = QaLens.currentActivity ?: return false
+        return kotlinx.coroutines.withTimeoutOrNull(15_000) {
+            kotlinx.coroutines.suspendCancellableCoroutine<Boolean> { continuation ->
+                val state = QaLens.state.value
+                QaLensScreenCapture.captureAndShare(activity, state.nodes, state.selectedNode, share = false) {
+                    if (continuation.isActive) continuation.resumeWith(Result.success(it))
+                }
+            }
+        } ?: false
     }
 
     // ── UI driver (semantics actions — what UI tests invoke) ────────────────

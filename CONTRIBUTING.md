@@ -10,7 +10,7 @@ Use JDK 17, Android SDK 35 and Gradle 9.1.0. Set `JAVA_HOME` and `ANDROID_HOME` 
 do not commit local SDK paths. The GitHub workflow records the complete verification matrix.
 
 ```sh
-gradle :qalens-core:test :qalens-compose:testDebugUnitTest :qalens-noop:testDebugUnitTest
+gradle :qalens-core:test :qalens-compose:testDebugUnitTest :qalens-replay:testDebugUnitTest :qalens-noop:testDebugUnitTest
 gradle :qalens-compose:lintDebug :qalens-android:lintDebug :qalens-navigation-compose:lintDebug :qalens-replay:lintDebug
 gradle :sample-app:assembleDebug :sample-app:assembleRelease :sample-app:verifyReleaseIsolation
 gradle -p integration-tests/consumer assembleDebug assembleRelease verifyReleaseIsolation
@@ -20,7 +20,21 @@ python3 backend/tests/test_backend.py
 
 The consumer fixture resolves normal `com.qalens:*` coordinates through `includeBuild`; it catches
 integration failures that same-repository `project()` dependencies miss. Device checks are described
-in [recording retention](docs/RECORDING_RETENTION.md) and [OSS integrations](docs/OSS_INTEGRATIONS.md).
+in [recording retention](docs/RECORDING_RETENTION.md), [OSS integrations](docs/OSS_INTEGRATIONS.md)
+and [client safety](docs/CLIENT_SAFETY_FIXES.md).
+
+For the expanded Android regression runner, use a disposable emulator (replace its serial if needed):
+
+```sh
+gradle :sample-app:assembleDebug :sample-app:assembleDebugAndroidTest
+adb -s emulator-5554 install -r sample-app/build/outputs/apk/debug/sample-app-debug.apk
+adb -s emulator-5554 install -r sample-app/build/outputs/apk/androidTest/debug/sample-app-debug-androidTest.apk
+adb -s emulator-5554 shell am instrument -w com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require the runner's `OK:` message. An adb process exit code alone does not prove assertions passed.
+The runner changes sample activity contents/preferences and creates synthetic recordings; HTTP
+fixtures bind loopback only.
 
 ## Review expectations
 

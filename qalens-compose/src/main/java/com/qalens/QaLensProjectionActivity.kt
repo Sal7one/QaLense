@@ -18,7 +18,8 @@ class QaLensProjectionActivity : ComponentActivity() {
         val data = result.data
         val path = videoPath
         if (result.resultCode == RESULT_OK && data != null && path != null && QaLensSessionRecorder.isAwaitingVideo(path)) {
-            QaLensProjectionService.start(this, result.resultCode, data, path)
+            runCatching { QaLensProjectionService.start(this, result.resultCode, data, path) }
+                .onFailure { QaLensSessionRecorder.onVideoConsentDenied(path) }
         } else {
             QaLensSessionRecorder.onVideoConsentDenied(videoPath)
         }

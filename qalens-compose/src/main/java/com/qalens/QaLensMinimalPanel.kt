@@ -111,7 +111,7 @@ internal fun QaLensMinimalPanel(
 
         Spacer(Modifier.height(10.dp))
 
-        // Action grid — screenshot/mark save straight to Photos (no share sheet in the way).
+        // Action grid — screenshot/mark save to private cache (no share sheet in the way).
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(Modifier.weight(1f)) {
                 SquareAction("📷", "Screenshot", MBlue1, MBlue2) {

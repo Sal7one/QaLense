@@ -1,5 +1,8 @@
 # Reliability audit — 2026-09-08
 
+> Latest client follow-up: [2026-09-13 fixes and verification](CLIENT_SAFETY_FIXES.md).
+> The findings and counts below describe earlier passes.
+
 This pass examined release dependencies, the capture/recording lifecycle, crash registration,
 network body observation, screenshot handling, archive readers, backend verdicts, and verification
 scripts. It replaces the earlier assumption that a green compile matrix proved release safety.

@@ -146,11 +146,14 @@ object QaLensAppSal {
             .put("overlayAlpha", c.overlayAlpha.toDouble())
             .put("dockBottom", c.dockBottom))
         o.put("webhook", JSONObject()
-            .put("url", c.webhookUrl)
+            .put("url", if (includeSecrets) c.webhookUrl else runCatching {
+                val uri = java.net.URI(c.webhookUrl)
+                java.net.URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toString()
+            }.getOrDefault(""))
             .put("headerName", c.webhookHeaderName)
             .put("headerValue", if (includeSecrets) c.webhookHeaderValue
                                 else if (c.webhookHeaderValue.isBlank()) "" else "•••")
-            .put("params", c.webhookParams)
+            .put("params", if (includeSecrets) c.webhookParams else "")
             .put("includeMeta", c.webhookIncludeMeta))
         o.put("queries", JSONArray().also { arr ->
             c.queries.forEach { arr.put(JSONObject().put("name", it.name).put("db", it.db).put("sql", it.sql)) }
@@ -203,14 +206,16 @@ object QaLensAppSal {
     }.getOrNull()
 
     /**
-     * Apply an imported config to this device. Skips a masked/empty webhook secret so importing a
-     * shared config never wipes a locally configured token. Returns a short human summary.
+     * Apply an imported config. A masked/empty secret preserves the local credential only when
+     * the destination origin and header name are unchanged. Returns a short human summary.
      */
     fun apply(context: Context, c: AppSalConfig): String {
         setPanelMode(context, c.panelMode)
         QaLensPrefs.setOverlayAlpha(context, c.overlayAlpha)
         QaLensPrefs.setDockBottom(context, c.dockBottom)
         if (c.webhookUrl.isNotBlank()) QaLensPrefs.setWebhookUrl(context, c.webhookUrl)
+        if (!c.webhookHeaderName.equals(QaLensPrefs.webhookHeaderName(context), ignoreCase = true))
+            QaLensPrefs.setWebhookHeaderValue(context, "")
         QaLensPrefs.setWebhookHeaderName(context, c.webhookHeaderName)
         if (c.webhookHeaderValue.isNotBlank()) QaLensPrefs.setWebhookHeaderValue(context, c.webhookHeaderValue)
         QaLensPrefs.setWebhookParams(context, c.webhookParams)

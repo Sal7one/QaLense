@@ -95,16 +95,28 @@ private fun PlayerRoot(initialUri: Uri?) {
     // — returning to whoever opened it — instead of dropping the user on the empty picker.
     var loadedFromIntent by remember { mutableStateOf(false) }
 
+    var loadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    DisposableEffect(session) {
+        val loaded = session
+        onDispose { loaded?.let(QaLensSalReader::release) }
+    }
+
     fun load(uri: Uri, fromIntent: Boolean) {
-        scope.launch {
+        loadJob?.cancel()
+        loadJob = scope.launch {
+            var loaded: PlayerSession? = null
             loading = true; error = null
             try {
                 session = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { QaLensSalReader.read(context, it) }
-                        ?: error("Could not open file")
+                        ?.also { loaded = it } ?: error("Could not open file")
                 }
                 loadedFromIntent = fromIntent
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                loaded?.let(QaLensSalReader::release)
+                throw cancelled
             } catch (e: Exception) {
+                loaded?.let(QaLensSalReader::release)
                 error = e.message ?: "Failed to read .sal"
             }
             loading = false
@@ -120,11 +132,11 @@ private fun PlayerRoot(initialUri: Uri?) {
     Box(Modifier.fillMaxSize().background(Bg)) {
         val current = session
         when {
-            current != null -> PlayerScreen(current) {
+            current != null -> androidx.compose.runtime.key(current.rootDir) { PlayerScreen(current) {
                 // Came from the Control Room / a shared file → finish so we return there.
                 // Opened a file via the in-app picker → back to the picker landing.
                 if (loadedFromIntent) context.findActivity()?.finish() else session = null
-            }
+            } }
             else -> Column(
                 Modifier.fillMaxSize().padding(24.dp),
                 verticalArrangement = Arrangement.Center,
@@ -359,11 +371,22 @@ private fun MediaViewport(
             )
         } else {
             val frame = session.frameAt(playhead)
-            val bitmap = remember(frame?.file?.path) {
-                frame?.file?.let { runCatching { BitmapFactory.decodeFile(it.path) }.getOrNull() }
+            var bitmap by remember(frame?.file?.path) { mutableStateOf<android.graphics.Bitmap?>(null) }
+            LaunchedEffect(frame?.file?.path) {
+                bitmap = withContext(Dispatchers.IO) {
+                    frame?.file?.let { file -> runCatching {
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(file.path, bounds)
+                        require(bounds.outWidth > 0 && bounds.outHeight > 0)
+                        var sample = 1
+                        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2048) sample *= 2
+                        BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+                    }.getOrNull() }
+                }
             }
-            if (bitmap != null) {
-                Image(bitmap.asImageBitmap(), contentDescription = "frame", modifier = Modifier.fillMaxSize())
+            val displayed = bitmap
+            if (displayed != null) {
+                Image(displayed.asImageBitmap(), contentDescription = "frame", modifier = Modifier.fillMaxSize())
             } else {
                 Text("no frame", color = Muted, fontSize = 12.sp)
             }
@@ -375,12 +398,13 @@ private fun MediaViewport(
 private fun EventPane(items: List<PItem>, playhead: Long, startMs: Long, onSeek: (Long) -> Unit) {
     // All events are listed (newest first); ones after the playhead are dimmed. Tapping any row
     // seeks the video to that exact moment — including forward jumps.
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        if (items.isEmpty()) {
+    androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
+        if (items.isEmpty()) item {
             Text("No events in this track.", color = Muted, fontSize = 11.sp)
         }
         val currentTs = items.lastOrNull { it.ts <= playhead }?.ts
-        items.asReversed().forEach { item ->
+        items(items.size) { index ->
+            val item = items[items.lastIndex - index]
             val isPast = item.ts <= playhead
             val isCurrent = item.ts == currentTs
             Row(

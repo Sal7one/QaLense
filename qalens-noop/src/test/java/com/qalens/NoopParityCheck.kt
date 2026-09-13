@@ -148,6 +148,22 @@ object NoopParityCheck {
  */
 class NoopParityCheckTest {
     @org.junit.Test
+    fun coroutineFailureReachesHostUnchanged() {
+        val thread = Thread.currentThread()
+        val previous = thread.uncaughtExceptionHandler
+        val failure = IllegalStateException("fixture")
+        var received: Throwable? = null
+        thread.uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { origin, error ->
+            org.junit.Assert.assertSame(thread, origin)
+            received = error
+        }
+        try {
+            QaLens.coroutineExceptionHandler().handleException(kotlin.coroutines.EmptyCoroutineContext, failure)
+            org.junit.Assert.assertSame(failure, received)
+        } finally { thread.uncaughtExceptionHandler = previous }
+    }
+
+    @org.junit.Test
     fun parityHoldsAtRuntime() {
         NoopParityCheck.exerciseAll()
     }

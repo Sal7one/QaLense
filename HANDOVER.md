@@ -2,13 +2,13 @@
      docs/RELIABILITY_AUDIT.md and next.md before the historical sections below. -->
 # QaLens — Handover for AI Agents
 
-> **2026-09-08 current baseline:** Read `docs/RELIABILITY_AUDIT.md`, `docs/OSS_INTEGRATIONS.md`
-> and `next.md` first; sections below retain historical context. Current checks: 156 core tests,
-> 13 body/OkHttp tests, 1 no-op parity test, 58 web assertions and 20 backend tests. Debug/release
-> APKs, four Android lint gates (zero errors), independent consumer builds and release isolation
-> pass. The emulator runner passes real Chucker 4.1.0 coexistence, adapter privacy, crash bridge
-> non-echo and recording retention. Chucker-as-source was invalid and has been removed; use both
-> interceptors. CI configuration is added but has not yet run on GitHub.
+> **2026-09-13 current baseline:** Read `docs/CLIENT_SAFETY_FIXES.md`, `docs/OSS_INTEGRATIONS.md`
+> and `next.md` before the historical sections below. Kotlin matrix: 184 tests across core,
+> Compose/OkHttp, no-op and replay. Client capture privacy defaults, shutdown, bounded replay,
+> credential isolation and observed macro/upload outcomes now have regression coverage.
+> Screenshots default to private cache; full-display video requires host opt-in. Physical-device
+> video/rotation/storage and other remaining validation limits are listed in the fix report.
+> CI configuration is updated but has not yet run on GitHub.
 
 > Read this FIRST when you inherit this repository. It is a snapshot of the state of the repo,
 > how to verify it, the rules you must not break, and where the work should go next.

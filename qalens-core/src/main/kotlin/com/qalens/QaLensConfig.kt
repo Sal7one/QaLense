@@ -28,8 +28,9 @@ data class QaLensConfig(
     /**
      * R8: opt-in network body capture. Off by default. When enabled, the OkHttp interceptor
      * captures request/response body *previews* (text-ish content types only — JSON/XML/forms),
-     * truncated to 64&nbsp;KB, then folded through [QaLensRedactor] before storage (and re-redacted
-     * again at `.sal` encode time). Binary bodies get a `<binary N bytes>` placeholder instead.
+     * bounded to 64&nbsp;KB, then folded through [QaLensRedactor] before storage (and re-redacted
+     * again at `.sal` encode time). SSE and unknown/large response bodies are not read.
+     * Binary bodies get a `<binary N bytes>` placeholder instead.
      */
     val captureNetworkBodies: Boolean = false,
     /**
@@ -50,7 +51,11 @@ data class QaLensConfig(
      * transaction listener. This flag no longer disables QaLensOkHttpInterceptor: install it
      * alongside ChuckerInterceptor, or report another transport through QaLens.networkSink.
      */
-    val networkFromChucker: Boolean = false
+    val networkFromChucker: Boolean = false,
+    /** MediaProjection cannot apply per-node masks. Explicit host opt-in to unmasked full-display video. */
+    val allowUnmaskedVideo: Boolean = false,
+    /** Screenshots stay in private app cache unless the host explicitly enables gallery copies. */
+    val saveScreenshotsToGallery: Boolean = false
 ) {
     class Builder(seed: QaLensConfig = QaLensConfig()) {
         var enabled: Boolean = seed.enabled
@@ -75,6 +80,8 @@ data class QaLensConfig(
         var captureNetwork: Boolean = seed.captureNetwork
         var captureLogs: Boolean = seed.captureLogs
         var networkFromChucker: Boolean = seed.networkFromChucker
+        var allowUnmaskedVideo: Boolean = seed.allowUnmaskedVideo
+        var saveScreenshotsToGallery: Boolean = seed.saveScreenshotsToGallery
 
         /** Add a custom redaction rule on top of the defaults. */
         fun addRedaction(pattern: String, replacement: String = "[REDACTED]") {
@@ -103,7 +110,9 @@ data class QaLensConfig(
             captureNetworkBodies = captureNetworkBodies,
             captureNetwork = captureNetwork,
             captureLogs = captureLogs,
-            networkFromChucker = networkFromChucker
+            networkFromChucker = networkFromChucker,
+            allowUnmaskedVideo = allowUnmaskedVideo,
+            saveScreenshotsToGallery = saveScreenshotsToGallery
         )
     }
 
@@ -135,7 +144,7 @@ data class RedactionRule(
             ),
             // Authorization headers (any scheme)
             RedactionRule(
-                Regex("(?i)authorization\\s*[:=]\\s*\\S+"),
+                Regex("(?i)authorization\\s*[:=]\\s*[^\\r\\n]+"),
                 "Authorization: [REDACTED]"
             ),
             // Cookie / Set-Cookie headers (rest of line)

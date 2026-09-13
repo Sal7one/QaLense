@@ -9,12 +9,14 @@ import timber.log.Timber
 class ConsumerApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        QaLens.configure { appName = "External consumer" }
+        QaLens.configure { appName = "External consumer"; allowUnmaskedVideo = false; saveScreenshotsToGallery = false }
         QaLens.install(this)
         OkHttpClient.Builder().addInterceptor(QaLensOkHttpInterceptor()).build()
         Timber.plant(QaLensTimberTree())
         QaLens.networkSink("Custom client").record(NetworkEvent(method = "GET", url = "https://example.test", status = 200))
         QaLens.reportCrash(QaLensCrash(type = CrashType.CRASH, thread = "test", throwable = null, stackTrace = "fixture"))
+        QaLens.coroutineExceptionHandler()
+        QaLensCoroutineExceptionHandler.capture()
         QaLens.integrationReport()
         QaLensChuckerBridge.isAvailable(this)
     }

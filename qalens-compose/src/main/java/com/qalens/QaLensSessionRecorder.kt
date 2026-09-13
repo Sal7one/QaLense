@@ -52,12 +52,12 @@ internal object QaLensSessionRecorder {
     // each frame capture hides the overlay for that single PixelCopy so frames stay clean.
     private var systemChipMode = false
     private var startMs = 0L
-    private var lastFrameTimestamp = 0L
+    @Volatile private var lastFrameTimestamp = 0L
 
     /** True while a recording uses the floating system-window chip (overlay stays fully hidden). */
     val usesSystemChip: Boolean get() = systemChipMode
     private val mediaLock = Any()
-    private var frameCounter = 0
+    @Volatile private var frameCounter = 0
     private val frameIndex = linkedMapOf<Long, String>()
     @Volatile internal var evidence: RecordingEvidenceStore? = null
         private set
@@ -85,6 +85,8 @@ internal object QaLensSessionRecorder {
     private val tick = object : Runnable {
         override fun run() {
             if (!recording) return
+            if (!QaLens.config.value.enabled) { stop(share = false); return }
+            QaLensMemoryMonitor.maybeSample()
             sampleState()
             // Capture PixelCopy frames in BOTH modes. In video mode they're a SAFETY NET: if
             // MediaProjection produces an empty/unplayable video.mp4 (common on emulators and
@@ -101,6 +103,11 @@ internal object QaLensSessionRecorder {
     }
 
     fun start(activity: Activity, useVideo: Boolean = false) {
+        if (!QaLens.config.value.enabled) return
+        if (useVideo && !QaLens.config.value.allowUnmaskedVideo) {
+            QaLens.pushError(ErrorKind.RECORDING, "Video has no privacy masks. Use frame recording, or have the host explicitly enable allowUnmaskedVideo.")
+            return
+        }
         if (lifecycle.start(useVideo) == null) {
             QaLens.pushError(ErrorKind.RECORDING, "A recording is already active or still being saved.")
             return
@@ -240,11 +247,12 @@ internal object QaLensSessionRecorder {
     // ── Video-mode callbacks (from QaLensProjectionService / Activity) ─────────
     /** Consent granted and the projection is live — NOW we reveal the recording UI. */
     fun isAwaitingVideo(path: String): Boolean =
-        lifecycle.phase == RecordingLifecycle.Phase.AWAITING_CONSENT && videoFile?.absolutePath == path
+        QaLens.config.value.enabled && QaLens.config.value.allowUnmaskedVideo &&
+            lifecycle.phase == RecordingLifecycle.Phase.AWAITING_CONSENT && videoFile?.absolutePath == path
 
     fun onVideoStarted(path: String) {
         handler.post {
-            if (videoFile?.absolutePath != path || !lifecycle.activate(lifecycle.sessionId)) return@post
+            if (!isAwaitingVideo(path) || videoFile?.absolutePath != path || !lifecycle.activate(lifecycle.sessionId)) return@post
             videoStartMs = System.currentTimeMillis()
             val activity = QaLens.currentActivity ?: activityRef?.get()
             if (activity != null) beginCapture(activity)
@@ -285,7 +293,7 @@ internal object QaLensSessionRecorder {
 
     fun onVideoConsentDenied(path: String?) {
         handler.post {
-            if (path == null || !isAwaitingVideo(path)) return@post
+            if (path == null || lifecycle.phase != RecordingLifecycle.Phase.AWAITING_CONSENT || videoFile?.absolutePath != path) return@post
             lifecycle.cancel()
             evidence?.close()
             evidence = null
@@ -322,26 +330,31 @@ internal object QaLensSessionRecorder {
         // Overlay is hidden for the whole session and the REC chip lives in a separate window
         // (PixelCopy can't see it) — so no per-frame toggling, no flashing.
         QaLensScreenCapture.captureFrame(activity, manageOverlay = false) { bmp ->
-            var scaled: Bitmap? = null
-            try {
-                synchronized(mediaLock) {
-                if (!lifecycle.acceptsFrame(id) || sessionDir != dir) return@captureFrame
-                if (bmp != null) {
+            if (bmp == null) { capturing = false; return@captureFrame }
+            // Serialize media writes with archive writes, but never compress or wait for disk on main.
+            writer.execute {
+                var scaled: Bitmap? = null
+                try {
+                    if (!lifecycle.acceptsFrame(id) || !QaLens.config.value.enabled) return@execute
                     scaled = scale(bmp)
                     val ts = System.currentTimeMillis()
-                    frameCounter++
-                    val name = "frames/%06d.jpg".format(frameCounter)
-                    FileOutputStream(File(dir, name)).use { scaled.compress(Bitmap.CompressFormat.JPEG, 60, it) }
-                    frameIndex[ts] = name
-                    lastFrameTimestamp = System.currentTimeMillis() // A5: update watchdog
+                    val name = "frames/%06d.jpg".format(frameCounter + 1)
+                    val file = File(dir, name)
+                    FileOutputStream(file).use { check(scaled.compress(Bitmap.CompressFormat.JPEG, 60, it)) }
+                    synchronized(mediaLock) {
+                        if (lifecycle.acceptsFrame(id) && sessionDir == dir && QaLens.config.value.enabled) {
+                            frameCounter++
+                            frameIndex[ts] = name
+                            lastFrameTimestamp = ts
+                        } else file.delete()
+                    }
+                } catch (failure: Exception) {
+                    QaLens.log("Frame capture failed: ${failure.message}")
+                } finally {
+                    if (scaled !== bmp) scaled?.recycle()
+                    bmp.recycle()
+                    handler.post { if (id == lifecycle.sessionId) capturing = false }
                 }
-                }
-            } catch (e: Exception) {
-                QaLens.log("Frame capture failed: ${e.message}")
-            } finally {
-                if (scaled !== bmp) scaled?.recycle()
-                bmp?.recycle()
-                if (id == lifecycle.sessionId) capturing = false
             }
         }
     }
@@ -452,7 +465,7 @@ internal object QaLensSessionRecorder {
                             warnings = s.warnings, testTags = s.nodes.mapNotNull { it.testTag }, events = windowEvents),
                         network = windowNetwork, config = cfg, featureFlags = s.featureFlags,
                         networkInterceptorInstalled = s.networkAvailable, slowThresholdMs = cfg.slowNetworkThresholdMs,
-                        dataSources = s.dataSources
+                        dataSources = s.dataSources, frameMetrics = sessionFrameMetrics
                     ), cfg)
                 )
 

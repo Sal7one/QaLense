@@ -21,7 +21,7 @@ internal object QaLensDataTools {
         val columns: List<String> = emptyList(),
         val rows: List<List<String>> = emptyList(),
         val rowsAffected: Int = -1,        // -1 = was a read
-        val totalRows: Int = 0,            // before the MAX_ROWS cap
+        val totalRows: Int = 0,            // rows returned, capped at MAX_ROWS
         val durationMs: Long = 0,
         val error: String? = null
     )
@@ -32,7 +32,7 @@ internal object QaLensDataTools {
             .filterNot { it.endsWith("-journal") || it.endsWith("-shm") || it.endsWith("-wal") }
             .sorted()
 
-    fun runQuery(context: Context, dbName: String, sql: String): QueryResult {
+    fun runQuery(context: Context, dbName: String, sql: String, cancellation: android.os.CancellationSignal = android.os.CancellationSignal()): QueryResult {
         val trimmed = sql.trim().trimEnd(';')
         if (trimmed.isBlank()) return QueryResult(error = "Empty query")
         val dbFile = context.getDatabasePath(dbName)
@@ -41,13 +41,16 @@ internal object QaLensDataTools {
         val start = System.currentTimeMillis()
         return try {
             SQLiteDatabase.openDatabase(dbFile.path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
-                val head = trimmed.substringBefore(' ').lowercase()
+                val head = trimmed.takeWhile { !it.isWhitespace() }.lowercase()
                 if (head in setOf("select", "pragma", "with", "explain")) {
-                    db.rawQuery(trimmed, null).use { c ->
+                    // SQLiteCursor may count the entire result while filling its first window.
+                    // Limit in SQL as well as in the consumer loop so huge reads stop in SQLite.
+                    val bounded = if (head == "select" || head == "with") "SELECT * FROM ($trimmed) LIMIT $MAX_ROWS" else trimmed
+                    db.rawQuery(bounded, null, cancellation).use { c ->
                         val cols = c.columnNames.toList()
                         val rows = mutableListOf<List<String>>()
                         var total = 0
-                        while (c.moveToNext()) {
+                        while (rows.size < MAX_ROWS && c.moveToNext()) {
                             total++
                             if (rows.size < MAX_ROWS) {
                                 rows += cols.indices.map { i ->
@@ -60,6 +63,7 @@ internal object QaLensDataTools {
                     }
                 } else {
                     // Write path — report exactly what got affected.
+                    cancellation.throwIfCanceled()
                     val affected = when (head) {
                         "update", "delete" -> db.compileStatement(trimmed).use { it.executeUpdateDelete() }
                         "insert", "replace" -> db.compileStatement(trimmed).use {

@@ -67,8 +67,20 @@ class QaLensBodyPreviewTest {
         val text = "x".repeat(BODY_CAPTURE_CAP * 2)
         val response = Response.Builder().request(Request.Builder().url("https://example.com").build())
             .protocol(Protocol.HTTP_1_1).code(200).message("OK").body(text.toResponseBody(json)).build()
-        val preview = QaLensBodyPreview.response(response, config)!!
-        assertTrue(preview.length < BODY_CAPTURE_CAP + 100)
+        assertNull(QaLensBodyPreview.response(response, config))
         assertEquals(text, response.body!!.string())
     }
+    @Test fun streamingResponsesAreNeverRead() {
+        for ((type, length) in listOf("text/event-stream" to 42L, "application/json" to -1L)) {
+            val body = object : ResponseBody() {
+                override fun contentType() = type.toMediaType()
+                override fun contentLength() = length
+                override fun source(): okio.BufferedSource = error("Stream was touched")
+            }
+            val response = Response.Builder().request(Request.Builder().url("https://example.test").build())
+                .protocol(Protocol.HTTP_1_1).code(200).message("OK").body(body).build()
+            assertNull(QaLensBodyPreview.response(response, config))
+        }
+    }
+
 }

@@ -65,7 +65,7 @@ object QaLens {
     fun currentConnectivity(): ConnectivitySnapshot? = null
 
     fun coroutineExceptionHandler(): kotlinx.coroutines.CoroutineExceptionHandler =
-        kotlinx.coroutines.CoroutineExceptionHandler { _, _ -> }
+        QaLensCoroutineExceptionHandler.capture()
 
     fun registerDeepLinkScenario(
         name: String,

@@ -21,7 +21,8 @@ android {
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    // StateFlow, Flow and CoroutineExceptionHandler are part of the public SDK surface.
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     api(project(":qalens-core"))
     implementation(project(":qalens-android"))
 

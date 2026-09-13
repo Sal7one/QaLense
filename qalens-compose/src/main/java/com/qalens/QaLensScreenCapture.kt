@@ -11,6 +11,9 @@ import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
 import android.view.View
+import android.view.WindowManager
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
@@ -19,6 +22,33 @@ internal object QaLensScreenCapture {
 
     private const val OVERLAY_TAG = "qalens_overlay_compose_view"
     private const val PROVIDER_SUFFIX = ".qalens.fileprovider"
+
+    private val deliveryWorker = java.util.concurrent.ThreadPoolExecutor(
+        1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+        java.util.concurrent.ArrayBlockingQueue<Runnable>(1),
+        java.util.concurrent.ThreadFactory { task -> Thread(task, "qalens-screenshot").apply { isDaemon = true } }
+    )
+
+    /** Mask explicitly hidden nodes, password fields and text recognized by configured redaction.
+     * This is not OCR: custom Canvas/View content must use FLAG_SECURE or an enclosing hidden node.
+     */
+    private fun maskBounds(activity: Activity): List<androidx.compose.ui.geometry.Rect>? = runCatching {
+        val cfg = QaLens.config.value
+        QaLensActivityInstaller.captureSemanticsNodes(activity).mapNotNull { node ->
+            val c = node.config
+            val text = (c.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } +
+                listOfNotNull(c.getOrNull(SemanticsProperties.EditableText)?.text) +
+                c.getOrNull(SemanticsProperties.ContentDescription).orEmpty()).joinToString(" ")
+            if (c.contains(SemanticsProperties.Password) || c.getOrNull(QaHiddenFromReportsKey) == true || cfg.redact(text) != text)
+                node.boundsInWindow else null
+        }
+    }.getOrNull()
+
+    private fun mask(bitmap: Bitmap, bounds: List<androidx.compose.ui.geometry.Rect>) {
+        val canvas = Canvas(bitmap)
+        val paint = Paint().apply { color = Color.BLACK }
+        bounds.forEach { canvas.drawRect(it.left, it.top, it.right, it.bottom, paint) }
+    }
 
     /** Show/hide the QaLens overlay view (bubble + panel) on the given activity. */
     fun setOverlayVisible(activity: Activity, visible: Boolean) {
@@ -34,17 +64,33 @@ internal object QaLensScreenCapture {
      * per frame would make the bubble flicker. Returns null on failure (zero-size / FLAG_SECURE).
      */
     fun captureFrame(activity: Activity, manageOverlay: Boolean = true, onResult: (Bitmap?) -> Unit) {
+        if (!QaLens.config.value.enabled || activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0) {
+            onResult(null); return
+        }
+        val epoch = QaLens.captureEpoch
+        val before = maskBounds(activity) ?: run { onResult(null); return }
         val decor = activity.window.decorView
         val overlay = if (manageOverlay) decor.findViewWithTag<View>(OVERLAY_TAG) else null
         val previousVisibility = overlay?.visibility
         overlay?.visibility = View.INVISIBLE
         val finish: (Bitmap?) -> Unit = { bmp ->
             if (previousVisibility != null) overlay?.visibility = previousVisibility
-            onResult(bmp)
+            val after = if (bmp != null) maskBounds(activity) else emptyList()
+            if (bmp != null && (!QaLens.config.value.enabled || epoch != QaLens.captureEpoch ||
+                    activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0 || after == null)) {
+                bmp.recycle()
+                onResult(null)
+            } else {
+                if (bmp != null) mask(bmp, before + after.orEmpty())
+                onResult(bmp)
+            }
         }
 
         if (decor.width <= 0 || decor.height <= 0) { finish(null); return }
         val doCapture = Runnable {
+            if (!QaLens.config.value.enabled || epoch != QaLens.captureEpoch || decor.width <= 0 || decor.height <= 0) {
+                finish(null); return@Runnable
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val bmp = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
                 try {
@@ -72,19 +118,30 @@ internal object QaLensScreenCapture {
         activity: Activity,
         nodes: List<InspectNode>,
         selectedNode: InspectNode? = null,
-        share: Boolean = true
+        share: Boolean = true,
+        onComplete: (Boolean) -> Unit = {}
     ) {
         captureFrame(activity) { raw ->
             if (raw == null) {
                 QaLens.pushError(ErrorKind.SCREENSHOT, "Screenshot unavailable; the window may be secure or not ready.")
+                onComplete(false)
                 return@captureFrame
             }
+            val epoch = QaLens.captureEpoch
             var annotated: Bitmap? = null
             try {
                 annotated = annotate(raw, nodes, selectedNode, activity)
-                deliver(activity, annotated, share)
+                val output = annotated
+                deliveryWorker.execute {
+                    try {
+                        if (QaLens.config.value.enabled && epoch == QaLens.captureEpoch) deliver(activity, output, share, epoch, onComplete)
+                        else QaLens.onMain { onComplete(false) }
+                    } finally { output.recycle() }
+                }
+                annotated = null // worker owns this bitmap
             } catch (e: Exception) {
                 QaLens.pushError(ErrorKind.SCREENSHOT, "Screenshot failed: ${e.message}")
+                onComplete(false)
             } finally {
                 if (annotated !== raw) annotated?.recycle()
                 raw.recycle()
@@ -93,28 +150,31 @@ internal object QaLensScreenCapture {
     }
 
     /**
-     * Saves the annotated screenshot into the system gallery (Pictures/QaLens via MediaStore — no
-     * permission needed on API 29+) so it's always on the device, then optionally opens the share
-     * sheet on top. Pre-29 falls back to the cache+share path only.
+     * Explicit gallery opt-in only. Delete partial or revoked exports before publishing them.
      */
-    private fun saveToGallery(activity: Activity, bitmap: Bitmap): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
-        return runCatching {
-            val resolver = activity.contentResolver
+    private fun saveToGallery(activity: Activity, bitmap: Bitmap, epoch: Long): android.net.Uri? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val resolver = activity.contentResolver
+        var uri: android.net.Uri? = null
+        return try {
             val values = android.content.ContentValues().apply {
                 put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "qalens_${System.currentTimeMillis()}.png")
                 put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
                 put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/QaLens")
                 put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
             }
-            val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                ?: return false
-            resolver.openOutputStream(uri)?.use { bitmap.compress(Bitmap.CompressFormat.PNG, 95, it) }
+            val destination = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+            uri = destination
+            requireNotNull(resolver.openOutputStream(destination)).use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 95, it)) }
+            check(QaLens.config.value.enabled && epoch == QaLens.captureEpoch && QaLens.config.value.saveScreenshotsToGallery)
             values.clear()
             values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-            true
-        }.getOrDefault(false)
+            resolver.update(destination, values, null, null)
+            destination
+        } catch (_: Exception) {
+            uri?.let { runCatching { resolver.delete(it, null, null) } }
+            null
+        }
     }
 
     private fun annotate(src: Bitmap, nodes: List<InspectNode>, selectedNode: InspectNode?, activity: Activity): Bitmap {
@@ -188,38 +248,61 @@ internal object QaLensScreenCapture {
         return out
     }
 
-    /** Always lands the shot somewhere durable (gallery + cache evidence record); share is optional. */
-    private fun deliver(activity: Activity, bitmap: Bitmap, share: Boolean) {
+    /** Save to private cache; gallery export and sharing require explicit opt-ins. */
+    private fun deliver(activity: Activity, bitmap: Bitmap, share: Boolean, epoch: Long, onComplete: (Boolean) -> Unit) {
+        var galleryUri: android.net.Uri? = null
         try {
-            val savedToGallery = saveToGallery(activity, bitmap)
+            galleryUri = if (QaLens.config.value.saveScreenshotsToGallery) saveToGallery(activity, bitmap, epoch) else null
+            val savedToGallery = galleryUri != null
 
             val dir = File(activity.cacheDir, "qalens").also { it.mkdirs() }
             val file = File(dir, "qa_${System.currentTimeMillis()}.png")
-            FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 95, it) }
+            val temporary = File(dir, ".${file.name}.tmp")
+            try {
+                FileOutputStream(temporary).use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 95, it)) }
+                check(temporary.renameTo(file)) { "Could not publish screenshot" }
+            } finally { temporary.delete() }
 
-            QaLens.recordScreenshot(file.absolutePath, available = true)
-            // Visible confirmation — a log line nobody sees is not feedback. The toast shows over
-            // the app even with the panel closed (the silent-save path's only signal).
-            val note = if (savedToGallery) "📷 Saved to Photos · Pictures/QaLens"
-                       else "📷 Screenshot captured (gallery needs Android 10+)"
-            android.widget.Toast.makeText(activity, note, android.widget.Toast.LENGTH_SHORT).show()
-            QaLens.log(note)
-
-            if (share) {
-                val uri = FileProvider.getUriForFile(
-                    activity, activity.packageName + PROVIDER_SUFFIX, file
-                )
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = "image/png"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    putExtra(Intent.EXTRA_TEXT, QaLens.buildJiraReport())
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            QaLens.onMain {
+                if (!QaLens.config.value.enabled || epoch != QaLens.captureEpoch) {
+                    Thread({
+                        file.delete()
+                        galleryUri?.let { runCatching { activity.contentResolver.delete(it, null, null) } }
+                    }, "qalens-screenshot-cleanup").apply { isDaemon = true; start() }
+                    onComplete(false); return@onMain
                 }
-                activity.startActivity(Intent.createChooser(intent, "Share QA Evidence"))
+                try {
+                    QaLens.recordScreenshot(file.absolutePath, available = true)
+                    val note = if (savedToGallery) "📷 Saved to Photos · Pictures/QaLens"
+                               else "📷 Screenshot saved in app cache"
+                    android.widget.Toast.makeText(activity, note, android.widget.Toast.LENGTH_SHORT).show()
+                    QaLens.log(note)
+                    if (share) {
+                        val uri = FileProvider.getUriForFile(
+                            activity, activity.packageName + PROVIDER_SUFFIX, file
+                        )
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "image/png"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            putExtra(Intent.EXTRA_TEXT, QaLens.buildJiraReport())
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        activity.startActivity(Intent.createChooser(intent, "Share QA Evidence"))
+                    }
+                    onComplete(true)
+                } catch (failure: Exception) {
+                    QaLens.pushError(ErrorKind.SCREENSHOT, "Screenshot sharing failed: ${failure.message}")
+                    onComplete(false)
+                }
             }
+
         } catch (e: Exception) {
-            QaLens.recordScreenshot(null, available = false, note = e.javaClass.simpleName)
-            QaLens.log("Screenshot failed: ${e.message}")
+            galleryUri?.let { runCatching { activity.contentResolver.delete(it, null, null) } }
+            QaLens.onMain {
+                QaLens.recordScreenshot(null, available = false, note = e.javaClass.simpleName)
+                QaLens.log("Screenshot failed: ${e.message}")
+                onComplete(false)
+            }
         }
     }
 }
