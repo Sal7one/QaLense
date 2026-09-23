@@ -4,6 +4,7 @@
 #
 #   scripts/release_internal.sh            # build + package
 #   scripts/release_internal.sh --verify   # additionally re-verify every checksum
+#   scripts/release_internal.sh --version 0.9.0-dev --verify
 #
 # Consumers (settings.gradle.kts):
 #   dependencyResolutionManagement {
@@ -14,6 +15,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="0.9.0"
+VERIFY=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --verify) VERIFY=true; shift ;;
+    --version)
+      [[ $# -ge 2 ]] || { echo "--version requires a value" >&2; exit 2; }
+      VERSION="$2"; shift 2 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+[[ "$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "Invalid version: $VERSION" >&2; exit 2; }
 
 # This project needs JDK 17 (Kotlin 2.0.x can't parse newer JDK version strings).
 if [[ -z "${JAVA_HOME:-}" || ! "$("${JAVA_HOME}/bin/java" -version 2>&1 | head -1)" =~ \"17\. ]]; then
@@ -27,12 +39,14 @@ if [[ -z "${JAVA_HOME:-}" || ! "$("${JAVA_HOME}/bin/java" -version 2>&1 | head -
 fi
 
 echo "── Building + publishing all modules to build/qalens-repo …"
-./gradlew qalensDist
-
 REPO="build/qalens-repo"
+# A previous version must not leak into this self-contained repository.
+rm -rf "$REPO"
+"${QALENS_GRADLE:-./gradlew}" -PqalensVersion="$VERSION" qalensDist
+
 [[ -f "$REPO/SHA-256SUMS" ]] || { echo "ERROR: SHA-256SUMS missing"; exit 1; }
 
-if [[ "${1:-}" == "--verify" ]]; then
+if [[ "$VERIFY" == true ]]; then
   echo "── Verifying checksums …"
   (cd "$REPO" && shasum -a 256 -c SHA-256SUMS --quiet) && echo "   all checksums OK"
 fi

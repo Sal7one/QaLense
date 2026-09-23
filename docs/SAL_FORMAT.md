@@ -69,13 +69,18 @@ budgets, dropped callbacks and the keep-earliest policy. Dashboard clearing must
 history. Explicit bookmark removal is accounted separately. Missing coverage in older archives
 means unknown retention, not loss-free capture.
 
-Reader behavior is currently different:
+Reader limits and failure behavior:
 
 | Consumer | Current boundary |
 |---|---|
 | Android replay | Canonical path and duplicate checks; 4,096 entries; 256 MiB/entry and 512 MiB expanded ZIP total; 16 MiB expanded text/JSON tracks; 1 MiB manifest; 40,000 parsed track observations; rejects CRC mismatches and invalid/over-24-hour time ranges; cleans failed/closed imports |
-| Shared web reader / CLI | Validates structure/version and decodes Android v2 layering; currently warns and continues on per-entry CRC mismatch; Android-equivalent expansion budgets remain open |
-| Python backend | Rejects malformed/unsupported archives and avoids healthy verdicts for missing/partial evidence; Android-equivalent byte/CRC policy is not established |
+| Shared web reader / CLI | Canonical path and duplicate checks; 4,096 entries; 256 MiB/entry and 512 MiB expanded ZIP/decoded total; 16 MiB expanded text/JSON tracks; 1 MiB manifest; rejects ZIP CRC and listed manifest CRC mismatches, missing listed entries and versions above 2. Inflation is streamed and stopped at the limit. |
+| Python backend | Applies the same entry and byte limits, streams ZIP members to verify ZIP CRC, checks listed manifest CRCs over decoded content, and rejects malformed/missing evidence before storage. It produces an unknown verdict when summary/analysis is insufficient. |
+
+The web reader still holds successfully decoded entries in memory for replay, and the backend mock
+stores accepted raw archives. These limits constrain one archive; neither service is a hardened,
+authenticated public intake or a multi-tenant storage policy. Android's 40,000 parsed-observation
+limit and 24-hour time-range validation are not yet mirrored by web/backend consumers.
 
 CLI exits: 1 for observed failures (or a comparison regression); 2 for invalid input or disclosed
 partial evidence without an observed failure (also partial comparisons); otherwise 0 under its

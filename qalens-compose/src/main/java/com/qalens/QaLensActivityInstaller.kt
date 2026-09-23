@@ -172,6 +172,8 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
      */
     override fun onActivityDestroyed(activity: Activity) {
         if (isInternal(activity)) return
+        QaLensFrameMetrics.detach(activity)
+        QaLensSystemChip.detachFrom(activity)
         activities -= activity
         resumed -= activity
         liveActivities = (liveActivities - 1).coerceAtLeast(0)

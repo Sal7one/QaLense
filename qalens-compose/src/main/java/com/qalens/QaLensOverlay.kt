@@ -113,7 +113,7 @@ internal fun QaLensOverlay() {
                     .pointerInput(Unit) { detectTapGestures { QaLens.closePanel() } }
             )
             // Panel is drawn AFTER scrim so it is above it in z-order. QA chooses minimal vs full
-            // (Control Room / .appsal); the minimal sheet links back to the full panel.
+            // (Control Room / .appsal); the tester sheet links back to the full panel.
             if (state.minimalPanel) {
                 QaLensMinimalPanel(
                     modifier = Modifier.align(dockAlign).statusBarsPadding().padding(10.dp),

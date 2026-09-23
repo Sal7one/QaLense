@@ -7,6 +7,7 @@ import android.os.Looper
 import android.view.FrameMetrics
 import android.view.Window
 import androidx.annotation.RequiresApi
+import java.lang.ref.WeakReference
 
 /**
  * Captures per-frame render timings via [Window.OnFrameMetricsAvailableListener] (API 24+).
@@ -31,17 +32,18 @@ internal object QaLensFrameMetrics {
         QaLens.appendFrameMetrics(samples)
     }
 
-    private var currentActivity: android.app.Activity? = null
+    private var currentActivity: WeakReference<Activity>? = null
 
     fun attach(activity: Activity) {
         if (!QaLens.config.value.enabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
         // If the activity changed (rotation, recreation), detach from the old one first.
-        if (attached && currentActivity !== activity) {
-            detach(currentActivity ?: return)
+        if (attached && currentActivity?.get() !== activity) {
+            currentActivity?.get()?.let(::detach)
+            if (currentActivity?.get() == null) attached = false
         }
         if (attached) return
         attached = true
-        currentActivity = activity
+        currentActivity = WeakReference(activity)
         activity.window.addOnFrameMetricsAvailableListener(
             listener,
             handler
@@ -50,7 +52,7 @@ internal object QaLensFrameMetrics {
 
     fun detach(activity: Activity) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
-        if (!attached || currentActivity !== activity) return
+        if (!attached || currentActivity?.get() !== activity) return
         flushPending()
         attached = false
         currentActivity = null

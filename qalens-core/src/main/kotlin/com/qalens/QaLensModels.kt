@@ -288,7 +288,7 @@ data class NetworkEvent(
 data class QaLensUiState(
     val isInstalled: Boolean = false,
     val isPanelOpen: Boolean = false,
-    /** QA-minimal panel (big colorful controls) instead of the full developer panel. */
+    /** Tester quick-actions sheet instead of the full developer panel. */
     val minimalPanel: Boolean = false,
     val isInspectMode: Boolean = false,
     /** Tag mode: like inspect, but draws every visible automation/test tag on its component. */

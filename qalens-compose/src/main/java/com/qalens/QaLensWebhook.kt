@@ -1,6 +1,7 @@
 package com.qalens
 
 import android.content.Context
+import com.qalens.android.QaLensAndroidInfo
 import com.qalens.android.QaLensPrefs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -228,15 +229,15 @@ internal object QaLensWebhook {
     // ── HTTP plumbing ────────────────────────────────────────────────────────
 
     private fun buildUrl(context: Context, base: String): String {
-        val s = QaLens.state.value
+        val device = QaLensAndroidInfo.deviceSnapshot(context.applicationContext, QaLens.config.value)
         val parts = mutableListOf<String>()
         if (QaLensPrefs.webhookIncludeMeta(context)) {
             fun enc(v: String) = URLEncoder.encode(v, "UTF-8")
-            parts += "app=${enc(s.device.appName)}"
-            parts += "version=${enc(s.device.appVersion)}"
-            s.device.environment?.let { parts += "env=${enc(it)}" }
+            parts += "app=${enc(device.appName)}"
+            parts += "version=${enc(device.appVersion)}"
+            device.environment?.let { parts += "env=${enc(it)}" }
             parts += "platform=android"
-            parts += "device=${enc("${s.device.manufacturer} ${s.device.deviceModel}")}"
+            parts += "device=${enc("${device.manufacturer} ${device.deviceModel}")}"
             parts += "createdAt=${System.currentTimeMillis()}"
             // Active QA profile → the backend knows WHO uploaded (shared test phones).
             QaLensPrefs.userName(context).takeIf { it.isNotBlank() }?.let { parts += "user=${enc(it)}" }
@@ -250,11 +251,11 @@ internal object QaLensWebhook {
     private data class RequestSettings(val headers: Map<String, String>)
     private class HttpFailure(val code: Int) : IOException("Upload rejected (HTTP $code)")
     private fun requestSettings(context: Context): RequestSettings {
-        val state = QaLens.state.value
-        val headers = linkedMapOf("User-Agent" to "QaLens-Android", "X-QaLens-App" to state.device.appName,
-            "X-QaLens-Version" to state.device.appVersion, "X-QaLens-Platform" to "android ${state.device.androidVersion}")
-        state.device.environment?.let { headers["X-QaLens-Env"] = it }
-        headers["X-QaLens-Device"] = "${state.device.manufacturer} ${state.device.deviceModel}"
+        val device = QaLensAndroidInfo.deviceSnapshot(context.applicationContext, QaLens.config.value)
+        val headers = linkedMapOf("User-Agent" to "QaLens-Android", "X-QaLens-App" to device.appName,
+            "X-QaLens-Version" to device.appVersion, "X-QaLens-Platform" to "android ${device.androidVersion}")
+        device.environment?.let { headers["X-QaLens-Env"] = it }
+        headers["X-QaLens-Device"] = "${device.manufacturer} ${device.deviceModel}"
         QaLensPrefs.userName(context).takeIf { it.isNotBlank() }?.let { headers["X-QaLens-User"] = it }
         val name = QaLensPrefs.webhookHeaderName(context)
         val value = QaLensPrefs.webhookHeaderValue(context)

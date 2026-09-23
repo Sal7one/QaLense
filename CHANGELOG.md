@@ -2,10 +2,44 @@
 
 ## Unreleased — post-0.9.0
 
-### Overlay design tokens — 2026-09-13
-- Add `QaLensTokens`: one host-adaptive palette replacing the eight hard-coded palettes
-  scattered across the overlay, panel, sheet, canvases and Control Room. A light host gets the
-  dark overlay panel; a dark host gets an opaque light panel. The selector reads the
+### Archive reader limits — 2026-09-23
+- Bound ZIP entry counts, per-entry and total expansion, nested gzip text, and manifest size in the
+  shared web/CLI reader and Python mock backend. Reject invalid paths, duplicates, ZIP CRC errors,
+  missing listed entries and manifest CRC mismatches before replay or backend storage.
+- Add v1/v2, nested compression, tampered checksum and expansion regressions. The backend remains
+  a loopback-only development mock without authentication or tenant isolation.
+- Make the recording stop chip expose an accessibility click action and release its in-app window
+  when its Activity is destroyed. The projection notification opens recording controls on a body
+  tap while its explicit action stops capture. Move chip/notification text into resources and show
+  a short upload verdict in Control Room instead of truncating raw backend JSON.
+- Build webhook app/device metadata from application context so uploads started in the standalone
+  Control Room retain headers and query context even before a host Activity has resumed.
+- Align the Gradle wrapper with CI at 9.1.0 and make the internal Maven zip script accept a version,
+  clearing old generated publications before packaging.
+
+### Tester flow and local upload demo — 2026-09-23
+- Make the QA quick-actions sheet the default for new installs, with three primary actions: record a
+  session, capture a screenshot, and mark a bug. Move macros, device/report copying, tags, Control
+  Room, watch mode and developer diagnostics under **More tools**.
+- Apply the existing overlay tokens to that sheet. Add a deliberate **Send latest session** action
+  when a backend endpoint and saved recording are both available, with a short upload outcome.
+- Make the local backend and demo web server bind to loopback by default. Restrict browser CORS to
+  loopback or same-host pages; validate request sizes, JSON object bodies, chunk sizes/counts and
+  upload IDs before accepting or using them. Remove chunk staging before returning finalize success;
+  make the curl demo use the same 1 MB chunk contract as the Android client.
+- Make the sample's debug-only cleartext exception explicit for loopback domains and align imported
+  `.appsal` files that omit a panel preference with the tester-first default.
+- Replace the handoff prompt duplicate with the repository's single current handover. Refresh the
+  backend quick start and state clearly that the mock stores raw recordings and is not a shared
+  production service. QaLens itself remains free and self-hostable under MIT.
+- Validation: `./demo.sh test` passed (web reader, all 20 backend tests, Kotlin unit/release-parity
+  checks and expected failing-session CLI smoke); `:sample-app:assembleDebug` and debug lint for the
+  Compose, Android and sample modules passed. Lint warnings and the manual API 36 AVD and backend
+  smoke results are recorded in HANDOVER.
+
+### Host-adaptive overlay foundations — 2026-09-13
+- Add `QaLensTokens`: host-adaptive palettes for the bubble, inspect/tag canvases, scrim and tag
+  legend. A light host gets the dark overlay panel; a dark host gets an opaque light panel. The selector reads the
   configuration night mask because the overlay attaches at decor level, outside the host
   Material theme.
 - Fix a real contradiction: `#E53935` meant "accessibility warning" in the inspect canvas and
@@ -18,8 +52,7 @@
   tokens. The bubble keeps its original crisp white ring. Add `QaLensDimens` (4dp scale, one
   radius family, 48dp touch minimum) and `QaLensType`.
 - Document the system, contrast tables and adoption order in docs/OVERLAY_DESIGN.md. The
-  inspector panel, minimal sheet, Control Room and REC chip still use their own literals and are
-  the remaining migration.
+  inspector panel, Control Room and REC chip still use their own literals and remain to be migrated.
 
 ### Handover consolidation — 2026-09-13
 - Replace conflicting onboarding snapshots with one self-contained HANDOVER and a short takeover

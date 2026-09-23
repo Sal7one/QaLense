@@ -38,6 +38,11 @@ self-contained Maven repository with a `SHA-256SUMS` manifest (verify after tran
 `shasum -a 256 -c SHA-256SUMS`). Host the unzipped folder anywhere (artifact server, internal
 static host, even a shared drive) and consume it:
 
+For an internal preview version, run `scripts/release_internal.sh --version 0.9.0-preview1 --verify`
+and use that exact version in every debug and release dependency. The script clears its generated
+repository before publishing so a zip never mixes versions. The wrapper and CI use Gradle 9.1.0;
+set `QALENS_GRADLE` to another executable only when testing a deliberate toolchain change.
+
 ```kotlin
 // settings.gradle.kts
 dependencyResolutionManagement {
@@ -182,11 +187,14 @@ QaLens.contract("Checkout") { requiresTag("checkout.submit"); requiresNoFailedNe
 
 ## Step 7 — Team setup via `.appsal` (recommended)
 
-One JSON config per app package: panel style (QA-minimal vs full), webhook endpoint, saved SQL
-queries, macros, watched prefs files. Build it in the web editor (`web/index.html` → **⚙ .appsal
-editor**), commit it next to your app, and every tester imports it on-device:
-**Control Room → App Config → ⤓ Import .appsal**. Personal identities (per-tester webhook
-bearer/Jira user) are **QA Profiles** on the device, deliberately not part of `.appsal`.
+One JSON config per app package: panel style (tester quick actions vs full developer diagnostics),
+webhook endpoint, saved SQL queries, macros and watched prefs files. Start from
+`web/sample.appsal`, edit it in `web/index.html` → **⚙ .appsal editor**, set the app package and
+team defaults, then export and review the JSON. Keep the webhook blank until the company owns an
+authenticated service; the bundled Python mock is only for loopback testing. Commit a secret-free
+config next to the host app, and have each tester import it on-device via **Control Room → App
+Config → ⤓ Import .appsal**. Personal identities (per-tester webhook bearer/Jira user) are **QA
+Profiles** on the device, deliberately not part of `.appsal`.
 
 ### Macros (inside `.appsal` or created on-device)
 
@@ -203,7 +211,8 @@ mark logged in by macro
 ```
 
 Targets: exact test tag first, then visible text, then content description (smallest match wins).
-The minimal QA panel surfaces the **5 most recently used macros** at the top. Verbs:
+The tester quick-actions sheet keeps macros under **More tools**; it shows the **5 most recently
+used** first. Verbs:
 `deeplink <uri>` · `wait <ms>` · `tap <tag|text>` · `type <tag> <text>` · `record [video]` ·
 `stop` · `screenshot` · `mark <text>`.
 
@@ -212,7 +221,7 @@ The minimal QA panel surfaces the **5 most recently used macros** at the top. Ve
 | Artifact | What / where |
 |---|---|
 | `.sal` recording | ZIP of frames-or-video + synced timeline/network/logs/state + `analysis.json` (precomputed digest) + `for_ai.md` (self-describing for AI). Record from the panel/notification/Control Room. Replay on-device, in `web/index.html`, or `node web/tools/sal_report.js file.sal` (exit 1 on failures — CI gate). |
-| Webhook upload | Control Room → per recording **⇪ Webhook**: multipart `file` + `X-QaLens-App/-Version/-Env/-Device/-Platform/-User/-Sal-Name/-Sal-Size/-Digest` headers + query params. Your backend's response body is shown to the tester. |
+| Webhook upload | Tester sheet → **Send latest session**, or Control Room → per recording **⇪ Webhook**: multipart `file` + `X-QaLens-App/-Version/-Env/-Device/-Platform/-User/-Sal-Name/-Sal-Size/-Digest` headers + query params. Your backend's response body is shown to the tester. |
 | Screenshots | Annotated, saved to private app cache; sharing and Photos copies are opt-in. |
 | Bug reports | Redacted Jira/Slack/repro text via one-tap copy (`QaLens.buildJiraReport()` etc.). |
 

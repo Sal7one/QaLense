@@ -54,8 +54,8 @@ web_up() {
     ok "web player already running (pid $(cat "$WEB_PID_FILE"))"
     return 0
   fi
-  info "serving the web player (Mission Control) on :$WEB_PORT"
-  (cd "$ROOT" && python3 -m http.server "$WEB_PORT" > /tmp/qalens-demo-web.log 2>&1 & echo $! > "$WEB_PID_FILE")
+  info "serving the web player (Mission Control) on 127.0.0.1:$WEB_PORT"
+  (cd "$ROOT" && python3 -m http.server --bind 127.0.0.1 "$WEB_PORT" > /tmp/qalens-demo-web.log 2>&1 & echo $! > "$WEB_PID_FILE")
   wait_for "http://127.0.0.1:$WEB_PORT/web/index.html" 15 || {
     echo "web server failed — see /tmp/qalens-demo-web.log"; exit 1; }
   ok "web player up: http://127.0.0.1:$WEB_PORT/"
@@ -99,7 +99,7 @@ cmd_curl() {
   echo
   say "2) Mobile webhook — multipart .sal upload with X-QaLens-* headers:"
   curl -fsS -F "file=@$ROOT/web/sample.sal" \
-      -H "X-QaLens-App: QaLens Sample" -H "X-QaLens-Env: staging" -H "X-QaLens-User: qa+saleh@example.com" \
+      -H "X-QaLens-App: QaLens Sample" -H "X-QaLens-Env: staging" -H "X-QaLens-User: qa-tester@example.invalid" \
       "$B/webhook?team=payments&pipeline=nightly" | python3 -m json.tool
   echo
   say "3) Frontend hook — web player JSON summary ingest:"
@@ -107,8 +107,8 @@ cmd_curl() {
       -d "{\"app\":\"QaLens Sample\",\"version\":\"1.4.2\",\"environment\":\"staging\",\"platform\":\"web\",\"score\":58,\"likelyOwner\":\"Backend/API\",\"failedRequests\":2,\"sessionId\":\"curl-demo\"}" \
       "$B/api/ingest" | python3 -m json.tool
   echo
-  say "4) Chunked/resumable upload (R7) — split sample.sal into 2 chunks, resume-aware:"
-  python3 "$ROOT/scripts/demo_chunked.py" "$ROOT/web/sample.sal" "$B" 100000
+  say "4) Chunked/resumable upload (R7) — client-compatible 1 MB chunks:"
+  python3 "$ROOT/scripts/demo_chunked.py" "$ROOT/web/sample.sal" "$B"
   echo
   say "5) What the backend stored:"
   curl -fsS "$B/api/uploads" | python3 -c "import json,sys; [print(' ', u['id'], '|', u['source'], '|', (u.get('app') or {}).get('name'), '| score', u.get('score'), '|', (u.get('verdict') or {}).get('severity')) for u in json.load(sys.stdin)['uploads']]"
@@ -125,11 +125,7 @@ cmd_test() {
   python3 "$ROOT/backend/tests/test_backend.py" 2>&1 | grep -E "^(Ran|OK|FAILED)"
   echo
   say "3/4 kotlin unit tests + release parity (gradle):"
-  GRADLE_BIN="$HOME/.gradle/wrapper/dists/gradle-9.1.0-bin/9agqghryom9wkf8r80qlhnts3/gradle-9.1.0/bin/gradle"
-  if [ ! -x "$GRADLE_BIN" ]; then
-    info "cached gradle not found — using the wrapper (first run downloads ~130MB)"
-    GRADLE_BIN="$ROOT/gradlew"
-  fi
+  GRADLE_BIN="${QALENS_GRADLE:-$ROOT/gradlew}"
   (cd "$ROOT" && JAVA_HOME="${JAVA_HOME:-/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home}" "$GRADLE_BIN" :qalens-core:test :qalens-compose:testDebugUnitTest :qalens-replay:testDebugUnitTest :qalens-noop:testDebugUnitTest :qalens-replay:compileDebugKotlin :sample-app:compileDebugKotlin :sample-app:compileReleaseKotlin :sample-app:verifyReleaseIsolation --console=plain 2>&1 | tail -6)
   echo
   say "4/4 CLI smoke (sal_report as a CI gate):"

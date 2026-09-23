@@ -16,6 +16,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import com.qalens.compose.R
 import java.lang.ref.WeakReference
 
 /**
@@ -43,7 +44,10 @@ internal object QaLensSystemChip {
         override fun run() {
             val view = chip ?: return
             val sec = ((System.currentTimeMillis() - startMs) / 1000).coerceAtLeast(0)
-            view.text = "■ REC  %d:%02d".format(sec / 60, sec % 60)
+            val minutes = (sec / 60).toInt()
+            val seconds = (sec % 60).toInt()
+            view.text = view.context.getString(R.string.qalens_recording_elapsed, minutes, seconds)
+            view.contentDescription = view.context.getString(R.string.qalens_stop_recording_elapsed, minutes, seconds)
             handler.postDelayed(this, 1000L)
         }
     }
@@ -84,12 +88,19 @@ internal object QaLensSystemChip {
         }
     }
 
-    @SuppressLint("ClickableViewAccessibility")
     private fun attach(context: Context, wm: WindowManager, type: Int, activity: Activity?) {
         val density = context.resources.displayMetrics.density
 
-        val view = TextView(context).apply {
-            text = "■ REC  0:00"
+        val view = object : TextView(context) {
+            override fun performClick(): Boolean {
+                super.performClick()
+                QaLens.stopRecording()
+                return true
+            }
+        }.apply {
+            text = context.getString(R.string.qalens_recording_elapsed, 0, 0)
+            contentDescription = context.getString(R.string.qalens_stop_recording_elapsed, 0, 0)
+            isClickable = true
             setTextColor(Color.WHITE)
             textSize = 13f
             typeface = Typeface.create(Typeface.DEFAULT_BOLD, Typeface.BOLD)
@@ -117,7 +128,8 @@ internal object QaLensSystemChip {
             activity?.let { token = it.window.attributes.token }
         }
 
-        // Drag to move; treat sub-slop movement as a tap → stop recording.
+        // Drag to move; sub-slop movement calls performClick, including the accessibility action.
+        @SuppressLint("ClickableViewAccessibility") // The TextView subclass above overrides performClick.
         view.setOnTouchListener(object : View.OnTouchListener {
             private var downX = 0f; private var downY = 0f
             private var startX = 0; private var startY = 0
@@ -138,7 +150,7 @@ internal object QaLensSystemChip {
                             runCatching { wm.updateViewLayout(v, params) }
                         }
                     }
-                    MotionEvent.ACTION_UP -> if (!moved) QaLens.stopRecording()
+                    MotionEvent.ACTION_UP -> if (!moved) v.performClick()
                 }
                 return true
             }
@@ -163,5 +175,10 @@ internal object QaLensSystemChip {
         runCatching { windowManager?.removeViewImmediate(view) }
         windowManager = null
         inAppActivity = null
+    }
+
+    /** The permission-free chip is tied to one Activity window; release it on destruction. */
+    fun detachFrom(activity: Activity) {
+        if (inAppActivity?.get() === activity) hide()
     }
 }

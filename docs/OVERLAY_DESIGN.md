@@ -1,8 +1,8 @@
-# Overlay design tokens
+# Floating overlay design tokens
 
 How the QaLens floating overlay is coloured, sized and spaced, and the evidence behind
-those choices. The design source is the overlay design system; this document is its
-implementation contract.
+those choices. The source of truth is `QaLensTokens.kt` and this document; the token layer
+currently covers the floating bubble, tester quick-actions sheet, and inspect/tag canvases.
 
 ## The problem this solves
 
@@ -12,7 +12,7 @@ The overlay colours were hard-coded per file:
 |---|---|---|
 | QA bubble | `QaLensOverlay.kt` | `#111827` disc, white ring, amber `#FFC107` for inspect |
 | Inspector panel | `QaLensInspectorPanel.kt` | `#E6111827` panel, `#60A5FA` accent, `#FBBF24` warn |
-| QA-minimal sheet | `QaLensMinimalPanel.kt` | `#F80E1322` plus six gradient pairs |
+| Tester quick-actions sheet | `QaLensMinimalPanel.kt` | tokenized panel surfaces with semantic action colors |
 | Canvases | `QaLensOverlay.kt` | `#2196F3` / `#00C853` / `#E53935` / `#FFC107` |
 | Control Room | `QaLensControlActivity.kt` | `#0B0F17`, `#151B26`, `#60A5FA` |
 
@@ -98,8 +98,8 @@ colour-blind tester:
 `QaLensDimens` replaces the ad-hoc `6.dp` / `8.dp` / `10.dp` spread with a 4dp scale
 (`s1`…`s6`), one radius family (`rChip`, `rXs`…`rXl`), and `touchMin = 48.dp`.
 
-`touchMin` is the Android floor and every interactive element must clear it. The track chips
-in the inspector strip were roughly 28dp tall before.
+`touchMin` is the Android floor for new controls. Existing inspector and Control Room controls
+still need a separate sizing review; the token declaration alone does not resize them.
 
 `rowTimeColumn = 46.dp` fixes the leading column width so timestamps and values line up
 vertically down a track — the property that makes evidence scannable.
@@ -112,23 +112,20 @@ codes, byte counts, percentages, p95. Proportional type is for prose and labels 
 
 ## Adoption status
 
-Applied in this change:
+Applied:
 
 - `QaLensTokens.kt` — the token layer (new)
 - `QaLensTokensTest.kt` — contrast and scheme regression tests (new)
 - `QaLensOverlay.kt` — bubble, inspect canvas, tag canvas, panel scrim, tag chip and the
   tag-mode legend now read from tokens. The bubble keeps its original crisp white ring; a
   softened ring measured worse against the cream host and read as a smudge.
+- `QaLensMinimalPanel.kt` — the simplified tester sheet uses the same surfaces and status colors.
 
 Not yet migrated, in priority order:
 
-1. `QaLensInspectorPanel.kt` — the largest remaining win, and where the structural redesign
-   lands (verdict first, three pinned actions, four track chips with overflow, severity-
-   weighted tiles, the honest-coverage callout above the fold).
-2. `QaLensMinimalPanel.kt` — the tester-facing sheet.
-3. `QaLensControlActivity.kt` — the Control Room.
-4. `QaLensSystemChip.kt` — the recording chip.
+1. `QaLensInspectorPanel.kt` — the largest remaining surface to migrate and simplify.
+2. `QaLensControlActivity.kt` — developer setup and configuration.
+3. `QaLensSystemChip.kt` — the recording chip.
 
-Until those land, the overlay is visually consistent only on the surfaces listed above; the
-panels still use their own literals and will look like a different generation of the product.
-Do not claim a host-adaptive overlay while those files remain hard-coded.
+Until those land, the inspector, Control Room and recording chip still use their own colors and
+sizing. Do not claim the entire QaLens UI is host-adaptive.

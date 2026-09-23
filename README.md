@@ -5,9 +5,8 @@ QA/debug build, inspect screen/network/log context, then export a bug report or 
 recording. Engineers can replay it on Android, in the browser, or inspect it with a Node CLI.
 Release builds use a separate no-op artifact.
 
-**New AI or contributor: read [HANDOVER.md](HANDOVER.md).** It contains the project context,
-current verified baseline, code map, engineering contracts and next steps without requiring chat
-history. [TAKEOVER_PROMPT.md](TAKEOVER_PROMPT.md) is ready to paste into another AI.
+**New contributor: read [HANDOVER.md](HANDOVER.md).** It contains the project context, current
+verified baseline, code map, engineering contracts and next steps.
 
 ## What it does
 
@@ -62,7 +61,10 @@ node web/test/read.test.js
 python3 backend/tests/test_backend.py
 ```
 
-The backend is an unauthenticated development mock. See [DEMO.md](DEMO.md) for local operation and
+QaLens is free and self-hostable under the MIT license; the included backend is a local test mock,
+not a hosted multi-company service. See [DEMO.md](DEMO.md) for the 60-second upload walkthrough and
+[backend setup](backend/README.md) for the mobile and web send paths. The backend binds to loopback
+by default and has no authentication or production storage guarantees. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the complete JDK 17 / Gradle 9.1.0 Android build, lint,
 consumer and device matrix. `./demo.sh test` is a convenience subset, not every CI/device check.
 

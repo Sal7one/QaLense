@@ -276,7 +276,7 @@
           <div class="card-body">
             <label class="as-field"><span>Panel style</span>
               <select data-as="ui.panelMode">
-                <option value="minimal" ${AS.ui.panelMode === "minimal" ? "selected" : ""}>QA Minimal</option>
+                <option value="minimal" ${AS.ui.panelMode === "minimal" ? "selected" : ""}>Tester quick actions</option>
                 <option value="full" ${AS.ui.panelMode !== "minimal" ? "selected" : ""}>Full developer</option>
               </select></label>
             <label class="as-field"><span>Overlay opacity — <b id="asAlphaVal">${Math.round(AS.ui.overlayAlpha * 100)}%</b></span>

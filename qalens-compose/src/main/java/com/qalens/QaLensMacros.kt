@@ -18,7 +18,7 @@ internal data class MacroRunResult(val passed: Boolean, val assertionFailures: I
 
 /**
  * Runs QA macros — named step lists from the `.appsal` config, fired with one tap from the
- * minimal panel or the Control Room. Step DSL (one step per line, case-insensitive):
+ * tester sheet's More tools section or the Control Room. Step DSL (one step per line, case-insensitive):
  *
  *   deeplink <uri>         open a deep link
  *   wait <ms>              pause

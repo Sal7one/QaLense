@@ -1,93 +1,110 @@
-# QaLens mock webhook backend
+# QaLens local test backend
 
-`server.py` is a Python stdlib development server for testing QaLens uploads. It stores artifacts,
-serves a dashboard and computes a deterministic mock verdict from observed evidence. It does not
-call an AI model. Missing/partial evidence must not become a healthy verdict.
+This free, zero-dependency Python server lets you exercise the real upload paths without signing up
+for a hosted service. It stores sample `.sal` files, shows them on a local dashboard, and returns a
+deterministic mock verdict. It does not call an AI model.
 
-The server has no authentication, open CORS and unauthenticated deletion. The code defaults to
-`0.0.0.0`; for local development bind explicitly to loopback:
+## Try a complete send in one minute
+
+From the repository root:
 
 ```sh
-python3 backend/server.py --host 127.0.0.1 --port 8000
-# Optional isolated storage:
-python3 backend/server.py --host 127.0.0.1 --port 9000 --data-dir /tmp/qalens-data
+./demo.sh quick
 ```
 
-Open `http://127.0.0.1:8000/` for the dashboard. Python 3.9+ is required; no `cgi` module dependency.
-Do not use this mock as a production endpoint. [next.md](../next.md) tracks security and reader gaps.
+This starts the backend at `http://127.0.0.1:8000` and the web player at
+`http://127.0.0.1:8100`. In Mission Control, open **Settings → Backend URL**, enter
+`http://127.0.0.1:8000`, load the bundled sample, and choose **Send to backend**. The received
+recording appears on the dashboard at `http://127.0.0.1:8000/`.
 
-## Connect a client
+To confirm the Android webhook without building the app, or to send the included sample archive:
 
-- Android emulator: select a disposable device, run `adb -s emulator-5554 reverse tcp:8000 tcp:8000`,
-  then set Control Room → Webhook to `http://127.0.0.1:8000/webhook` and use Test endpoint.
-  The sample debug configuration allows local cleartext; the SDK does not grant that to every host.
-- Web: open the v2 or classic viewer, configure Backend URL `http://127.0.0.1:8000`, load a session
-  and choose Send to backend. No endpoint is configured by default.
+```sh
+curl -fsS -X POST http://127.0.0.1:8000/webhook \
+  -H 'Content-Type: application/json' -d '{"qalens":"webhook-test"}'
+curl -fsS -F file=@web/sample.sal \
+  -H 'X-QaLens-App: QaLens Sample' \
+  http://127.0.0.1:8000/webhook
+```
+
+`./demo.sh curl` exercises the mobile ping, mobile `.sal` upload, web summary, and resumable upload.
+The dashboard updates from the server's stored records.
+
+## Send from Android
+
+For a USB-connected emulator or phone, run:
+
+```sh
+adb reverse tcp:8000 tcp:8000
+```
+
+In QaLens **Control Room → Webhook**, set `http://127.0.0.1:8000/webhook` and choose **Test
+endpoint**. Record and stop a session; choose **Send latest session** from the tester panel, or
+**Webhook** beside the recording in Control Room. The tester sheet only displays the send action
+after an endpoint and a saved session exist. Upload is always a deliberate tap.
+
+The sample debug app permits local HTTP for this demo. Host apps retain control of their own network
+security settings. QaLens does not add cleartext access to consuming apps.
+
+## Run the backend by itself
+
+```sh
+python3 backend/server.py
+# or choose another local port and an isolated data directory
+python3 backend/server.py --port 9000 --data-dir /tmp/qalens-demo-data
+```
+
+The default bind is `127.0.0.1`; Python 3.9 or newer is required. Upload bodies are capped at 64 MiB.
+The sample `./demo.sh` web server also binds to loopback. Set a local URL in both the web player and
+the Android Control Room; no endpoint is preconfigured in the SDK.
+
+The server has no authentication, encryption, access controls, tenant isolation, or production
+retention policy. It keeps raw recordings under `backend/data/` (or `--data-dir`) and its dashboard
+allows unauthenticated downloads and deletion. Keep it on loopback for local testing. Binding it to
+`0.0.0.0` is an explicit opt-in for a trusted development network, not a way to host company data.
+For company use, each team can run QaLens for free and connect it to a backend they own; a real
+shared service still needs an independently designed identity, access, transport, storage, and
+retention model.
 
 ## HTTP contract
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/webhook` | Multipart `file` containing a `.sal`, or JSON `{"qalens":"webhook-test"}` ping |
-| POST | `/api/ingest` | Web summary JSON or multipart archive |
-| POST | `/webhook/chunk/start` | Start/resume by name, size and digest; returns `uploadId` |
-| POST | `/webhook/chunk/<id>/<i>` | Raw bytes for chunk index i; verifies supplied size and CRC32 |
-| GET | `/webhook/chunk/<id>/status` | Returns received chunk indices |
-| POST | `/webhook/chunk/<id>/finalize` | Assemble, parse, store and return the normal verdict; 409 for missing chunks |
-| GET | `/ping` | Health response |
-| GET | `/` | Dashboard |
+| POST | `/webhook` | Android JSON test ping or multipart `.sal` upload |
+| POST | `/api/ingest` | Web-player JSON summary or multipart archive |
+| POST | `/webhook/chunk/start` | Start or resume a chunked upload |
+| POST | `/webhook/chunk/<id>/<index>` | Upload one CRC32-checked chunk |
+| GET | `/webhook/chunk/<id>/status` | List received chunk indices |
+| POST | `/webhook/chunk/<id>/finalize` | Assemble, parse and store an upload |
+| GET | `/ping` | Health check |
+| GET | `/` | Local dashboard |
 | GET | `/api/uploads` | Stored upload list |
-| GET | `/api/uploads/<id>` | Metadata, parsed evidence and verdict |
+| GET | `/api/uploads/<id>` | Parsed evidence and mock verdict |
 | GET | `/uploads/<id>/download` | Original `.sal` bytes |
-| DELETE | `/api/uploads/<id>` | Remove an upload |
-| OPTIONS | Any | CORS preflight |
+| DELETE | `/api/uploads/<id>` | Delete a stored upload |
 
-Android sends `X-QaLens-App/-Version/-Env/-Device/-Platform/-User`, recording name/size and
-`X-QaLens-Digest` (the archive's `analysis.json.stats`). Query parameters are retained as metadata.
-Recordings above 2,000,000 bytes use 1,000,000-byte chunks. Start sends `X-QaLens-Sal-Name`,
-`X-QaLens-Sal-Size`, `X-QaLens-Chunk-Count` and digest. Each chunk sends `X-QaLens-Chunk-Crc32`
-(lowercase hexadecimal) and `X-QaLens-Chunk-Size`; mismatch returns 409. Start is idempotent for the
-same name/size/digest; clients query status to skip received chunks before finalization.
+The browser API allows CORS for loopback pages and pages served from the same host. This keeps the
+local web demo working without granting arbitrary websites access to a localhost recording
+dashboard. Native Android sends do not use CORS.
 
-The Android client uses bounded workers and retries transient failures. Queue rejection, transport
-failures and exhausted 408/429/5xx outcomes can persist in a capped 20-item queue. Other permanent
-HTTP outcomes are removed; chunk mismatch 409 has its own retry path. Queued uploads are bound to
-their original endpoint and may retry on later upload/connectivity events. Legacy queue records
-without a destination require an explicit new upload. Disabling the SDK cancels active upload work.
-See [client fixes](../docs/CLIENT_SAFETY_FIXES.md); do not treat every 4xx as nonretryable.
+Android sends app/device metadata and a digest. Recordings over 2,000,000 bytes use 1 MB chunks;
+each chunk carries a size and CRC32, and the client resumes missing chunks after a dropped
+connection. The backend's mock verdict preserves partial-recording and evidence-loss signals.
 
-## Examples
+## Storage, extension and limits
 
-Run from the repository root with the loopback server running:
+Each upload gets a directory containing `recording.sal`, metadata, parsed manifest/summary/analysis,
+and a verdict. The data directory is ignored by Git. The dashboard's delete action removes one
+recording. The `.sal` format is documented in [SAL_FORMAT.md](../docs/SAL_FORMAT.md).
 
-```sh
-curl -X POST http://127.0.0.1:8000/webhook \
-  -H 'Content-Type: application/json' -d '{"qalens":"webhook-test"}'
-curl -F file=@web/sample.sal -H 'X-QaLens-App: QaLens Sample' \
-  'http://127.0.0.1:8000/webhook?team=example'
-```
+`mock_verdict(meta, parsed)` is an example seam for analysis code. It preserves the response shape
+used by the SDK. The mock reader rejects invalid paths, duplicates, CRC mismatches and archives
+over the 4,096-entry, 256 MiB/entry, 512 MiB expanded-total, 16 MiB/text and 1 MiB/manifest
+limits. It still has no authentication, tenant isolation or production retention policy; do not
+expose it as a public archive-processing service.
 
-For a complete executable chunk protocol example, use `backend/tests/test_backend.py` or the
-`curl` mode in `demo.sh`. Do not hard-code a chunk count for an arbitrary archive size.
-
-## Storage and extension point
-
-Uploads live under `backend/data/` or `--data-dir`, in per-upload directories containing raw
-recording bytes, metadata, verdict and parsed manifest/summary/analysis/AI brief when available.
-Keep this generated data out of Git. Archives follow [SAL_FORMAT.md](../docs/SAL_FORMAT.md);
-Android-equivalent expansion budgets/checksum policy are not established for the backend.
-
-`mock_verdict(meta, parsed)` is the extension point for real analysis. Preserve the client response
-contract and coverage semantics if replacing it. A model-backed service additionally needs its own
-authentication, storage, privacy and operational design; none is supplied by this local mock.
-
-## Tests
+Run backend checks with:
 
 ```sh
 python3 backend/tests/test_backend.py
 ```
-
-The last client-fix baseline passed 20 tests against ephemeral local servers and temporary storage.
-Coverage includes upload/download, metadata/JSON ingest, dashboard/deletion, malformed input,
-Android-style v2 compression, partial-evidence verdicts and chunk start/status/finalize/resume.
-[HANDOVER.md](../HANDOVER.md) records the dated whole-project baseline.

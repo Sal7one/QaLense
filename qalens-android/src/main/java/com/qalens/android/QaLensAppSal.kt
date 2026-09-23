@@ -21,7 +21,7 @@ data class AppSalConfig(
     val name: String = "",
     val exportedAt: Long = 0L,
     // ui
-    val panelMode: String = "full",          // "minimal" | "full"
+    val panelMode: String = "minimal",       // "minimal" | "full"
     val overlayAlpha: Float = 1f,
     val dockBottom: Boolean = false,
     // webhook
@@ -48,7 +48,7 @@ object QaLensAppSal {
         context.applicationContext.getSharedPreferences("qalens_prefs", Context.MODE_PRIVATE)
 
     // ── Panel mode (minimal vs full) ─────────────────────────────────────────
-    fun panelMode(context: Context): String = prefs(context).getString(KEY_PANEL_MODE, "full") ?: "full"
+    fun panelMode(context: Context): String = prefs(context).getString(KEY_PANEL_MODE, "minimal") ?: "minimal"
     fun setPanelMode(context: Context, mode: String) =
         prefs(context).edit().putString(KEY_PANEL_MODE, if (mode == "minimal") "minimal" else "full").apply()
 
@@ -90,7 +90,7 @@ object QaLensAppSal {
         prefs(context).edit().putString(KEY_MACROS, arr.toString()).apply()
     }
 
-    // ── Macro usage (device-local, NOT exported — recency feeds the minimal panel) ──
+    // ── Macro usage (device-local, NOT exported — recency feeds More tools) ──
     private const val KEY_MACRO_USAGE = "appsal_macro_usage"
 
     fun recordMacroUse(context: Context, name: String) {
@@ -191,7 +191,7 @@ object QaLensAppSal {
             packageName = o.optString("package"),
             name = o.optString("name"),
             exportedAt = o.optLong("exportedAt"),
-            panelMode = ui.optString("panelMode", "full"),
+            panelMode = ui.optString("panelMode", "minimal"),
             overlayAlpha = ui.optDouble("overlayAlpha", 1.0).toFloat(),
             dockBottom = ui.optBoolean("dockBottom", false),
             webhookUrl = wh.optString("url"),

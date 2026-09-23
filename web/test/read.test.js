@@ -82,8 +82,7 @@ function zipStore(entries, method = 0) {
 
 // Build a v2 .sal in memory from a v1 files Map: gzip every *.json entry (STORE), rebuild
 // manifest.json with formatVersion 2 and files[] as {name, crc32, compressed} objects.
-// manifest.json is omitted from files[] — its own checksum would be self-referential (the reader
-// treats files[] as informational; the ZIP entry names are authoritative).
+// manifest.json is omitted from files[] — its own checksum would be self-referential.
 function buildV2(srcFiles, corruptName, method = 0) {
   const td = new TextDecoder("utf-8");
   const manifest = JSON.parse(td.decode(srcFiles.get("manifest.json")));
@@ -173,18 +172,6 @@ function ok(cond, msg) {
      "Android v2: evidence survives both compression layers");
   ok(androidV2.frames.length === 64, "Android v2: JPEG frames survive DEFLATE");
 
-  // Negative: corrupt one crc32 → parse still succeeds (warn path, no hard fail).
-  const warnBad = [];
-  console.warn = (...a) => warnBad.push(a.join(" "));
-  let corruptParsed = false;
-  try {
-    const c = await SAL.read(toAB(buildV2(files, "timeline.json")));
-    corruptParsed = c.formatVersion === 2 && c.timeline.length === 13;
-  } catch (_) { corruptParsed = false; }
-  console.warn = origWarn;
-  ok(corruptParsed, "v2: crc32 mismatch still parses");
-  ok(warnBad.some((w) => w.includes("crc32 mismatch for timeline.json")), "v2: crc32 mismatch warned");
-
   // Negative: formatVersion 3 must throw.
   const td = new TextDecoder("utf-8");
   const v3entries = [...files.entries()].map(([name, data]) => [name, data]);
@@ -202,6 +189,18 @@ function ok(cond, msg) {
     }
     ok(rejected, message);
   }
+  await rejects(buildV2(files, "timeline.json"), "v2 manifest checksum mismatch is rejected");
+  const badZipCrc = zipStore([["manifest.json", Buffer.from("{}")]]);
+  const crcCentral = badZipCrc.readUInt32LE(badZipCrc.length - 22 + 16);
+  badZipCrc.writeUInt32LE(0, crcCentral + 16);
+  await rejects(badZipCrc, "ZIP central checksum mismatch is rejected");
+  const oversizedGzip = zlib.gzipSync(Buffer.alloc(16 * 1024 * 1024 + 1, 0x20));
+  await rejects(zipStore([["manifest.json", Buffer.from("{}")],
+    ["timeline.json", oversizedGzip]]), "nested gzip expansion beyond text budget is rejected");
+  const excessiveEntry = zipStore([["manifest.json", Buffer.from("{}")]]);
+  const entryCentral = excessiveEntry.readUInt32LE(excessiveEntry.length - 22 + 16);
+  excessiveEntry.writeUInt32LE(256 * 1024 * 1024 + 1, entryCentral + 24);
+  await rejects(excessiveEntry, "declared oversized ZIP entry is rejected before inflation");
   await rejects(zipStore([]), "missing manifest is rejected instead of an empty healthy session");
   await rejects(zipStore([["manifest.json", Buffer.from("broken")]]), "malformed manifest is rejected");
   await rejects(zipStore([["manifest.json", Buffer.from("[]")]]), "array manifest is rejected");
@@ -250,6 +249,11 @@ function ok(cond, msg) {
     const failing = fixture("failing", partialAnalysis, [{ method: "GET", url: "/failure", status: 500, ts: 101 }]);
     const run = (...args) => require("child_process").spawnSync(process.execPath,
       [path.join(__dirname, "..", "tools", "sal_report.js"), ...args], { encoding: "utf8" });
+    const damaged = path.join(tmp, "damaged.sal");
+    fs.writeFileSync(damaged, buildV2(files, "timeline.json"));
+    const invalidReport = run(damaged, "--json");
+    ok(invalidReport.status === 2 && invalidReport.stderr.includes("checksum mismatch") &&
+      invalidReport.stdout === "", "CLI rejects damaged evidence without JSON output");
     for (const mode of [[], ["--for-ai"], ["--json"]]) {
       const report = run(partial, ...mode);
       ok(report.status === 2, "partial evidence blocks clean CI result: " + (mode[0] || "markdown"));

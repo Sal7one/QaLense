@@ -1,10 +1,9 @@
 # QaLens: start here
 
-Updated 2026-09-13. This is the authoritative handover for a contributor or AI with no prior
-conversation context. It describes the implementation at `7a05bee`; the following documentation
-cleanup changes documentation and links only. Check `git status` and `git log` on arrival because
-local state and remote publication may have changed. Historical claims in CHANGELOG are not a
-current verification matrix.
+Updated 2026-09-23. This is the authoritative handover for a contributor or AI with no prior
+conversation context. It incorporates the tester-flow and local-backend changes made after
+`f9b2672`. Check `git status` and `git log` on arrival because local state and remote publication
+may have changed. Historical claims in CHANGELOG are not a current verification matrix.
 
 ## Product and user priorities
 
@@ -12,23 +11,28 @@ QaLens is an open-source Android Jetpack Compose QA evidence SDK, licensed under
 tester reproduce a bug, capture context, and give another engineer a useful report or recording.
 The host app selects the active SDK in debug/QA builds and `qalens-noop` in release builds.
 
-The user asked for a thorough Kotlin/client audit because the client app felt buggy, followed by
-fixes. Their priority is a robust client and SDK that is useful and easy to integrate with Chucker
-and other open-source tools. Continue with concrete client behavior and integration improvements.
-Do not pivot to a website redesign, iOS port or speculative rewrite. The latest request was to
-prepare this handover and remove stale docs before moving to a new AI.
+The user says the app feels buggy and the tester overlay is too complex. They want QaLens to be
+robust, easy for professional QA teams at multiple companies to share for free, simpler to
+integrate with Chucker and other OSS tools, and able to send real test recordings to a backend.
+QaLens is MIT-licensed and self-hostable; the included backend is a local mock, not a hosted or
+multi-tenant service. Prioritize the Android client and tester workflow, preserve host-app behavior,
+and make the local end-to-end send path concrete. Keep advanced diagnostics for engineers. Avoid
+speculative rewrites and never describe the mock as safe for company data.
 
 The product provides:
 
-- A floating QA bubble, inspect/tag modes, full and minimal panels, and a separate Control Room.
+- A floating QA bubble, inspect/tag modes, a tester quick-actions sheet (record, screenshot, mark a
+  bug), an optional full developer panel, and a separate Control Room. New installs default to the
+  tester sheet; advanced tools stay under More tools.
 - Compose semantics inspection, route history, accessibility rules, build checks, deterministic
   readiness scores, likely-owner classification, contracts and reproducible event timelines.
 - Opt-in OkHttp/Timber observations, generic network sinks, crash reporter bridges, Room/DataStore
   change events, feature flags and application-owned data providers.
 - Text bug reports, screenshots and `.sal` session archives. Android replay, two web viewers and a
   Node CLI consume archives. `.appsal` is a separate JSON configuration format for macros/settings.
-- An optional webhook uploader and a Python mock backend for local development. The backend's
-  “AI” verdict is deterministic code, not a model or a hosted service.
+- An optional webhook uploader and a Python mock backend for local development. The backend binds
+  to loopback by default, stores raw recordings, and returns a deterministic verdict; it is not an
+  authenticated or multi-tenant company service.
 
 The SDK cannot inspect arbitrary private Compose state, infer unobserved taps, recover events
 never delivered by Android, or certify health from empty tracks. Android capture is implemented;
@@ -49,8 +53,8 @@ iOS capture and native Ktor/Cronet/Apollo adapters are not. Generic transport ca
 | [Demo](DEMO.md), [web](web/README.md), [backend](backend/README.md) | Operating the sample and replay/upload tools |
 | [Changelog](CHANGELOG.md) | Historical changes; Git preserves deleted historical documents |
 
-[TAKEOVER_PROMPT.md](TAKEOVER_PROMPT.md) is a short prompt to paste into another AI. It deliberately
-points here instead of maintaining a second baseline. Root `AGENTS.md` also directs agents here.
+Root `AGENTS.md` directs contributors here; this file and `next.md` are the only current project
+handover and backlog.
 
 ## Verified implementation baseline
 
@@ -80,6 +84,45 @@ route-node clearing, DataStore cancellation/restart, invalid macro outcomes, SQL
 Android-produced archive replay, upload queue saturation/cancellation and exhausted 503 retries.
 It uses synthetic data and loopback HTTP. This does not replace physical-device video testing.
 
+The `f9b2672` overlay-token commit also reports passing token contrast/scheme tests, sample debug
+build, release-isolation verification and an API 36 overlay check. Those results predate the current
+tester-sheet and backend changes and have not been rerun here.
+
+## Takeover validation — 2026-09-23
+
+- `:qalens-compose:compileDebugKotlin :sample-app:compileDebugKotlin` passed with the documented
+  Gradle 9.1.0/JDK 17 toolchain.
+- `:sample-app:assembleDebug` passed. The quick-actions sheet was opened on the Pixel 8 Pro API 36
+  AVD; the three core actions, local privacy note, conditional upload action and collapsed/expanded
+  More tools were visually reviewed. An earlier review restored the AVD's full-panel preference;
+  the current visible AVD was later set to quick actions for tester validation.
+- `./demo.sh test` passed: web reader, all 23 backend tests, Kotlin unit/release-parity checks and
+  the expected failing-session CLI smoke. The backend round-trip test now also checks that completed
+  chunked uploads remove their temporary files before returning success.
+- An ephemeral loopback backend smoke sent `web/sample.sal`, confirmed it in `/api/uploads`, checked
+  loopback CORS allow / external-origin denial, and confirmed an oversized request returns 413. The
+  `scripts/demo_chunked.py` send path was also run against temporary storage and its upload appeared
+  in the backend store.
+- `:qalens-compose:lintDebug :qalens-android:lintDebug :sample-app:lintDebug` passed with zero
+  errors after making debug cleartext domains explicit. The latest run reports 24 warnings across
+  those modules, down from 28; the active stop-chip View is still held until stop/destroy and lint
+  flags that static reference. Sample metadata and dependency freshness also remain.
+- `git diff --check` and Python syntax parsing passed. The physical-device capture, accessibility
+  and recovery matrix remains open.
+- On a separate disposable API 36 emulator, the Android instrumentation runner returned `OK:` for
+  retention, Chucker, privacy, lifecycle, replay and webhook checks. A manual frame recording used
+  the in-app REC chip to stop and opened the share sheet. Its 4.9 MB synthetic `.sal` reached the
+  temporary loopback backend through the five-chunk resume protocol; the app showed HTTP 200 and
+  `/api/uploads` listed the mobile session. Starting the Control Room directly after reinstall
+  exposed blank upload app/device metadata; the webhook now derives it from application context.
+  A repeat post-reinstall upload confirmed populated headers and query fields. The visible Pixel 8
+  Pro tester sheet was also checked at 150% system font size and at a 360 × 640 dp small-phone
+  override. Primary actions remained readable, and expanded More tools scrolled to its lower
+  actions. The original display and font settings were restored. Physical-device, RTL and TalkBack
+  verification remain open.
+- `scripts/release_internal.sh --verify` built six modules into a local Maven repo, verified its
+  `SHA-256SUMS` and produced `dist/qalens-0.9.0-repo.zip`. The wrapper now reports Gradle 9.1.0.
+
 ## What changed recently
 
 | Commit | Result |
@@ -89,6 +132,7 @@ It uses synthetic data and loopback HTTP. This does not replace physical-device 
 | `022f38c` | Recording-owned histories survive dashboard eviction/clearing; omitted evidence is disclosed |
 | `d5e735b` | Actual release isolation, recording recovery, correct frame units, real Android v2 replay compatibility |
 | `e7c8adc` | Shared nearest-rank percentiles and regression tests |
+| `f9b2672` | Add overlay color/spacing tokens for the bubble and inspect/tag surfaces; not a whole-UI redesign |
 
 Do not reintroduce fixes from older handovers: Chucker has no supported live transaction-listener
 integration here, percentile ranks are fixed, response previews use OkHttp `peekBody`, and the
@@ -98,8 +142,8 @@ sparklines remain open.
 ## Build environment and exact verification
 
 Tested toolchain: JDK 17, Kotlin 2.0.21, AGP 8.7.3, Android compile/target SDK 35, minSdk 23,
-Compose BOM 2024.12.01, Gradle 9.1.0. The wrapper still requests Gradle 9.0.0; the verified local/CI
-path uses 9.1.0. Do not infer that any Gradle 9.x or newer Kotlin/JDK combination works.
+Compose BOM 2024.12.01, Gradle 9.1.0. The wrapper and CI both request the verified 9.1.0 version.
+Do not infer that any other Gradle 9.x or newer Kotlin/JDK combination works.
 JUnit4 is used for Android-module unit tests; do not switch no-op tests to JUnit Platform.
 
 On the original Mac, the checkout is `/Users/salehalanazi/Desktop/QaLense` (folder spelling differs
@@ -179,17 +223,17 @@ Default coordinates are `com.qalens:<module>:0.9.0`, defined in root `build.grad
 and local Maven distribution exist; no Maven Central availability is claimed. `qalensDist` writes
 `build/qalens-repo`; `scripts/release_internal.sh` packages it. External publishing is separate work.
 
-The latest code changes were committed on `dev`; no push or public release was performed in the
-client-fix or handover work. Start by inspecting the actual Git state. No code-fix task is left
-running as an intentional background job. An emulator or local demo process may still be alive;
-inspect before restarting or stopping anything. Shell logs under `/tmp` are disposable, not the
-source of truth. The next work is explicitly listed in [next.md](next.md).
+The client-fix, OSS integration and overlay-token changes are local commits on `dev`; no push or
+public release was performed. Inspect current Git state before continuing. The temporary backend
+and disposable test emulator were stopped and their temporary recordings removed. The user
+explicitly requested an emulator, so the visible Pixel 8 Pro (`emulator-5554`) remains running in
+tester quick-actions mode. Shell logs under `/tmp` are disposable, not the source of truth. The
+next work is explicitly listed in [next.md](next.md).
 
 ## First useful task for the incoming AI
 
-Read this file, the architecture, client fix report and backlog. Inspect the relevant Kotlin paths
-before proposing changes. Reproduce the baseline relevant to your chosen task, then extend the
-client device tests for one concrete lifecycle/privacy gap. Preserve existing working behavior,
-run checks appropriate to the change, update the single backlog and changelog, and commit a focused
-change. Report executed evidence and remaining limitations separately. Do not require the user to
-repeat decisions already captured here, and do not claim a whole-codebase audit proves absence of bugs.
+Read this file and [next.md](next.md). Start with the remaining tester-flow device/accessibility
+review, then continue the backend/archive and SDK integration backlog. Keep company deployment
+claims tied to an owned, authenticated backend; the included mock is for local upload testing.
+Preserve release/no-op isolation, capture privacy and host behavior. Report exactly what was checked
+and what remains open; do not claim a whole-codebase audit proves absence of bugs.

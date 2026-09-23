@@ -426,7 +426,7 @@ object QaLens {
         it.copy(isInspectMode = enabled, isTagMode = if (enabled) false else it.isTagMode)
     }
 
-    /** QA-minimal panel (big colorful controls) vs the full developer panel. Persisted. */
+    /** Tester quick-actions sheet vs the full developer panel. Persisted per app install. */
     fun setPanelMinimal(minimal: Boolean) {
         uiStateMutable.update { it.copy(minimalPanel = minimal) }
         appContext?.let { com.qalens.android.QaLensAppSal.setPanelMode(it, if (minimal) "minimal" else "full") }

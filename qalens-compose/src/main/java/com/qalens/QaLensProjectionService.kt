@@ -18,6 +18,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.DisplayMetrics
 import androidx.core.app.ServiceCompat
+import com.qalens.compose.R
 import androidx.core.content.ContextCompat
 import java.io.File
 
@@ -180,14 +181,20 @@ class QaLensProjectionService : Service() {
             Intent(this, QaLensProjectionService::class.java).setAction(ACTION_STOP),
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
+        val controlsIntent = android.app.PendingIntent.getActivity(
+            this, 3,
+            Intent(this, QaLensControlActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
         val notification: Notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("QaLens · Recording screen")
-            .setContentText("Tap to stop and save the recording")
+            .setContentTitle(getString(R.string.qalens_recording_notification_title))
+            .setContentText(getString(R.string.qalens_recording_notification_text))
             .setOngoing(true)
             .setSilent(true)
-            .setContentIntent(stopIntent)
-            .addAction(0, "■ Stop recording", stopIntent)
+            .setContentIntent(controlsIntent)
+            .addAction(0, getString(R.string.qalens_stop_recording), stopIntent)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

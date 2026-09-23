@@ -24,8 +24,8 @@ import androidx.compose.ui.unit.sp
  * clear WCAG AA 4.5:1 for text. If you change a value, recompute — see
  * `docs/OVERLAY_DESIGN.md` for the two tables and how they were produced.
  *
- * The design source is the mockup in the design system; this file is its Compose
- * expression. Keep the two in step.
+ * The product intent and adoption status live in `docs/OVERLAY_DESIGN.md`; keep this
+ * implementation and that guide in step.
  */
 @Immutable
 data class QaLensOverlayColors(
@@ -211,7 +211,7 @@ object QaLensDimens {    /** Android minimum touch target. Every interactive ele
     val bubbleBorder: Dp = 2.dp
     val bubbleHalo: Dp = 2.dp
 
-    /** The QA-minimal sheet, unchanged so it still fits a small phone. */
+    /** The tester quick-actions sheet, sized to fit small phones. */
     val sheetWidth: Dp = 310.dp
     val sheetRadius: Dp = 22.dp
 

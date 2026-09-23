@@ -31,9 +31,10 @@ The bundled [backend](../backend/README.md) is an unauthenticated development mo
 
 The reader parses ZIP locally using native `DecompressionStream`, then recognizes gzip-compressed
 JSON inside ZIP entries. Both v1 and v2 are supported; newer versions are refused. The bundled
-`sample.sal` is v1, so it alone cannot prove Android v2 compatibility. Per-entry CRC mismatches in
-web currently warn and continue; Android replay rejects them. Web/backend expansion limits remain
-open work. See [the SAL contract](../docs/SAL_FORMAT.md) for exact layering and reader differences.
+`sample.sal` is v1, so it alone cannot prove Android v2 compatibility. v2 nested-compression
+fixtures cover that path. ZIP and listed manifest CRC mismatches, oversized expansion and missing
+listed entries are rejected. The reader has per-entry and total expansion budgets; see
+[the SAL contract](../docs/SAL_FORMAT.md) for exact limits and remaining differences.
 
 Recorded text and pixels have different privacy boundaries. Review artifacts before sharing;
 Android masks known sensitive Compose regions but opt-in video is unmasked. The web viewer does

@@ -1,8 +1,8 @@
 # QaLens — the mobile release-evidence SDK (showcase + demo guide)
 
-> **One line:** QaLens turns a manual QA session into a redacted, AI-ready bug bundle — and a
-> replayable `.sal` recording — with zero Android Studio, then ships it to your analysis backend
-> through hooks you can stand up in ten seconds.
+> **One line:** QaLens turns a manual QA session into a redacted, AI-ready bug bundle and replayable
+> `.sal` recording. The repository includes a local mock backend so teams can try the full send flow
+> without subscribing to a hosted service.
 
 This article is the fastest possible tour: what QaLens is, the one-command demo, the hooks, and a
 scripted walkthrough that exercises **every feature** — on the web in 60 seconds, or on a device in
@@ -59,13 +59,15 @@ The scripted **wow flow**:
    the fake backend returns `POST /transfer → 500` twice.
 2. Open the **Control Room** (the second launcher icon) → **Webhook** →
    `http://127.0.0.1:8000/webhook` → **Test endpoint** → the mock backend answers instantly.
-3. Tap the **QA bubble** → **Overview**: the release score has dropped and *Likely Owner =
-   Backend/API (HIGH)* — with reasons.
-4. **Bug Bundle → Copy Jira Bug** → paste. Build, device, repro steps, network failure,
+3. Tap the **QA bubble** → **Record a session**, reproduce the issue, then stop from the recording
+   chip. Sessions save locally first.
+4. Tap the bubble again → **Mark a bug** to add a timestamp and private screenshot. If a webhook is
+   configured and the session is saved, **Send latest session** sends it explicitly.
+5. Open **More tools → Developer diagnostics** for the score and *Likely Owner = Backend/API
+   (HIGH)*, with reasons.
+6. **Bug Bundle → Copy Jira Bug** → paste. Build, device, repro steps, network failure,
    accessibility, flags, app data — all redacted.
-5. **Record Session** → reproduce → **Stop** → the `.sal` lands in the recordings list →
-   **⇪ webhook** → the dashboard shows the upload and the mock AI verdict.
-6. In the **Settings** screen of the sample app, the new *QaLens Demos* section lets you feed the
+7. In the **Settings** screen of the sample app, the new *QaLens Demos* section lets you feed the
    pipeline on demand: failing transfer, ⭐ mark moment, BUG bookmark, 10-second recording,
    business event, **coroutine crash**, **ANR**, and a real **crash** — then watch each one appear
    in the panel's Overview/Logs and in the next `.sal`.
@@ -197,6 +199,11 @@ next.md                 the single prioritized backlog
 **Does it upload anything by itself?** There is no configured destination by default. QA can
 explicitly share or upload; failed uploads may retry later against their recorded destination.
 Configured text redaction and limited pixel masks do not make arbitrary evidence safe to share.
+
+**Can multiple companies use QaLens for free?** Yes. The SDK is MIT-licensed and teams can self-host
+their own integrations. The included Python backend is for local testing; it has no login, tenant
+separation or production retention controls. Do not point company recordings at a publicly reachable
+instance of that mock.
 
 **What if my screen has no test tags?** QaLens scores *missing* tags as a testability finding —
 that is signal, not noise. `Modifier.qaTag/qaName` fixes it in one line.

@@ -59,6 +59,7 @@ import com.qalens.android.QaLensProfiles
 import com.qalens.android.QaProfile
 import java.io.File
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 private val Bg        = Color(0xFF0B0F17)
 private val Card      = Color(0xFF151B26)
@@ -431,8 +432,8 @@ private fun ControlRoom(
         // ── QA Experience: panel style + macros ──
         ControlCard("QA Experience") {
             SwitchRow(
-                "QA Minimal panel",
-                "Big colorful actions + one-tap macros for testers. Off = the full developer panel.",
+                "Tester quick actions",
+                "Record a session, capture a screenshot, or mark a bug. Extra tools stay under More tools. Off = developer diagnostics.",
                 checked = state.minimalPanel
             ) { QaLens.setPanelMinimal(it) }
             Spacer(Modifier.height(10.dp))
@@ -908,6 +909,25 @@ private fun SettingField(
 }
 
 /** Live upload status under a recording / the test button. */
+private fun webhookReplySummary(body: String): String {
+    val reply = runCatching { JSONObject(body) }.getOrNull()
+    if (reply != null) {
+        val error = reply.optString("error").trim()
+        if (error.isNotEmpty()) return error.take(120)
+        val message = reply.optString("message").trim()
+        if (message.isNotEmpty()) return message.take(120)
+        if (reply.optString("engine").startsWith("qalens-mock-")) {
+            val severity = reply.optString("severity").trim()
+            val owner = reply.optString("likelyOwner").trim()
+            if (severity.isNotEmpty()) return "Local demo verdict: $severity" +
+                owner.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
+        }
+        return reply.optString("summary").trim().replace(Regex("\\s+"), " ").take(120)
+    }
+    val plain = body.trim().replace(Regex("\\s+"), " ")
+    return plain.takeIf { !it.startsWith("{") && !it.startsWith("<") }?.take(120).orEmpty()
+}
+
 @Composable
 private fun WebhookStatusLine(state: QaLensWebhook.UploadState?) {
     when (state) {
@@ -920,11 +940,9 @@ private fun WebhookStatusLine(state: QaLensWebhook.UploadState?) {
             Spacer(Modifier.height(5.dp))
             val tint = if (state.success) Green else Red
             val verdict = if (state.success) "✓ Backend accepted" else "✕ Backend rejected"
-            Text(
-                "$verdict (HTTP ${state.code})" +
-                    state.body.takeIf { it.isNotBlank() }?.let { " · ${it.take(160)}" }.orEmpty(),
-                color = tint, fontSize = 10.sp
-            )
+            val detail = webhookReplySummary(state.body)
+            Text("$verdict (HTTP ${state.code})" + detail.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(),
+                color = tint, fontSize = 10.sp)
         }
         is QaLensWebhook.UploadState.Failed -> {
             Spacer(Modifier.height(5.dp))

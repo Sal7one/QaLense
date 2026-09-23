@@ -49,6 +49,7 @@ fixtures bind loopback only.
 ## Distribution
 
 Local/composite integration and a generated Maven repository are supported. This repository does
-not establish that `com.qalens` artifacts are available from Maven Central. To produce a local
-repository, run `gradle qalensDist`. A development version can be set with `-PqalensVersion=...`;
-all module coordinates and publications use that version. Publishing externally is a separate step.
+not establish that `com.qalens` artifacts are available from Maven Central. Run
+`scripts/release_internal.sh --verify` for a checked local zip, or add `--version 0.9.0-preview1`
+for a preview with matching coordinates across modules. The script clears stale generated
+publications before packaging. Publishing externally is a separate step.
