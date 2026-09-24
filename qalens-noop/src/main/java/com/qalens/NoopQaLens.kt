@@ -89,7 +89,9 @@ object QaLens {
         provider: () -> Map<String, String>
     ) = Unit
     fun observeRoom(db: RoomDatabase, vararg tables: String) = Unit
+    fun stopObservingRoom(db: RoomDatabase, vararg tables: String) = Unit
     fun <T> observeDataStore(name: String, flow: Flow<T>, describe: (T) -> String = { "updated" }) = Unit
+    fun stopObservingDataStore(name: String) = Unit
     fun registerDataSourceObserver(observer: DataSourceObserver) = Unit
     fun unregisterDataSourceObserver(observer: DataSourceObserver) = Unit
     fun notifyDataChange(source: String, tableName: String, changeType: ChangeType) = Unit

@@ -17,10 +17,16 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTag as semanticsTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.room.Room
 import android.app.Instrumentation
 import android.content.Intent
 import android.os.Bundle
 import com.qalens.*
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.onEach
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -49,6 +55,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             }
             verifySavedRecordingStorage(retained)
             verifyOssIntegrations()
+            verifyRoomIntegration()
+            verifyRealDataStoreIntegration()
             verifyClientSafety()
             verifyComposeInspection()
             val limited = record("budget", 100, "x".repeat(100_000), clearUi = false)
@@ -61,7 +69,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
                 check(network.getLong("retained") == JSONArray(read(zip, "network.json")).length().toLong())
                 check(read(zip, "report.txt").contains("observations omitted"))
             }
-            result.putString("stream", "\nOK: 600 requests and logs survived UI clearing; saved archives are durable, shareable and legacy cache archives migrate; Compose dialog roots, hidden subtrees and semantics-only updates are inspected; byte-budget loss is disclosed; Chucker coexistence, adapters and crash bridge pass; client privacy, disable/resume, navigation, DataStore, macros, SQL, replay and webhook queue/retry checks pass.\n")
+            result.putString("stream", "\nOK: 600 requests and logs survived UI clearing; saved archives are durable, shareable and legacy cache archives migrate; Compose dialog roots, hidden subtrees and semantics-only updates are inspected; real Room/DataStore hooks and preference snapshot changes reach recording analysis; byte-budget loss is disclosed; Chucker coexistence, adapters and crash bridge pass; client privacy, disable/resume, navigation, macros, SQL, replay and webhook queue/retry checks pass.\n")
             result.putString("retainedArchive", retained.name)
             result.putString("limitedArchive", limited.name)
             finish(android.app.Activity.RESULT_OK, result)
@@ -173,6 +181,76 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             QaLens.state.value.nodes.any { it.testTag == "qa.state" && it.stateDescription == "on" }
         }
         runOnMainSync { QaLens.setInspectMode(false) }
+    }
+
+    private fun verifyRoomIntegration() {
+        val db = Room.inMemoryDatabaseBuilder(targetContext, FixtureRoomDatabase::class.java).build()
+        try {
+            val before = QaLens.state.value.events.count { it.tag == QaLensDataEvents.ROOM }
+            QaLens.observeRoom(db, "entries")
+            QaLens.observeRoom(db, " entries ", "entries") // duplicate registration must be idempotent
+            waitForIdleSync()
+            db.entries().insert(FixtureRoomDatabase.Entry(1, "synthetic"))
+            waitUntil("Room invalidation did not reach the QaLens event track") {
+                QaLens.state.value.events.count { it.tag == QaLensDataEvents.ROOM } > before
+            }
+            check(QaLens.state.value.events.count { it.tag == QaLensDataEvents.ROOM } == before + 1) {
+                "Duplicate Room registration emitted duplicate change events"
+            }
+            check(!QaLens.state.value.events.last { it.tag == QaLensDataEvents.ROOM }.message
+                .contains("synthetic")) { "Room row value leaked into the change event" }
+            QaLens.stopObservingRoom(db)
+            waitForIdleSync()
+            val stoppedAt = QaLens.state.value.events.count { it.tag == QaLensDataEvents.ROOM }
+            db.entries().insert(FixtureRoomDatabase.Entry(2, "synthetic"))
+            Thread.sleep(300)
+            check(QaLens.state.value.events.count { it.tag == QaLensDataEvents.ROOM } == stoppedAt) {
+                "Room observer continued after unregistration"
+            }
+        } finally {
+            QaLens.stopObservingRoom(db)
+            db.close()
+        }
+    }
+
+    private fun verifyRealDataStoreIntegration() {
+        val scope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+        )
+        val file = File(targetContext.cacheDir, "qalens-pref-fixture-${System.nanoTime()}.preferences_pb")
+        val store = PreferenceDataStoreFactory.create(scope = scope, produceFile = { file })
+        val initial = java.util.concurrent.CountDownLatch(1)
+        val emissions = java.util.concurrent.atomic.AtomicInteger()
+        try {
+            QaLens.observeDataStore("real-pref", store.data.onEach {
+                if (emissions.incrementAndGet() == 1) initial.countDown()
+            }) { "theme updated" }
+            check(initial.await(5, java.util.concurrent.TimeUnit.SECONDS)) { "DataStore initial value was not collected" }
+            val before = QaLens.state.value.events.count { it.tag == QaLensDataEvents.DATASTORE }
+            kotlinx.coroutines.runBlocking {
+                store.edit { it[stringPreferencesKey("theme")] = "dark" }
+            }
+            waitUntil("Real DataStore edit did not reach the QaLens event track") {
+                QaLens.state.value.events.count { it.tag == QaLensDataEvents.DATASTORE } > before
+            }
+            check(!QaLens.state.value.events.last { it.tag == QaLensDataEvents.DATASTORE }.message.contains("dark")) {
+                "DataStore value leaked into the change event"
+            }
+            QaLens.stopObservingDataStore("real-pref")
+            waitForIdleSync()
+            val stoppedAt = QaLens.state.value.events.count { it.tag == QaLensDataEvents.DATASTORE }
+            kotlinx.coroutines.runBlocking {
+                store.edit { it[stringPreferencesKey("theme")] = "light" }
+            }
+            Thread.sleep(300)
+            check(QaLens.state.value.events.count { it.tag == QaLensDataEvents.DATASTORE } == stoppedAt) {
+                "DataStore observer continued after unregistration"
+            }
+        } finally {
+            QaLens.stopObservingDataStore("real-pref")
+            scope.cancel()
+            file.delete()
+        }
     }
 
     private fun verifyOssIntegrations() {
@@ -305,6 +383,11 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         val memoryBefore = QaLens.state.value.memorySamples.size
         runOnMainSync { QaLens.startRecording() }
         check(QaLens.state.value.isRecording)
+        val nextTheme = if (SamplePreferences.current["theme"] == "dark") "light" else "dark"
+        SamplePreferences.setTheme(nextTheme == "dark")
+        waitUntil("DataStore change did not refresh the registered preference snapshot") {
+            QaLens.state.value.dataSources["Preferences"]?.get("theme") == nextTheme
+        }
         Thread.sleep(2600)
         check(QaLens.state.value.memorySamples.size > memoryBefore) { "Recording never sampled memory" }
         runOnMainSync { QaLens.configure { enabled = false } }
@@ -321,6 +404,15 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         waitUntil("Disable failed to finalize recording") { !QaLens.state.value.isSavingRecording }
         val archive = archiveDir.listFiles()!!.first { it.extension == "sal" && it.name !in archivesBefore }
         ZipFile(archive).use { zip ->
+            val states = JSONArray(read(zip, "state.json"))
+            check((0 until states.length()).any { i ->
+                states.getJSONObject(i).getJSONObject("dataSources")
+                    .optJSONObject("Preferences")?.optString("theme") == nextTheme
+            }) { "Updated preference was absent from the recording state track" }
+            val analysis = JSONObject(read(zip, "analysis.json"))
+            check(analysis.getJSONObject("stats").getInt("preferenceChanges") > 0) {
+                "Recorded analysis missed the observed preference change"
+            }
             val frame = zip.entries().asSequence().first { it.name.endsWith(".jpg") }
             val image = zip.getInputStream(frame).use { android.graphics.BitmapFactory.decodeStream(it) }
             val pixel = image.getPixel(image.width / 2, image.height / 2)

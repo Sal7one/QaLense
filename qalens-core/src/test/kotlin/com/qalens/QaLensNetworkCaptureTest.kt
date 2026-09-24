@@ -43,6 +43,8 @@ class QaLensNetworkCaptureTest {
         assertTrue(report.contains("ACTION: attach"))
         assertTrue(report.contains("networkFromChucker is unsupported"))
         assertTrue(report.contains("not proof of traffic"))
+        assertTrue(report.contains("Room invalidations in dashboard: 0"))
+        assertTrue(report.contains("DataStore changes in dashboard: 0"))
         assertTrue(report.contains("not masked"))
     }
     @Test fun diagnosticsContainNoNetworkContents() {

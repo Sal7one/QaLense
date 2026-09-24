@@ -138,6 +138,7 @@ object NoopParityCheck {
 
         // Existing
         q.observeDataStore("name", kotlinx.coroutines.flow.flowOf("v"))
+        q.stopObservingDataStore("name")
         q.registerDeepLinkScenario("name", "uri")
     }
 }

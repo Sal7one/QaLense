@@ -160,6 +160,26 @@ tester-sheet and backend changes and have not been rerun here.
   semantics-only updates, along with its existing capture/integration regressions. Physical-device
   TalkBack, dialog-window pixel capture, and other Compose versions remain unverified.
 
+## Data integration continuation — 2026-09-24
+
+- Confirmed Chucker 4.1.0 and QaLens's OkHttp interceptor run beside each other in the sample and
+  device runner; Chucker has no supported live transaction callback into QaLens. Other transports
+  still use the host-owned `networkSink` callback. Room and DataStore were already optional hooks,
+  but their change events did not refresh app-data snapshots before `state.json` sampling.
+- Room invalidations and DataStore Flow updates now mark analysis dirty, so registered cached
+  snapshots update for the next recording sample. Explicit stop hooks allow owners to release
+  their database/Flow observations; debug and no-op APIs compile in the independent consumer.
+  The integration report lists retained dashboard counts for both hooks and snapshot sources.
+- `analysis.json` now counts observed Room/DataStore changes and adds a bounded temporal lead when
+  one precedes a failed request by at most five seconds. It says timing does not prove cause and
+  never interprets an empty track as proof of no writes. The sample's event label names preference
+  keys only; snapshot providers still require host allowlisting/redaction.
+- `./demo.sh test`, Compose/Android/sample lint, sample debug/release and release isolation, and
+  independent-consumer debug/release/isolation checks passed. The disposable API 36 runner returned
+  `OK:` with real Room and Preferences DataStore writes/unsubscribe, plus a recorded preference
+  snapshot update in `state.json` and change count in `analysis.json`. Physical-device and broader
+  library-version compatibility remain open.
+
 ## What changed recently
 
 | Commit | Result |

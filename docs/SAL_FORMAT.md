@@ -26,7 +26,7 @@ additive optional coverage metadata; coordinate breaking changes across every pr
 |---|---|
 | `manifest.json` | Format version; app/build/device context; session ID; platform; start/end epoch milliseconds; fps; frame index; file list/counts; optional video filename and video start time; screen/locale/timezone metadata |
 | `summary.json` | Captured score, likely owner, confidence/reasons, penalties and reproduction summary |
-| `analysis.json` | Schema `qalens-analysis/1`: coverage, statistics, endpoint aggregates, screen spans, anomalies and likely-owner signals |
+| `analysis.json` | Schema `qalens-analysis/1`: coverage, statistics, endpoint aggregates, screen spans, anomalies and likely-owner signals; optional Room/DataStore observation counts and temporal failure links |
 | `for_ai.md` | Generated guide to the archive, schemas, joins, coverage and an analysis brief |
 | `timeline.json` | Timeline observations with `ts`, `kind`, `title`, `detail`, `isError` |
 | `network.json` | Completed requests: `ts`, method, redacted URL, status, latency, sizes, error and optional bounded body previews |

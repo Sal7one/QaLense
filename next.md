@@ -24,9 +24,10 @@ baselines and project context. Older changelog entries are historical, not uncom
 
 ## Priority 2: preserve client reliability and integration
 
-- **Observer and inspection edges.** Stress Room and repeated concurrent enable/disable; DataStore
-  cancellation/resume and route clearing are already covered. The active Inspector now polls
-  semantics-only updates, and a device runner checks separate Compose dialog roots, duplicate-tag
+- **Observer and inspection edges.** Real Room and Preferences DataStore writes/unsubscribe,
+  observer cancellation/resume, preference snapshot freshness and route clearing are now covered
+  on an API 36 emulator. Stress concurrent enable/disable and other Room versions. The active
+  Inspector polls semantics-only updates, and a device runner checks separate Compose dialog roots, duplicate-tag
   reconciliation and hidden subtrees. Continue with background logging, physical-device windows,
   and Compose version compatibility beyond the tested 1.7.8 runtime.
 - **Close Android lint follow-ups.** Frame metrics now use a weak Activity reference and detach on

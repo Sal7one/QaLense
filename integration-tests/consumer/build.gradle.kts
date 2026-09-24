@@ -12,6 +12,7 @@ android {
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.ui:ui")
+    compileOnly("androidx.room:room-runtime:2.6.1")
     debugImplementation("com.qalens:qalens-compose:0.9.0")
     releaseImplementation("com.qalens:qalens-noop:0.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

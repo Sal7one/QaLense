@@ -2,6 +2,16 @@
 
 ## Unreleased — post-0.9.0
 
+### Data hooks and recording insights — 2026-09-24
+- Refresh registered app-data snapshots when Room invalidates a table or an observed DataStore
+  Flow changes, so subsequent recording state samples do not retain stale values. Add explicit
+  stop hooks for host-owned databases and flows, mirrored by the release no-op SDK.
+- Tag Room and DataStore observations without reading rows or preference values. Count them in
+  integration diagnostics and `analysis.json`; identify a change within five seconds before a
+  failed request as a bounded temporal lead, explicitly not a causal conclusion.
+- Verify real Room and Preferences DataStore writes/unsubscribe on the device, and assert a
+  preference change reaches `state.json` and analysis. Keep sample event labels free of values.
+
 ### Compose inspection and visual controls — 2026-09-24
 - Discover attached Compose roots in the host Activity plus optionally registered Dialog/Popup
   roots. Scope node IDs by root, map separate-window coordinates, drop offscreen nodes, and match

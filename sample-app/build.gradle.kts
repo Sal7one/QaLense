@@ -31,6 +31,9 @@ android {
 
 dependencies {
     androidTestImplementation(project(":qalens-android"))
+    androidTestImplementation("androidx.room:room-runtime:2.6.1")
+    androidTestAnnotationProcessor("androidx.room:room-compiler:2.6.1")
+    androidTestImplementation("androidx.datastore:datastore-preferences:1.1.0")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")

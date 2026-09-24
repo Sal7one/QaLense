@@ -77,6 +77,22 @@ QaLens automatically deduplicates accidental repeated QaLensOkHttpInterceptor in
 one OkHttp Call. Reusing a Request in a later Call still records it. It cannot deduplicate arbitrary
 independent adapters without stable upstream request identity.
 
+## Room and DataStore
+
+Pass an app-owned `RoomDatabase` and its actual table names to `QaLens.observeRoom(db, "orders")`.
+The callback records table invalidations only. `QaLens.observeDataStore("Prefs", dataStore.data)`
+observes a host-owned Flow; its optional descriptor should describe the change without serializing
+preference values. Pair those event hooks with an allowlisted `registerDataSource` provider backed
+by cached state if a recording needs current values. Providers execute on the analysis/main thread,
+so do not query Room synchronously inside one. Dispose hooks with `stopObservingRoom(db)` and
+`stopObservingDataStore("Prefs")` when their owners go away. The sample's normal UI preferences are
+an in-memory Flow; the Android regression runner separately exercises real Room and Preferences
+DataStore fixtures.
+
+Data events join `logs.json` and `timeline.json`; redacted snapshots join `state.json`.
+`analysis.json` counts observed Room/DataStore changes and identifies changes shortly before a
+failed request. Those are timing links, not causation or a claim that unobserved writes were safe.
+
 ## Timber and crash reporters
 
 Plant `QaLensTimberTree()` beside existing Timber trees. `captureLogs=false` gates automatic
@@ -94,7 +110,8 @@ method from enrichment: it should attach context, not create another crash repor
 ## Diagnose wiring
 
 Call `QaLens.integrationReport()` or use Overview → **Copy integration check**. The report lists
-capture settings, declared sources and dashboard counts without copying request contents. A source
+capture settings, declared sources, Room/DataStore dashboard changes, snapshot-source counts and
+network counts without copying request contents or preference values. A source
 is declared when its interceptor/sink is constructed; this alone cannot prove it is on the correct
 client. Perform a request, inspect its row, and record a short session. The archive includes declared
 names in `analysis.json.coverage.networkSources`. Source names are capped at 16 per process.

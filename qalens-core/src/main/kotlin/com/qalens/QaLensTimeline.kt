@@ -24,6 +24,12 @@ enum class TimelineKind {
     SCREENSHOT   // evidence captured
 }
 
+/** Stable event tags for host-owned data changes; no row or preference values are implied. */
+object QaLensDataEvents {
+    const val ROOM = "qalens.data.room"
+    const val DATASTORE = "qalens.data.datastore"
+}
+
 /**
  * Merges the separate event streams QaLens collects into one timeline sorted by time.
  *
@@ -48,11 +54,13 @@ object TimelineMerger {
             val isNav = e.type == QaEventType.BREADCRUMB &&
                 (msg.startsWith("Navigation") || msg.startsWith("Navigate"))
             val isAssertion = msg.startsWith("assertion", ignoreCase = true) || e.tag == "qalens.assertion"
+            val isDataChange = e.tag == QaLensDataEvents.ROOM || e.tag == QaLensDataEvents.DATASTORE
             val looksError = msg.contains("error", true) || msg.contains("fail", true) ||
                 msg.contains("exception", true) || msg.contains("crash", true)
             val kind = when {
                 isAssertion -> TimelineKind.ASSERTION
                 isNav -> TimelineKind.NAVIGATION
+                isDataChange -> TimelineKind.LOG
                 e.type == QaEventType.EVENT -> if (looksError) TimelineKind.ERROR else TimelineKind.ACTION
                 looksError -> TimelineKind.ERROR
                 else -> TimelineKind.LOG
@@ -66,7 +74,7 @@ object TimelineMerger {
                     TimelineKind.ACTION -> r(e.tag).ifBlank { msg }
                     else -> msg
                 },
-                detail = if (kind == TimelineKind.ACTION && e.tag != null && r(e.tag) != msg) msg else null,
+                detail = if (kind == TimelineKind.ACTION && !isDataChange && e.tag != null && r(e.tag) != msg) msg else null,
                 isError = if (kind == TimelineKind.ASSERTION) msg.contains('✕') else kind == TimelineKind.ERROR
             )
         }

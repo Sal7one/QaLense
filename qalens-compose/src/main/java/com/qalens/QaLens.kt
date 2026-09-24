@@ -262,22 +262,38 @@ object QaLens {
     private fun resumeDataObservers() {
         if (!config.value.enabled) return
         roomBindings.filterNot { it.active }.forEach { binding ->
-            binding.active = runCatching { binding.db.invalidationTracker.addObserver(binding.observer) }.isSuccess
+            val result = runCatching { binding.db.invalidationTracker.addObserver(binding.observer) }
+            binding.active = result.isSuccess
+            result.onFailure {
+                pushError(ErrorKind.DATA_SOURCE, "Room observer registration failed: ${it.javaClass.simpleName}")
+            }
         }
         flowBindings.values.forEach { if (it.job?.isActive != true) it.job = it.start() }
     }
 
     fun observeRoom(db: RoomDatabase, vararg tables: String) {
-        if (tables.isEmpty()) return
-        val observer = object : InvalidationTracker.Observer(tables.toList().toTypedArray()) {
+        val selected = tables.map(String::trim).filter(String::isNotBlank).distinct().sorted()
+        if (selected.isEmpty()) return
+        val observer = object : InvalidationTracker.Observer(selected.toTypedArray()) {
             override fun onInvalidated(changed: Set<String>) {
-                event("DB changed", "Room tables changed: ${changed.joinToString()}")
+                event(QaLensDataEvents.ROOM, "Room tables changed: ${changed.sorted().joinToString()}")
+                markAnalysisDirty()
             }
         }
         onMain {
-            if (roomBindings.none { it.db === db && it.tables == tables.toList() })
-                roomBindings += RoomBinding(db, tables.toList(), observer)
+            if (roomBindings.none { it.db === db && it.tables == selected })
+                roomBindings += RoomBinding(db, selected, observer)
             resumeDataObservers()
+        }
+    }
+
+    /** Release a host-owned Room observer before closing its database; no rows are read. */
+    fun stopObservingRoom(db: RoomDatabase, vararg tables: String) = onMain {
+        val selected = tables.map(String::trim).filter(String::isNotBlank).distinct().sorted()
+        val matches = roomBindings.filter { it.db === db && (selected.isEmpty() || it.tables == selected) }
+        matches.forEach { binding ->
+            if (binding.active) runCatching { binding.db.invalidationTracker.removeObserver(binding.observer) }
+            roomBindings.remove(binding)
         }
     }
 
@@ -295,15 +311,23 @@ object QaLens {
                         flow.drop(1).collect { value ->
                             if (configState.value.enabled) {
                                 val desc = runCatching { describe(value) }.getOrDefault("updated")
-                                event("$name changed", desc)
+                                event(QaLensDataEvents.DATASTORE, "$name changed: $desc")
+                                markAnalysisDirty()
                             }
                         }
                     } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                    catch (failure: Exception) { log("observeDataStore($name) failed: ${failure.message}") }
+                    catch (failure: Exception) {
+                        pushError(ErrorKind.DATA_SOURCE, "DataStore source '$name' stopped: ${failure.javaClass.simpleName}")
+                    }
                 }
             })
             resumeDataObservers()
         }
+    }
+
+    /** Cancel a host-owned preference Flow when its owner is disposed. */
+    fun stopObservingDataStore(name: String) = onMain {
+        flowBindings.remove(name)?.job?.cancel()
     }
 
     // ── A6: Generic data-source observer (Room/DataStore agnostic) ───────────
@@ -333,6 +357,7 @@ object QaLens {
             runCatching { obs.onChanged(source, tableName, changeType) }
                 .onFailure { log("DataSourceObserver.onChanged failed: ${it.message}") }
         }
+        markAnalysisDirty()
     }
 
     /** Notify all registered observers of a data-layer error. */
@@ -856,12 +881,15 @@ object QaLens {
     private fun markAnalysisDirty() {
         if (!configState.value.enabled) return
         if (!analysisDirty.compareAndSet(false, true)) return  // a recompute is already pending
-        val r = Runnable {
-            analysisPending = null
-            if (analysisDirty.compareAndSet(true, false)) runAnalysis()
+        onMain {
+            if (!configState.value.enabled || !analysisDirty.get()) return@onMain
+            val r = Runnable {
+                analysisPending = null
+                if (analysisDirty.compareAndSet(true, false)) runAnalysis()
+            }
+            analysisPending = r
+            mainHandler.postDelayed(r, ANALYSIS_DEBOUNCE_MS)
         }
-        analysisPending = r
-        mainHandler.postDelayed(r, ANALYSIS_DEBOUNCE_MS)
     }
 
     /**

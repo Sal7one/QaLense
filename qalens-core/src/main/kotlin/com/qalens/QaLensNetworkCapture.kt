@@ -45,12 +45,16 @@ object QaLensIntegrationDiagnostics {
         appendLine("Network rows in dashboard: ${state.networkEvents.size}")
         appendLine("Automatic logs: ${if (config.captureLogs) "enabled" else "disabled"}")
         appendLine("Logs in dashboard: ${state.events.size}")
+        appendLine("Room invalidations in dashboard: ${state.events.count { it.tag == QaLensDataEvents.ROOM }}")
+        appendLine("DataStore changes in dashboard: ${state.events.count { it.tag == QaLensDataEvents.DATASTORE }}")
+        appendLine("App-data snapshot sources: ${state.dataSources.size}")
         appendLine("Body previews: ${if (config.captureNetworkBodies) "opted in; bounded and text-redacted" else "off"}")
         if (config.enabled && config.captureNetwork && state.networkSources.isEmpty())
             appendLine("ACTION: attach QaLensOkHttpInterceptor to the client that executes requests, or use QaLens.networkSink for another transport.")
         if (config.networkFromChucker)
             appendLine("ACTION: networkFromChucker is unsupported. Keep both ChuckerInterceptor and QaLensOkHttpInterceptor; Chucker has no public transaction listener.")
         appendLine("A declared source is not proof of traffic. Exercise a real request and check its network row.")
+        appendLine("Data counts reflect retained dashboard events, not proof that every write was observed. Exercise a real Room/DataStore change and check the next recording.")
         appendLine("Screenshots mask known sensitive Compose regions; custom pixels and full-display video are not masked automatically.")
     }
 }

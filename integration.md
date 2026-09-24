@@ -172,10 +172,10 @@ records declared adapter names; declaration alone does not prove complete captur
 Modifier.qaTag("login.email.field")
 Modifier.qaName("Submit payment")             // human label for reports
 
-// App-owned data → panel, reports, .sal
-QaLens.registerDataSource("Prefs") { mapOf("theme" to prefs.theme) }
-QaLens.observeDataStore("Prefs", dataStore.data) { it.toString() }
-QaLens.observeRoom(db, "accounts", "orders")  // table-change timeline events
+// App-owned, allowlisted snapshots → panel, reports, .sal
+QaLens.registerDataSource("Prefs") { mapOf("theme" to cachedTheme.value) }
+QaLens.observeDataStore("Prefs", dataStore.data) { "settings updated" }
+QaLens.observeRoom(db, "accounts", "orders")  // table names only; no row contents
 
 // Feature flags (live provider, evaluated safely)
 QaLens.setFeatureFlagProvider { flags.snapshot() }
@@ -184,6 +184,20 @@ QaLens.setFeatureFlagProvider { flags.snapshot() }
 QaLens.registerDeepLinkScenario("Open cart", "myapp://cart", expectedRoute = "cart")
 QaLens.contract("Checkout") { requiresTag("checkout.submit"); requiresNoFailedNetwork() }
 ```
+
+`observeRoom` uses Room's invalidation tracker; it records changed table names, not queries or
+rows. `observeDataStore` accepts the real DataStore `data` Flow or any `Flow<T>`, skips the initial
+value, and records the host's short `describe` label for later changes. Do not stringify the whole
+preferences object or include secrets in that label. Snapshot providers run during analysis on the
+main thread: return a cached, allowlisted map, and use `redactKeys`/`redactAll` for sensitive
+values. When the host closes a database or disposes a Flow owner, call
+`QaLens.stopObservingRoom(db)` or `QaLens.stopObservingDataStore("Prefs")`.
+
+Room/DataStore changes now refresh those snapshots for recording state samples. A `.sal` archive's
+`analysis.json` reports observed Room and preference change counts and flags a data change within
+five seconds before a failed request as a temporal lead. The lead is a question to investigate,
+not a claim that the data change caused the failure. Empty counts can mean unchanged data or
+missing hooks; check `analysis.json.coverage` and exercise a real write during integration.
 
 ### Compose inspection across host windows
 

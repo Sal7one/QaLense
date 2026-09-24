@@ -3,7 +3,9 @@ package example
 import android.app.Application
 import android.view.View
 import androidx.compose.ui.Modifier
+import androidx.room.RoomDatabase
 import com.qalens.*
+import kotlinx.coroutines.flow.Flow
 import okhttp3.OkHttpClient
 import timber.log.Timber
 
@@ -16,6 +18,14 @@ class ConsumerApplication : Application() {
         QaLens.registerComposeRoot(view)
         QaLens.unregisterComposeRoot(view)
         return Modifier.qaInspectionRoot()
+    }
+
+    @Suppress("unused")
+    private fun dataHookParity(db: RoomDatabase, values: Flow<Int>) {
+        QaLens.observeRoom(db, "entries")
+        QaLens.stopObservingRoom(db, "entries")
+        QaLens.observeDataStore("Prefs", values) { "updated" }
+        QaLens.stopObservingDataStore("Prefs")
     }
 
     override fun onCreate() {
