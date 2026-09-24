@@ -185,6 +185,38 @@ QaLens.registerDeepLinkScenario("Open cart", "myapp://cart", expectedRoute = "ca
 QaLens.contract("Checkout") { requiresTag("checkout.submit"); requiresNoFailedNetwork() }
 ```
 
+### Compose inspection across host windows
+
+QaLens reads the public Compose semantics tree from the active Activity's attached Compose roots.
+Ordinary `setContent` and embedded `ComposeView`s in that window need no extra hook. Keep normal
+`Modifier.testTag` and accessibility semantics; use `qaTag` only when you also want its optional
+layout hint. Repeated tags are matched to semantics by bounds, but unique test tags remain best for
+reliable macros and reports.
+
+A Compose `Dialog`, `Popup`, or other window has a separate root. Register it at the content root:
+
+```kotlin
+Dialog(onDismissRequest = onDismiss) {
+    Box(Modifier.qaInspectionRoot()) {
+        // dialog content
+    }
+}
+```
+
+The modifier unregisters the window when its composition ends and is inert in release builds. For
+a host-managed window, pair `QaLens.registerComposeRoot(view)` after attaching its Compose view with
+`QaLens.unregisterComposeRoot(view)` when removing it. The view's context must belong to the active
+Activity. `QaLens.invalidateInspection()` requests a debounced scan after a semantics-only update;
+visual Inspect/Tag modes also refresh every 500 ms while open. Outside those modes there is no
+continuous polling. The no-op artifact exposes the same calls.
+
+In Inspect mode, **Actions** shows interactive nodes by default. Switch to All, Tagged, or Issues
+when investigating, then tap an outline to see its redacted label, tag, size, and warnings or copy
+the test tag. Node IDs are scoped to their Compose root. Detached and fully off-viewport nodes are omitted;
+`qaHiddenFromReports()` excludes its subtree from reports. Semantics do not reveal arbitrary private
+Compose state or custom Canvas content. Activity-window screenshots do not establish capture of
+separate dialog windows, so review sensitive windows and `FLAG_SECURE` separately.
+
 ## Step 7 — Team setup via `.appsal` (recommended)
 
 One JSON config per app package: panel style (tester quick actions vs full developer diagnostics),

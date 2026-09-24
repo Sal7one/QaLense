@@ -30,7 +30,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 object QaLens {
     private val configState = MutableStateFlow(QaLensConfig())
     private val uiStateMutable = MutableStateFlow(QaLensUiState())
-    private val manualNodes = linkedMapOf<String, InspectNode>()
+    private data class ManualNode(val node: InspectNode, val view: WeakReference<View>)
+    private val manualNodes = linkedMapOf<String, ManualNode>()
     private val recomposeBuffer = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private var lastRecomposeFlushMs = 0L
 
@@ -699,6 +700,10 @@ object QaLens {
         uiStateMutable.update { it.copy(selectedNode = node, isPanelOpen = node != null || it.isPanelOpen) }
     }
 
+    internal fun previewNode(node: InspectNode?) {
+        uiStateMutable.update { it.copy(selectedNode = node) }
+    }
+
     fun snapshot(): InspectionSnapshot {
         val state = uiStateMutable.value
         return InspectionSnapshot(
@@ -772,6 +777,7 @@ object QaLens {
         updateDeviceAndScreen(activity)
         refreshInspection(activity.window.decorView)
         uiStateMutable.update { it.copy(isInstalled = true) }
+        markAnalysisDirty()
     }
 
     internal fun onActivityPaused(activity: Activity) {
@@ -805,9 +811,25 @@ object QaLens {
             ?.let { QaLensActivityInstaller.readVisibleNodes(it) }
             .orEmpty()
 
-        val merged = mergeNodes(autoNodes, manualNodes.values.toList())
+        val activity = currentActivity
+        val viewportWidth = rootView?.width ?: 0
+        val viewportHeight = rootView?.height ?: 0
+        val manual = manualNodes.values.mapNotNull { entry ->
+            val view = entry.view.get()
+            val bounds = entry.node.bounds
+            entry.node.takeIf {
+                view != null && view.isAttachedToWindow &&
+                    QaLensActivityInstaller.belongsToActivity(view, activity) &&
+                    bounds.right > 0 && bounds.bottom > 0 &&
+                    bounds.left < viewportWidth && bounds.top < viewportHeight
+            }
+        }
+        val merged = InspectionNodeMerger.merge(autoNodes, manual)
         val evaluated = QaLensRules.evaluate(merged, config)
         val warnings = QaLensRules.flattenWarnings(evaluated)
+
+        val previous = uiStateMutable.value
+        if (previous.nodes == evaluated && previous.warnings == warnings) return
 
         uiStateMutable.update { old ->
             val selected = old.selectedNode?.let { selected -> evaluated.firstOrNull { it.id == selected.id } }
@@ -815,6 +837,15 @@ object QaLens {
         }
         markAnalysisDirty()
     }
+
+    /** Request a fresh semantics scan after a host-owned state change that did not cause layout. */
+    fun invalidateInspection() = scheduleInspection()
+
+    /** Include a separate host Compose window (Dialog, Popup, or custom ComposeView) in scans. */
+    fun registerComposeRoot(view: View) = QaLensActivityInstaller.registerInspectionRoot(view)
+
+    /** Remove a previously registered host Compose window. */
+    fun unregisterComposeRoot(view: View) = QaLensActivityInstaller.unregisterInspectionRoot(view)
 
     /**
      * Mark derived analysis as stale and schedule a debounced recompute on the main thread. Bursts
@@ -888,9 +919,10 @@ object QaLens {
 
     private fun hostOf(url: String): String? = runCatching { java.net.URL(url).host }.getOrNull()
 
-    internal fun registerManualNode(node: InspectNode) {
+    internal fun registerManualNode(node: InspectNode, view: View) {
         if (!configState.value.enabled) return
-        manualNodes[node.id] = node
+        if (manualNodes[node.id]?.let { it.node == node && it.view.get() === view } == true) return
+        manualNodes[node.id] = ManualNode(node, WeakReference(view))
         scheduleInspection()
     }
 
@@ -1095,24 +1127,4 @@ object QaLens {
         }
     }
 
-    private fun mergeNodes(autoNodes: List<InspectNode>, manual: List<InspectNode>): List<InspectNode> {
-        val byId = linkedMapOf<String, InspectNode>()
-        autoNodes.forEach { byId[it.id] = it }
-        manual.forEach { node ->
-            val existing = node.testTag?.let { tag -> byId.values.firstOrNull { it.testTag == tag } }
-            if (existing == null) {
-                byId[node.id] = node
-            } else {
-                byId[existing.id] = existing.copy(
-                    qaName = node.qaName ?: existing.qaName,
-                    testTag = node.testTag ?: existing.testTag,
-                    hiddenFromReports = node.hiddenFromReports,
-                    source = NodeSource.MANUAL_QA_TAG
-                )
-            }
-        }
-        return byId.values
-            .filter { it.bounds.width > 0 && it.bounds.height > 0 }
-            .sortedWith(compareBy<InspectNode> { it.bounds.top }.thenBy { it.bounds.left })
-    }
 }

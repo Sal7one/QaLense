@@ -2,11 +2,21 @@ package com.qalens.sample
 
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.Text
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTag as semanticsTag
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import android.app.Instrumentation
 import android.content.Intent
 import android.os.Bundle
@@ -40,6 +50,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             verifySavedRecordingStorage(retained)
             verifyOssIntegrations()
             verifyClientSafety()
+            verifyComposeInspection()
             val limited = record("budget", 100, "x".repeat(100_000), clearUi = false)
             ZipFile(limited).use { zip ->
                 val coverage = coverage(zip)
@@ -50,7 +61,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
                 check(network.getLong("retained") == JSONArray(read(zip, "network.json")).length().toLong())
                 check(read(zip, "report.txt").contains("observations omitted"))
             }
-            result.putString("stream", "\nOK: 600 requests and logs survived UI clearing; saved archives are durable, shareable and legacy cache archives migrate; byte-budget loss is disclosed; Chucker coexistence, adapters and crash bridge pass; client privacy, disable/resume, navigation, DataStore, macros, SQL, replay and webhook queue/retry checks pass.\n")
+            result.putString("stream", "\nOK: 600 requests and logs survived UI clearing; saved archives are durable, shareable and legacy cache archives migrate; Compose dialog roots, hidden subtrees and semantics-only updates are inspected; byte-budget loss is disclosed; Chucker coexistence, adapters and crash bridge pass; client privacy, disable/resume, navigation, DataStore, macros, SQL, replay and webhook queue/retry checks pass.\n")
             result.putString("retainedArchive", retained.name)
             result.putString("limitedArchive", limited.name)
             finish(android.app.Activity.RESULT_OK, result)
@@ -110,6 +121,58 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             moved.delete()
             QaLens.refreshRecordings()
         }
+    }
+
+    private fun verifyComposeInspection() {
+        val activity = startActivitySync(Intent(targetContext, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
+        val status = mutableStateOf("off")
+        runOnMainSync {
+            activity.setContent {
+                Box(Modifier.fillMaxSize()) {
+                    Text("Main root", Modifier.testTag("qa.root.main"))
+                    Text("Status", Modifier.semantics { semanticsTag = "qa.state"; stateDescription = status.value })
+                    Box(Modifier.testTag("qa.clickable.parent").clickable { }) {
+                        Text("Open details", Modifier.semantics { contentDescription = "Open details" })
+                    }
+                    Box(Modifier.size(80.dp).qaHiddenFromReports()) {
+                        Text("Sensitive", Modifier.qaTag("qa.hidden.child"))
+                    }
+                    Dialog(onDismissRequest = {}) {
+                        Box(Modifier.size(200.dp).qaInspectionRoot().testTag("qa.root.dialog")) {
+                            Text("Dialog root", Modifier.qaTag("qa.root.dialog.text").qaName("Dialog element"))
+                        }
+                    }
+                }
+            }
+            QaLens.setInspectMode(true)
+        }
+        waitForIdleSync()
+        waitUntil("Separate dialog Compose root was not inspected") {
+            val tags = QaLens.state.value.nodes.mapNotNull { it.testTag }.toSet()
+            "qa.root.main" in tags && "qa.root.dialog.text" in tags
+        }
+        val nodes = QaLens.state.value.nodes
+        val main = nodes.first { it.testTag == "qa.root.main" }
+        val dialog = nodes.first { it.testTag == "qa.root.dialog.text" }
+        check(main.id != dialog.id) { "Compose roots shared a semantics ID" }
+        check(dialog.bounds.centerX in 0..activity.window.decorView.width) { "Dialog bounds were not mapped to host window" }
+        check(dialog.qaName == "Dialog element") { "Dialog qaTag did not reconcile with its semantics node" }
+        check(nodes.count { it.testTag == "qa.root.dialog.text" } == 1) {
+            "Dialog qaTag created duplicate nodes: ${nodes.filter { it.testTag == "qa.root.dialog.text" }}"
+        }
+        check(nodes.first { it.testTag == "qa.clickable.parent" }.hasHumanLabel) {
+            "Clickable parent's merged child label was not inspected"
+        }
+        check(nodes.first { it.testTag == "qa.clickable.parent" }.contentDescription.isEmpty()) {
+            "Clickable parent duplicated a child's content description despite having visible text"
+        }
+        check(nodes.none { it.testTag == "qa.hidden.child" }) { "Hidden subtree leaked through manual qaTag" }
+        runOnMainSync { status.value = "on" }
+        waitUntil("State-only semantics change was not inspected") {
+            QaLens.state.value.nodes.any { it.testTag == "qa.state" && it.stateDescription == "on" }
+        }
+        runOnMainSync { QaLens.setInspectMode(false) }
     }
 
     private fun verifyOssIntegrations() {

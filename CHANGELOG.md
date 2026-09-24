@@ -2,6 +2,18 @@
 
 ## Unreleased — post-0.9.0
 
+### Compose inspection and visual controls — 2026-09-24
+- Discover attached Compose roots in the host Activity plus optionally registered Dialog/Popup
+  roots. Scope node IDs by root, map separate-window coordinates, drop offscreen nodes, and match
+  repeated `qaTag` hints by bounds. Hidden subtrees no longer reappear through manual hints.
+- Refresh semantics-only changes while Inspect/Tag is open, with an explicit invalidation hook for
+  hosts. Add matching active/no-op APIs and a Compose root modifier for separate windows.
+- Default the visual inspector to Actions and add All/Tagged/Issues filters plus a selected-node
+  detail card with a copyable test tag. Use merged accessibility labels without duplicating child
+  image descriptions onto already text-labeled parents.
+- Expand Android device coverage for dialog roots, hidden content, label merging and state-only
+  changes; compile the new API in the independent debug/release consumer.
+
 ### Tester accessibility and archive retention — 2026-09-24
 - Give the tester sheet a named Close button, button roles for actions, an expanded/collapsed
   More tools state, and decorative symbols hidden from accessibility. Correct the English privacy

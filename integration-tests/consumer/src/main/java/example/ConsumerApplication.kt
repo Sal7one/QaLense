@@ -1,12 +1,23 @@
 package example
 
 import android.app.Application
+import android.view.View
+import androidx.compose.ui.Modifier
 import com.qalens.*
 import okhttp3.OkHttpClient
 import timber.log.Timber
 
 /** Identical application source must compile against the active SDK and the release no-op. */
 class ConsumerApplication : Application() {
+    /** Compile the same optional Compose integration calls against debug and release artifacts. */
+    @Suppress("unused")
+    private fun inspectionApiParity(view: View): Modifier {
+        QaLens.invalidateInspection()
+        QaLens.registerComposeRoot(view)
+        QaLens.unregisterComposeRoot(view)
+        return Modifier.qaInspectionRoot()
+    }
+
     override fun onCreate() {
         super.onCreate()
         QaLens.configure { appName = "External consumer"; allowUnmaskedVideo = false; saveScreenshotsToGallery = false }

@@ -1,6 +1,7 @@
 package com.qalens
 
 import android.app.Application
+import android.view.View
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.room.RoomDatabase
@@ -51,6 +52,9 @@ object QaLens {
     fun setWatchMode(on: Boolean) = Unit
     fun toggleWatchMode() = Unit
     fun selectNode(node: InspectNode?) = Unit
+    fun invalidateInspection() = Unit
+    fun registerComposeRoot(view: View) = Unit
+    fun unregisterComposeRoot(view: View) = Unit
 
     fun pushError(kind: ErrorKind, message: String, retry: (() -> Unit)? = null) = Unit
     fun dismissError(id: String) = Unit
@@ -159,6 +163,7 @@ fun Modifier.qaTag(tag: String, hiddenFromReports: Boolean = false): Modifier = 
 fun Modifier.qaName(name: String): Modifier = this
 fun Modifier.qaHiddenFromReports(): Modifier = this
 fun Modifier.qaContentDescription(value: String): Modifier = this
+fun Modifier.qaInspectionRoot(): Modifier = this
 
 @Composable
 fun Modifier.qaLensRecompose(name: String): Modifier = this

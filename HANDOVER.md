@@ -143,6 +143,23 @@ tester-sheet and backend changes and have not been rerun here.
   The first runner attempt found an old test assumption that archives were in cache; it was fixed
   and the runner passed from cleared app state.
 
+## Compose inspection continuation — 2026-09-24
+
+- Inspect now reads all attached Compose roots in the Activity window and optional separately
+  registered Dialog/Popup roots using public Compose semantics APIs. IDs are root-scoped, window
+  coordinates are aligned, hidden subtrees are excluded, and repeated `qaTag` hints match by bounds.
+  See [integration.md](integration.md) for host hooks and honest capture limits.
+- The visible Pixel emulator showed a calmer Actions-first inspector with All/Tagged/Issues
+  filters. Tapping a transaction outline now leaves the visual inspector open and shows a detail
+  card with its tag; previously `selectNode` opened the tester sheet. Merged child labels no longer
+  raise spurious duplicate-description warnings on the sample transaction rows.
+- `./demo.sh test`, Compose/Android/sample debug lint, sample debug/release and instrumentation APK
+  builds, sample release dependency isolation, and the independent consumer debug/release and
+  isolation checks passed. The expanded runner on a disposable API 36 emulator returned `OK:` for
+  dialog roots, hidden subtrees, duplicate-tag reconciliation, accessibility label enrichment and
+  semantics-only updates, along with its existing capture/integration regressions. Physical-device
+  TalkBack, dialog-window pixel capture, and other Compose versions remain unverified.
+
 ## What changed recently
 
 | Commit | Result |

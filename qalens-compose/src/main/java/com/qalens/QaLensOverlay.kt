@@ -3,21 +3,27 @@ package com.qalens
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -37,11 +43,16 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qalens.android.QaLensPrefs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 /*
  * Overlay surfaces now read their colours from QaLensTokens instead of per-file literals.
@@ -64,6 +75,15 @@ internal fun QaLensOverlay() {
         }
     }
 
+    // Compose semantics can change without a View layout pass (for example a toggle state or
+    // content description). Keep the live visual modes current without polling in normal use.
+    LaunchedEffect(state.isInspectMode, state.isTagMode, state.isWatchMode, view) {
+        while ((state.isInspectMode || state.isTagMode) && !state.isWatchMode) {
+            delay(500)
+            QaLens.refreshInspection(view.rootView)
+        }
+    }
+
     val dockAlign = if (state.dockBottom) Alignment.BottomEnd else Alignment.TopEnd
 
     // While recording the overlay is hidden entirely; the stop control is the REC chip in its own
@@ -77,7 +97,7 @@ internal fun QaLensOverlay() {
             InspectCanvas(
                 nodes = state.nodes,
                 selectedNode = state.selectedNode,
-                onSelect = QaLens::selectNode,
+                onSelect = QaLens::previewNode,
                 colors = colors
             )
         }
@@ -134,6 +154,8 @@ internal fun QaLensOverlay() {
     }
 }
 
+private enum class InspectFilter(val label: String) { ALL("All"), ACTIONS("Actions"), TAGGED("Tagged"), ISSUES("Issues") }
+
 @Composable
 private fun InspectCanvas(
     nodes: List<InspectNode>,
@@ -141,20 +163,30 @@ private fun InspectCanvas(
     onSelect: (InspectNode?) -> Unit,
     colors: QaLensOverlayColors
 ) {
+    var filter by remember { mutableStateOf(InspectFilter.ACTIONS) }
+    val visibleNodes = when (filter) {
+        InspectFilter.ALL -> nodes
+        InspectFilter.ACTIONS -> nodes.filter { it.isClickable || it.isFocusable }
+        InspectFilter.TAGGED -> nodes.filter { it.testTag != null }
+        InspectFilter.ISSUES -> nodes.filter { it.warnings.isNotEmpty() }
+    }
+    val context = LocalContext.current
+    val config by QaLens.config.collectAsState()
+
     Box(
         Modifier
             .fillMaxSize()
             .background(colors.canvasWash)
             // Only consume confirmed taps (no movement); drags pass through to the
             // underlying app so the user can scroll the page while in inspect mode.
-            .pointerInput(nodes) {
+            .pointerInput(visibleNodes) {
                 awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val down = awaitFirstDown(requireUnconsumed = true)
                     val up = waitForUpOrCancellation() ?: return@awaitEachGesture
                     val moved = (up.position - down.position).getDistance()
                     if (moved < viewConfiguration.touchSlop) {
                         up.consume()
-                        val selected = nodes
+                        val selected = visibleNodes
                             .filter { it.bounds.contains(down.position.x, down.position.y) }
                             .minByOrNull { it.bounds.width * it.bounds.height }
                         onSelect(selected)
@@ -163,7 +195,7 @@ private fun InspectCanvas(
             }
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            nodes.forEach { node ->
+            visibleNodes.forEach { node ->
                 val isSelected = selectedNode?.id == node.id
                 val hasWarnings = node.warnings.isNotEmpty()
                 val color = when {
@@ -190,19 +222,79 @@ private fun InspectCanvas(
             }
         }
 
-        selectedNode?.let { node ->
-            Surface(
-                tonalElevation = 8.dp,
-                shadowElevation = 8.dp,
-                modifier = Modifier
-                    .offset { IntOffset(node.bounds.left, (node.bounds.top - 52).coerceAtLeast(16)) }
-                    .border(1.dp, colors.accent, MaterialTheme.shapes.small)
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 12.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            selectedNode?.let { node ->
+                Surface(
+                    color = colors.panel,
+                    contentColor = colors.fg,
+                    shape = RoundedCornerShape(QaLensDimens.rMd),
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            config.redact(node.label),
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            "${node.role ?: "Component"} · ${node.widthDp.toInt()}×${node.heightDp.toInt()}dp" +
+                                (node.testTag?.let { " · ${config.redact(it)}" } ?: ""),
+                            color = colors.fg2,
+                            fontSize = 11.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (node.warnings.isNotEmpty()) {
+                            Text(
+                                node.warnings.take(2).joinToString(" · ") { it.title },
+                                color = colors.warn,
+                                fontSize = 11.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        node.testTag?.let { tag ->
+                            Text(
+                                "Copy test tag",
+                                color = colors.accent,
+                                fontSize = 12.sp,
+                                modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
+                                    .clickable(role = Role.Button) {
+                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                            as android.content.ClipboardManager
+                                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("QaLens test tag", tag))
+                                    }
+                                    .padding(vertical = 10.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().background(colors.panel, RoundedCornerShape(QaLensDimens.rMd)).padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    text = node.label.take(48),
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelMedium
-                )
+                InspectFilter.entries.forEach { option ->
+                    Text(
+                        option.label,
+                        color = if (filter == option) colors.accent else colors.fg2,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f)
+                            .heightIn(min = QaLensDimens.touchMin)
+                            .background(if (filter == option) colors.accentWash else Color.Transparent,
+                                RoundedCornerShape(QaLensDimens.rSm))
+                            .clickable(role = Role.Button) { filter = option; onSelect(null) }
+                            .padding(horizontal = 2.dp, vertical = 12.dp)
+                    )
+                }
             }
         }
     }

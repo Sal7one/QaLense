@@ -25,8 +25,10 @@ baselines and project context. Older changelog entries are historical, not uncom
 ## Priority 2: preserve client reliability and integration
 
 - **Observer and inspection edges.** Stress Room and repeated concurrent enable/disable; DataStore
-  cancellation/resume and route clearing are already covered. Check semantics updates that do not
-  cause layout/lifecycle churn and background logging.
+  cancellation/resume and route clearing are already covered. The active Inspector now polls
+  semantics-only updates, and a device runner checks separate Compose dialog roots, duplicate-tag
+  reconciliation and hidden subtrees. Continue with background logging, physical-device windows,
+  and Compose version compatibility beyond the tested 1.7.8 runtime.
 - **Close Android lint follow-ups.** Frame metrics now use a weak Activity reference and detach on
   destroy; the in-app stop chip detaches on destroy, exposes an accessibility click and uses string
   resources. The projection notification body opens controls while its action stops recording.
