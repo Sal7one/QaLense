@@ -71,8 +71,8 @@ off stdout. The built-in demo intentionally produces exit 1.
 node web/test/read.test.js
 ```
 
-The last client-fix baseline passed 58 assertions, including Android-style gzip-inside-DEFLATE,
-reader validation, retention warnings and CLI behavior. Dated verification lives in
+The shared reader and CLI are exercised by this script, including v1/v2 nested compression,
+archive validation, retention warnings and CLI behavior. Dated test results live in
 [HANDOVER.md](../HANDOVER.md); [next.md](../next.md) owns open work.
 
 `web/tools/make_sample.js` regenerates the synthetic demo using headless Chromium and

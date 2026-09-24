@@ -1,8 +1,9 @@
 # Android client audit fixes — 2026-09-13
 
-This change addresses the fourteen findings from the Kotlin client audit. It prioritizes host-app
-behavior, capture privacy, background work and trustworthy outcomes. It does not certify every
-Android device, every custom UI or the web/backend readers.
+This is the dated record of fourteen findings from the Kotlin client audit. It prioritizes host-app
+behavior, capture privacy, background work and trustworthy outcomes. Later reader limits, Compose
+inspection and data-hook work are documented in the current [handover](../HANDOVER.md). The audit
+does not certify every Android device or custom UI.
 
 ## Findings and resulting behavior
 
@@ -70,7 +71,8 @@ Android replay limits are 4,096 ZIP entries, 256 MiB per entry, 512 MiB total ex
 time ranges must be ordered, nonnegative and at most 24 hours. Frames decode to at most 2,048 pixels
 on their longest side. Over-limit or CRC-invalid archives fail instead of partially playing.
 Large videos within the budgets are checksummed as streams. These limits apply to Android replay;
-web/backend expansion budgets are still separate work.
+Web and backend readers now also enforce expansion budgets, but their validation differs from
+Android's; see [SAL format](SAL_FORMAT.md) for each reader's current limits.
 
 Validation uses JDK 17, Gradle 9.1.0 and the sample's disposable API 36 emulator. The expanded
 instrumentation runner uses synthetic data and loopback HTTP only. Run it with the commands in
@@ -84,9 +86,10 @@ instrumentation runner uses synthetic data and loopback HTTP only. Run it with t
 - Web reader/CLI and backend regressions remain part of the full verification matrix.
 
 Remaining validation: physical-device video consent/rotation/background/storage-pressure cases;
-API 23 screenshot fallback runtime coverage (lint checks its API availability); Room observer and repeated concurrent DataStore
-restart stress; semantics changes that do not cause layout; SQL cancellation under very
-long writes; interrupted replay import/low-memory stress. SELECT/WITH result limiting cannot bound
-the computation cost of aggregates, sorting or arbitrary writes; those run off main and read queries
+API 23 screenshot fallback runtime coverage (lint checks its API availability); concurrent Room
+observer and repeated DataStore restart stress; Compose-version/window compatibility; SQL
+cancellation under very long writes; interrupted replay import/low-memory stress. SELECT/WITH
+result limiting cannot bound the computation cost of aggregates, sorting or arbitrary writes; those
+run off main and read queries
 accept cancellation. Main-thread window capture and semantics traversal remain required Android UI
 work. Custom redaction regexes still have no execution-time budget.

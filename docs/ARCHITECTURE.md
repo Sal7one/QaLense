@@ -1,7 +1,8 @@
 # QaLens architecture
 
-Current at the client-fix baseline `7a05bee`. Start with [HANDOVER.md](../HANDOVER.md) for product
-context and verification. [next.md](../next.md) owns unresolved work.
+Describes the Android client through the Compose inspection and data-hook changes in `a16ca21`.
+Start with [HANDOVER.md](../HANDOVER.md) for dated verification and [next.md](../next.md) for
+unresolved work.
 
 ## Module boundaries
 
@@ -31,14 +32,19 @@ analysis; avoid claiming a service-oriented rewrite is complete.
 
 - Startup installs lifecycle observation once. Host activity resume tracks the activity, attaches
   the overlay and frame observers; internal Control Room/player/projection screens are excluded.
-- `ComposeSemanticsReader` inside `QaLensActivityInstaller.kt` uses `RootForTest.semanticsOwner`
-  and `getAllSemanticsNodes`, not the removed private-method reflection path. Legacy config naming
-  (`enableSemanticsReflection`) remains. Route changes clear old nodes; layout/manual changes
-  schedule coalesced inspection. Changes without layout still need broader validation.
+- `ComposeSemanticsReader` inside `QaLensActivityInstaller.kt` uses public Compose semantics APIs
+  across attached Activity roots and optionally registered Dialog/Popup roots, not the removed
+  private-method reflection path. Root-scoped IDs and mapped window coordinates keep nodes distinct.
+  Legacy config naming (`enableSemanticsReflection`) remains. Route changes clear old nodes;
+  coalesced invalidation and polling while Inspect/Tag is open cover semantics-only changes.
+  Other Compose versions and physical-device windows still need validation.
 - Network/log/crash adapters apply shared gating/redaction and feed bounded dashboard histories.
   Declared network sources describe wiring intent, not proof all traffic was observed.
 - Dirty/debounced analysis derives warnings, score, likely owner, build safety, screen quality,
-  flags and provider data. Providers are host code and should be lightweight.
+  flags and provider data. Room invalidations and DataStore Flow updates refresh registered cached
+  snapshots for subsequent recording state samples. The archive counts observed changes and marks
+  short temporal leads before failed requests; these do not prove causation or complete observation.
+  Providers are host code and should be lightweight.
 - On-demand `EvidenceBuilder`/reports use the same scoring inputs, including frame metrics.
   Snapshot macros in core validate state; the Android named macro driver performs real semantics
   actions and waits for asynchronous outcomes. These are different APIs.

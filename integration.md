@@ -266,8 +266,8 @@ used** first. Verbs:
 
 | Artifact | What / where |
 |---|---|
-| `.sal` recording | ZIP of frames-or-video + synced timeline/network/logs/state + `analysis.json` (precomputed digest) + `for_ai.md` (self-describing for AI). Record from the panel/notification/Control Room. Replay on-device, in `web/index.html`, or `node web/tools/sal_report.js file.sal` (exit 1 on failures — CI gate). |
-| Webhook upload | Tester sheet → **Send latest session**, or Control Room → per recording **⇪ Webhook**: multipart `file` + `X-QaLens-App/-Version/-Env/-Device/-Platform/-User/-Sal-Name/-Sal-Size/-Digest` headers + query params. Your backend's response body is shown to the tester. |
+| `.sal` recording | ZIP of frames-or-video + synced timeline/network/logs/state + `analysis.json` (precomputed digest) + `for_ai.md` (self-describing for AI). Completed archives live in app-private `files/qalens/recordings/`. Record from the panel/notification/Control Room. Replay on-device, in the primary `web/index-v2.html` viewer (or classic `web/index.html`), or with `node web/tools/sal_report.js file.sal` (exit 1 for observed failures, 2 for invalid or disclosed partial evidence without a failure). |
+| Webhook upload | Tester sheet → **Send latest session**, or Control Room → per recording **⇪ Webhook**: multipart `file` + `X-QaLens-App/-Version/-Env/-Device/-Platform/-User/-Sal-Name/-Sal-Size/-Digest` headers + query params. The tester sees a short upload verdict; inspect the backend dashboard for full details. |
 | Screenshots | Annotated, saved to private app cache; sharing and Photos copies are opt-in. |
 | Bug reports | Redacted Jira/Slack/repro text via one-tap copy (`QaLens.buildJiraReport()` etc.). |
 

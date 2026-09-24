@@ -1,8 +1,8 @@
 # SAL session archive contract
 
-Current producer baseline: `7a05bee`. A `.sal` is a ZIP containing media, structured observations
-and derived reports. A `.appsal` is unrelated JSON for app/tester configuration; do not feed it to
-the session reader. Open work lives only in [next.md](../next.md).
+The current Android producer writes v2 archives. A `.sal` is a ZIP containing media, structured
+observations and derived reports. A `.appsal` is unrelated JSON for app/tester configuration; do
+not feed it to the session reader. Open work lives only in [next.md](../next.md).
 
 ## Versions and encoding
 

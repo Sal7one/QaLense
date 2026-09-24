@@ -77,6 +77,7 @@ button requires HTTP serving. `web/index.html` remains the classic fallback and 
 |---|---|
 | Take over development | [Handover](HANDOVER.md), [current backlog](next.md) |
 | Understand modules and data flow | [Architecture](docs/ARCHITECTURE.md) |
+| Understand overlay behavior and token coverage | [Overlay design](docs/OVERLAY_DESIGN.md) |
 | Integrate into an app | [Integration](integration.md), [OSS contracts](docs/OSS_INTEGRATIONS.md) |
 | Understand client fixes and compatibility changes | [Client fixes](docs/CLIENT_SAFETY_FIXES.md) |
 | Implement or inspect recordings | [SAL format](docs/SAL_FORMAT.md), [retention](docs/RECORDING_RETENTION.md) |

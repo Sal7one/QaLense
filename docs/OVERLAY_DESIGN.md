@@ -1,8 +1,10 @@
 # Floating overlay design tokens
 
 How the QaLens floating overlay is coloured, sized and spaced, and the evidence behind
-those choices. The source of truth is `QaLensTokens.kt` and this document; the token layer
-currently covers the floating bubble, tester quick-actions sheet, and inspect/tag canvases.
+those choices. The implementation source of truth is `QaLensTokens.kt`; this document records
+the design decisions and current adoption. Tokens cover the floating bubble, tester quick-actions
+sheet, and inspect/tag canvases. The visual inspector gained Actions/All/Tagged/Issues filters and
+a selected-node detail card after token adoption, but its full panel is not yet tokenized.
 
 ## The problem this solves
 
@@ -114,8 +116,8 @@ codes, byte counts, percentages, p95. Proportional type is for prose and labels 
 
 Applied:
 
-- `QaLensTokens.kt` — the token layer (new)
-- `QaLensTokensTest.kt` — contrast and scheme regression tests (new)
+- `QaLensTokens.kt` — the token layer
+- `QaLensTokensTest.kt` — contrast and scheme regression tests
 - `QaLensOverlay.kt` — bubble, inspect canvas, tag canvas, panel scrim, tag chip and the
   tag-mode legend now read from tokens. The bubble keeps its original crisp white ring; a
   softened ring measured worse against the cream host and read as a smudge.

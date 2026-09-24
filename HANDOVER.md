@@ -1,8 +1,8 @@
 # QaLens: start here
 
 Updated 2026-09-24. This is the authoritative handover for a contributor or AI with no prior
-conversation context. It incorporates the tester-flow and local-backend changes made after
-`f9b2672`. Check `git status` and `git log` on arrival because local state and remote publication
+conversation context. It covers the tester flow, local backend, Compose inspection and data hooks
+through `a16ca21`. Check `git status` and `git log` on arrival because code and publication state
 may have changed. Historical claims in CHANGELOG are not a current verification matrix.
 
 ## Product and user priorities
@@ -49,6 +49,7 @@ iOS capture and native Ktor/Cronet/Apollo adapters are not. Generic transport ca
 | [OSS integrations](docs/OSS_INTEGRATIONS.md) | Supported Chucker, transport, Timber and crash-reporter contracts |
 | [SAL format](docs/SAL_FORMAT.md) | Archive versions, compression, tracks, timestamps and reader differences |
 | [Recording retention](docs/RECORDING_RETENTION.md) | Recording-owned journal budgets and evidence-loss accounting |
+| [Overlay design](docs/OVERLAY_DESIGN.md) | Token coverage and remaining UI migration |
 | [Contributing](CONTRIBUTING.md) | Portable build/test/device commands and distribution workflow |
 | [Demo](DEMO.md), [web](web/README.md), [backend](backend/README.md) | Operating the sample and replay/upload tools |
 | [Changelog](CHANGELOG.md) | Historical changes; Git preserves deleted historical documents |
@@ -56,12 +57,11 @@ iOS capture and native Ktor/Cronet/Apollo adapters are not. Generic transport ca
 Root `AGENTS.md` directs contributors here; this file and `next.md` are the only current project
 handover and backlog.
 
-## Verified implementation baseline
+## Historical client-fix baseline
 
-The following checks passed during the client-fix work on 2026-09-13. They were not rerun merely
-for documentation cleanup. Reproduce the relevant checks before changing behavior; do not present
-these historical results as a fresh run. GitHub CI is configured; remote CI execution and public
-artifact publication were not verified.
+The following checks passed during the client-fix work on 2026-09-13. Later 2026-09-24 checks are
+recorded below; these counts are retained only as historical evidence. GitHub CI is configured,
+but remote CI execution and public artifact publication were not verified here.
 
 | Check | Last result |
 |---|---|
@@ -84,9 +84,9 @@ route-node clearing, DataStore cancellation/restart, invalid macro outcomes, SQL
 Android-produced archive replay, upload queue saturation/cancellation and exhausted 503 retries.
 It uses synthetic data and loopback HTTP. This does not replace physical-device video testing.
 
-The `f9b2672` overlay-token commit also reports passing token contrast/scheme tests, sample debug
-build, release-isolation verification and an API 36 overlay check. Those results predate the current
-tester-sheet and backend changes and have not been rerun here.
+The `f9b2672` overlay-token commit separately reports passing token contrast/scheme tests, sample
+debug build, release-isolation verification and an API 36 overlay check. Later sections describe
+verification after the tester-sheet and backend changes.
 
 ## Takeover validation — 2026-09-23
 
@@ -190,6 +190,10 @@ tester-sheet and backend changes and have not been rerun here.
 | `d5e735b` | Actual release isolation, recording recovery, correct frame units, real Android v2 replay compatibility |
 | `e7c8adc` | Shared nearest-rank percentiles and regression tests |
 | `f9b2672` | Add overlay color/spacing tokens for the bubble and inspect/tag surfaces; not a whole-UI redesign |
+| `6d824d0` | Simplify the tester sheet and exercise real uploads against the loopback backend |
+| `d98895a` | Retain completed archives in app-private files and improve tester accessibility |
+| `de2af59` | Inspect multiple Compose roots and add visual filters and node details |
+| `a16ca21` | Refresh data snapshots from Room/DataStore changes and add bounded recording insights |
 
 Do not reintroduce fixes from older handovers: Chucker has no supported live transaction-listener
 integration here, percentile ranks are fixed, response previews use OkHttp `peekBody`, and the
@@ -282,12 +286,11 @@ Default coordinates are `com.qalens:<module>:0.9.0`, defined in root `build.grad
 and local Maven distribution exist; no Maven Central availability is claimed. `qalensDist` writes
 `build/qalens-repo`; `scripts/release_internal.sh` packages it. External publishing is separate work.
 
-The client-fix, OSS integration and overlay-token changes are local commits on `dev`; no push or
-public release was performed. Inspect current Git state before continuing. The temporary backend
-and disposable test emulator were stopped and their temporary recordings removed. The user
-explicitly requested an emulator, so the visible Pixel 8 Pro (`emulator-5554`) remains running in
-tester quick-actions mode. Shell logs under `/tmp` are disposable, not the source of truth. The
-next work is explicitly listed in [next.md](next.md).
+The development commits through this handover are on `dev`. Check the remote branch and CI before
+assuming they are published or validated there. No Maven Central or production backend release is
+claimed. Test backends, emulator state and shell logs are local and disposable; use `adb devices`
+to discover an available emulator rather than relying on a prior serial. The next work is listed
+in [next.md](next.md).
 
 ## First useful task for the incoming AI
 
