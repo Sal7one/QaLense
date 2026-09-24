@@ -37,6 +37,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
                 check((0 until logs.length()).count { logs.getJSONObject(it).getString("message").startsWith("retention-log-") } == 600)
                 check(!coverage(zip).getBoolean("truncated"))
             }
+            verifySavedRecordingStorage(retained)
             verifyOssIntegrations()
             verifyClientSafety()
             val limited = record("budget", 100, "x".repeat(100_000), clearUi = false)
@@ -49,7 +50,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
                 check(network.getLong("retained") == JSONArray(read(zip, "network.json")).length().toLong())
                 check(read(zip, "report.txt").contains("observations omitted"))
             }
-            result.putString("stream", "\nOK: 600 requests and logs survived UI clearing; byte-budget loss is disclosed; Chucker coexistence, adapters and crash bridge pass; client privacy, disable/resume, navigation, DataStore, macros, SQL, replay and webhook queue/retry checks pass.\n")
+            result.putString("stream", "\nOK: 600 requests and logs survived UI clearing; saved archives are durable, shareable and legacy cache archives migrate; byte-budget loss is disclosed; Chucker coexistence, adapters and crash bridge pass; client privacy, disable/resume, navigation, DataStore, macros, SQL, replay and webhook queue/retry checks pass.\n")
             result.putString("retainedArchive", retained.name)
             result.putString("limitedArchive", limited.name)
             finish(android.app.Activity.RESULT_OK, result)
@@ -63,7 +64,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         startActivitySync(Intent(targetContext, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         waitForIdleSync()
-        val dir = File(targetContext.cacheDir, "qalens")
+        val dir = File(targetContext.filesDir, "qalens/recordings")
         val previous = dir.listFiles()?.map { it.name }?.toSet().orEmpty()
         runOnMainSync {
             QaLens.configure { captureNetworkBodies = body != null }
@@ -85,6 +86,30 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             Thread.sleep(100)
         }
         error("Recording did not finish saving")
+    }
+
+    private fun verifySavedRecordingStorage(retained: File) {
+        val durable = File(targetContext.filesDir, "qalens/recordings")
+        check(retained.parentFile == durable) { "Saved archive is still in cache" }
+        val legacy = File(targetContext.cacheDir, "qalens").apply { mkdirs() }
+        val old = File(legacy, "session_migration_fixture_${System.nanoTime()}.sal")
+        val moved = File(durable, old.name)
+        try {
+            old.writeText("migration fixture")
+            QaLens.refreshRecordings()
+            check(!old.exists() && moved.readText() == "migration fixture") { "Legacy archive was not moved" }
+            check(QaLens.state.value.recordings.any { it.path == moved.absolutePath }) { "Migrated archive is missing from the tester sheet" }
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                targetContext, targetContext.packageName + ".qalens.fileprovider", moved
+            )
+            check(targetContext.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } == "migration fixture") {
+                "FileProvider cannot share a durable archive"
+            }
+        } finally {
+            old.delete()
+            moved.delete()
+            QaLens.refreshRecordings()
+        }
     }
 
     private fun verifyOssIntegrations() {
@@ -212,7 +237,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             try { emit(0); kotlinx.coroutines.awaitCancellation() } finally { stops.incrementAndGet() }
         })
         waitUntil("DataStore observer did not start") { starts.get() == 1 }
-        val archivesBefore = dir.listFiles().orEmpty().map { it.name }.toSet()
+        val archiveDir = File(targetContext.filesDir, "qalens/recordings")
+        val archivesBefore = archiveDir.listFiles().orEmpty().map { it.name }.toSet()
         val memoryBefore = QaLens.state.value.memorySamples.size
         runOnMainSync { QaLens.startRecording() }
         check(QaLens.state.value.isRecording)
@@ -230,7 +256,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         check(!QaLens.state.value.isRecording && QaLens.state.value.events.size == eventCount)
         check(QaLens.state.value.networkEvents.size == networkCount)
         waitUntil("Disable failed to finalize recording") { !QaLens.state.value.isSavingRecording }
-        val archive = dir.listFiles()!!.first { it.extension == "sal" && it.name !in archivesBefore }
+        val archive = archiveDir.listFiles()!!.first { it.extension == "sal" && it.name !in archivesBefore }
         ZipFile(archive).use { zip ->
             val frame = zip.entries().asSequence().first { it.name.endsWith(".jpg") }
             val image = zip.getInputStream(frame).use { android.graphics.BitmapFactory.decodeStream(it) }

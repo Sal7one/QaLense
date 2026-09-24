@@ -396,7 +396,7 @@ internal object QaLensSessionRecorder {
         val videoStartMs = this.videoStartMs
         if (Looper.myLooper() == Looper.getMainLooper()) QaLensFrameMetrics.flushPending()
         val s = RecordingWindow.slice(captured.applyTo(QaLens.state.value), startMs, endMs)
-        val cacheRoot = activity?.cacheDir ?: QaLens.appContext?.cacheDir ?: dir.parentFile
+        val storageContext = activity ?: QaLens.appContext
         val save = Runnable {
             try {
                 val windowEvents = s.events.filter { it.timestampMillis >= startMs }
@@ -510,7 +510,7 @@ internal object QaLensSessionRecorder {
                 )
                 val manifestJson = SalTracks.manifest(manifest, fileEntries)
 
-                val salDir = File(cacheRoot, "qalens").apply { mkdirs() }
+                val salDir = recordingsDir(checkNotNull(storageContext) { "No app context to save recording" })
                 val target = File(salDir, "session_$startMs.sal")
                 writeSalZip(target, manifestJson, texts, framesDir, frameRelPaths, extras)
                 val sizeNote = if (usingVideo) "video" else "${frameIndex.size} frames"
@@ -645,7 +645,20 @@ internal object QaLensSessionRecorder {
         }
     }
 
-    /** Directory holding saved `.sal` files (and transient `rec_*` frame dirs). */
+    /** Durable app-private archive storage. Transient frames and screenshots remain in cache. */
     internal fun recordingsDir(context: android.content.Context): File =
-        File(context.cacheDir, "qalens").apply { mkdirs() }
+        File(context.filesDir, "qalens/recordings").apply { mkdirs() }
+
+    /** Move archives created by older SDKs out of cache, while keeping any failed moves visible. */
+    internal fun savedRecordings(context: android.content.Context): List<File> {
+        val destination = recordingsDir(context)
+        val legacy = File(context.cacheDir, "qalens")
+        val oldFiles = legacy.listFiles { file -> file.isFile && file.name.endsWith(".sal") }.orEmpty()
+        oldFiles.forEach { file ->
+            val target = File(destination, file.name)
+            if (!target.exists()) file.renameTo(target)
+        }
+        return destination.listFiles { file -> file.isFile && file.name.endsWith(".sal") }.orEmpty().toList() +
+            legacy.listFiles { file -> file.isFile && file.name.endsWith(".sal") }.orEmpty()
+    }
 }

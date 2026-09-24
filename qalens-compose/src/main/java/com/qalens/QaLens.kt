@@ -355,6 +355,7 @@ object QaLens {
                 minimalPanel = com.qalens.android.QaLensAppSal.panelMode(application) == "minimal"
             )
         }
+        bgScope.launch(Dispatchers.IO) { refreshRecordings() }
         QaLensActivityInstaller.install(application)
         if (config.value.enabled) {
             QaLensCrashHandler.install()
@@ -666,11 +667,10 @@ object QaLens {
     }
 
     // ── Saved recordings (history / storage management) ─────────────────────────
-    /** Re-scan the cache for saved `.sal` files and publish them to state (size + date). */
+    /** Re-scan durable and legacy saved `.sal` files and publish them to state (size + date). */
     fun refreshRecordings() {
         val context: Context = currentActivityRef?.get() ?: appContext ?: return
-        val dir = QaLensSessionRecorder.recordingsDir(context)
-        val list = (dir.listFiles { f -> f.isFile && f.name.endsWith(".sal") } ?: emptyArray())
+        val list = QaLensSessionRecorder.savedRecordings(context)
             .sortedByDescending { it.lastModified() }
             .map { RecordingInfo(it.name, it.absolutePath, it.length(), it.lastModified()) }
         uiStateMutable.update { it.copy(recordings = list) }
@@ -690,9 +690,7 @@ object QaLens {
 
     fun deleteAllRecordings() {
         val context: Context = currentActivityRef?.get() ?: appContext ?: return
-        QaLensSessionRecorder.recordingsDir(context)
-            .listFiles { f -> f.name.endsWith(".sal") }
-            ?.forEach { it.delete() }
+        QaLensSessionRecorder.savedRecordings(context).forEach { it.delete() }
         refreshRecordings()
         log("Cleared all recordings")
     }

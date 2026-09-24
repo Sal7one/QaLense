@@ -2,6 +2,18 @@
 
 ## Unreleased — post-0.9.0
 
+### Tester accessibility and archive retention — 2026-09-24
+- Give the tester sheet a named Close button, button roles for actions, an expanded/collapsed
+  More tools state, and decorative symbols hidden from accessibility. Correct the English privacy
+  note's punctuation when the host app uses RTL layout. Review the sheet on a Pixel emulator in
+  RTL and both overlay color schemes; physical-device TalkBack remains to be checked.
+- Store completed `.sal` archives in app-private files instead of evictable cache. Rescan on SDK
+  startup, migrate older cache archives without deleting a failed move, and expose the new location
+  through the existing sharing provider. Temporary frames and screenshots still use cache.
+- Add device coverage for archive location, cache migration and share URI. Document that a host
+  must exclude the archive directory from its own backup rules when evidence must stay only on the
+  test device.
+
 ### Archive reader limits — 2026-09-23
 - Bound ZIP entry counts, per-entry and total expansion, nested gzip text, and manifest size in the
   shared web/CLI reader and Python mock backend. Reject invalid paths, duplicates, ZIP CRC errors,

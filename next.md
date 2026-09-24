@@ -1,6 +1,6 @@
 # Current backlog
 
-Updated 2026-09-23. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
+Updated 2026-09-24. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
 ## Priority 1: make the client useful to real QA teams
@@ -8,9 +8,10 @@ baselines and project context. Older changelog entries are historical, not uncom
 1. **Validate the simplified tester flow on devices.** The default sheet now exposes record,
    screenshot and mark-a-bug actions; team upload appears after setup and a recording exists.
    A Pixel emulator check covered 360 × 640 dp at 150% font, scrolling More tools, the in-app stop
-   chip, save/share sheet and a real local upload result. Still check RTL, light/dark mode and
-   TalkBack, then validate the complete flow on physical phones. Fix any focus, size, dismissal or
-   stale-state problem found.
+   chip, save/share sheet and a real local upload result. RTL and both overlay color schemes were
+   checked on the emulator; the quick-actions accessibility tree now has button roles and a named
+   Close control. Still run TalkBack and the complete flow on physical phones. Fix any focus, size,
+   dismissal or stale-state problem found.
 2. **Physical-device capture and recovery matrix.** Exercise video opt-in, consent denial/late
    consent, OS projection stop, rotation, backgrounding, interrupted save and disk-full handling.
    Test password/redaction-matched/custom content and multiple windows, plus the API 23 screenshot

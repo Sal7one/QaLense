@@ -32,7 +32,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -83,12 +90,15 @@ internal fun QaLensMinimalPanel(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Box(
-                Modifier.size(QaLensDimens.touchMin).clickable(onClick = onClose),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("×", color = colors.fg2, fontSize = 22.sp)
-            }
+            Text(
+                "Close",
+                color = colors.fg2,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
+                    .clickable(role = Role.Button, onClick = onClose)
+                    .padding(horizontal = 8.dp, vertical = 8.dp)
+            )
         }
 
         Spacer(Modifier.height(16.dp))
@@ -132,10 +142,11 @@ internal fun QaLensMinimalPanel(
 
         Spacer(Modifier.height(10.dp))
         Text(
-            "Screenshots and recordings stay on this device until you choose to share or send them.",
+            "Saved in this app. Tap Share or Send when you're ready.",
             color = colors.fg2,
             fontSize = 11.sp,
-            lineHeight = 15.sp
+            lineHeight = 15.sp,
+            style = TextStyle(textDirection = TextDirection.ContentOrLtr)
         )
 
         if (webhookConfigured && latestRecording != null) {
@@ -183,7 +194,7 @@ internal fun QaLensMinimalPanel(
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
-                    .clickable { openControlRoom(context) }
+                    .clickable(role = Role.Button) { openControlRoom(context) }
                     .padding(vertical = 8.dp)
             )
         }
@@ -195,7 +206,11 @@ internal fun QaLensMinimalPanel(
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
-                .clickable { showMore = !showMore }
+                .semantics(mergeDescendants = true) {
+                    contentDescription = if (showMore) "Hide more tools" else "More tools"
+                    stateDescription = if (showMore) "Expanded" else "Collapsed"
+                }
+                .clickable(role = Role.Button) { showMore = !showMore }
                 .padding(vertical = 8.dp)
         )
 
@@ -249,7 +264,7 @@ internal fun QaLensMinimalPanel(
                         Modifier.fillMaxWidth()
                             .padding(bottom = 6.dp)
                             .background(colors.panel2, RoundedCornerShape(QaLensDimens.rSm))
-                            .clickable { onClose(); QaLensMacros.run(macro) }
+                            .clickable(role = Role.Button) { onClose(); QaLensMacros.run(macro) }
                             .heightIn(min = QaLensDimens.touchMin)
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -282,7 +297,7 @@ internal fun QaLensMinimalPanel(
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
-                        .clickable { QaLens.setPanelMinimal(false) }
+                        .clickable(role = Role.Button) { QaLens.setPanelMinimal(false) }
                         .padding(vertical = 8.dp)
                 )
                 Text(
@@ -290,7 +305,7 @@ internal fun QaLensMinimalPanel(
                     color = colors.fg2,
                     fontSize = 12.sp,
                     modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
-                        .clickable { QaLens.setWatchMode(true) }
+                        .clickable(role = Role.Button) { QaLens.setWatchMode(true) }
                         .padding(vertical = 8.dp)
                 )
             }
@@ -311,12 +326,12 @@ private fun QuickAction(
     Row(
         Modifier.fillMaxWidth()
             .background(colors.panel2, RoundedCornerShape(QaLensDimens.rMd))
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .heightIn(min = 68.dp)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(symbol, color = tint, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text(symbol, modifier = Modifier.clearAndSetSemantics {}, color = tint, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(12.dp))
         Column {
             Text(title, color = colors.fg, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -330,13 +345,13 @@ private fun CompactAction(label: String, symbol: String, tint: Color, colors: Qa
     Column(
         Modifier.fillMaxWidth()
             .background(colors.panel2, RoundedCornerShape(QaLensDimens.rMd))
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .heightIn(min = 64.dp)
             .padding(horizontal = 8.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(symbol, color = tint, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(symbol, modifier = Modifier.clearAndSetSemantics {}, color = tint, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(3.dp))
         Text(label, color = colors.fg, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }

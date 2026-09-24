@@ -1,6 +1,6 @@
 # QaLens: start here
 
-Updated 2026-09-23. This is the authoritative handover for a contributor or AI with no prior
+Updated 2026-09-24. This is the authoritative handover for a contributor or AI with no prior
 conversation context. It incorporates the tester-flow and local-backend changes made after
 `f9b2672`. Check `git status` and `git log` on arrival because local state and remote publication
 may have changed. Historical claims in CHANGELOG are not a current verification matrix.
@@ -74,7 +74,7 @@ artifact publication were not verified.
 | Sample and independent-consumer release dependency gates | Passed |
 | Independent consumer debug/release builds | Passed |
 | `node web/test/read.test.js` | 58 assertions passed, including CLI regressions |
-| `python3 backend/tests/test_backend.py` | 20 tests passed |
+| `python3 backend/tests/test_backend.py` | 20 tests passed at this historical baseline |
 | Expanded Android instrumentation | Passed on a disposable API 36 emulator |
 
 The device runner checks 600-request/log retention, disclosed budget overflow, real Chucker 4.1.0
@@ -118,10 +118,30 @@ tester-sheet and backend changes and have not been rerun here.
   A repeat post-reinstall upload confirmed populated headers and query fields. The visible Pixel 8
   Pro tester sheet was also checked at 150% system font size and at a 360 × 640 dp small-phone
   override. Primary actions remained readable, and expanded More tools scrolled to its lower
-  actions. The original display and font settings were restored. Physical-device, RTL and TalkBack
+  actions. The original display and font settings were restored. Physical-device and TalkBack
   verification remain open.
 - `scripts/release_internal.sh --verify` built six modules into a local Maven repo, verified its
   `SHA-256SUMS` and produced `dist/qalens-0.9.0-repo.zip`. The wrapper now reports Gradle 9.1.0.
+
+## Continuation validation — 2026-09-24
+
+- The visible Pixel 8 Pro emulator (`emulator-5554`) stayed running. The tester sheet was checked
+  in RTL using the sample app's `ar-SA` locale and in both overlay color schemes using Android
+  night mode. The default locale, light mode and display settings were restored. UIAutomator showed
+  a focusable Close button and a labeled More tools button; TalkBack speech/focus order and physical
+  phones remain untested. English privacy copy now wraps correctly in RTL.
+- Reinstalling the sample exposed a real stale-state issue: five `.sal` archives remained in
+  `cache/qalens/`, but the quick sheet no longer showed Send latest session because the process
+  had not refreshed its recording list. Completed archives now go to
+  `files/qalens/recordings/`, startup scans and migrates older cache archives, and the share
+  provider allows the new path. On the visible emulator, all five old archives moved without loss
+  and Send latest session returned after reinstall. Host backup policy still governs files storage;
+  see [integration.md](integration.md) for the required exclusion when evidence must stay local.
+- `./demo.sh test` (including 23 backend tests), `:sample-app:assembleDebug :sample-app:assembleDebugAndroidTest
+  :sample-app:verifyReleaseIsolation :qalens-compose:lintDebug` passed. The disposable API 36
+  runner returned `OK:` after adding durable-location, legacy-migration and share-URI assertions.
+  The first runner attempt found an old test assumption that archives were in cache; it was fixed
+  and the runner passed from cleared app state.
 
 ## What changed recently
 
@@ -195,7 +215,9 @@ was `Pixel_8_Pro`, serial `emulator-5554`, API 36; its continued availability is
    handling belongs to the host application.
 3. **Privacy is explicit and limited.** Text boundaries redact configured patterns; screenshots
    mask known sensitive Compose regions and respect secure windows. Private-cache screenshots are
-   the default. Unmasked full-display video and gallery copies require separate host opt-ins.
+   the default; completed archives use app-private files, so host backup rules must exclude them
+   when recordings must stay on the device. Unmasked full-display video and gallery copies require
+   separate host opt-ins.
    These controls do not redact arbitrary pixels, user-authored SQL/macro literals or Chucker's
    independent storage. Never promise all data is automatically safe to share.
 4. **Disable means stop collecting.** Stop/finalize capture and cancel active observation/upload

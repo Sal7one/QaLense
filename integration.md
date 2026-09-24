@@ -276,6 +276,13 @@ are masked; arbitrary pixels are not. Coroutine helpers delegate uncaught failur
 release; they do not suppress exceptions. Imported webhook origin changes clear the local credential.
 A secret-free `.appsal` may still contain literal passwords in macro steps or SQL: review before sharing.
 
+Finished `.sal` archives live in the host app's private `files/qalens/recordings/` directory so
+cache eviction or an app update does not silently remove them. QaLens moves older archives from
+`cache/qalens/` when it next starts and keeps a legacy archive visible if a move fails. Uninstalling
+the host app still deletes them. Host app backup settings also apply to this directory: exclude
+`qalens/recordings/` from cloud backup and device transfer, or disable backup for the QA variant,
+if recordings must remain only on the test device. The sample app disables backup.
+
 An AI integrating another app should inspect its module names, Kotlin/AGP/Compose versions,
 Application, navigation, actual HTTP client, logging, crash vendor and existing build variants first.
 Use existing project identity/configuration when available; ask only for missing decisions that
