@@ -165,6 +165,26 @@ Open Overview → **Copy integration check**, or call `QaLens.integrationReport(
 sources and settings without exposing request contents. `analysis.json.coverage.networkSources`
 records declared adapter names; declaration alone does not prove complete capture.
 
+### Continuous logs and network traffic
+
+The live dashboard publishes pending logs and requests in batches about every 100 ms. It keeps the
+newest events: `maxEventHistory` defaults to 600 and is bounded to 20–10,000 entries, with a shared
+1,048,576-character message/tag budget. Individual dashboard fields have 16,384-character previews
+plus a truncation notice; network history keeps 250 requests. These limits bound text and entries,
+not total heap use. Repro/Logs/Network use lazy rows, and evidence/filter/search processing runs on
+background workers that keep progressing during a continuous stream.
+
+Recording journals have [separate retention budgets](docs/RECORDING_RETENTION.md). Dashboard
+eviction and preview truncation do not edit that journal. Chucker's own capture, storage and UI
+remain governed by Chucker's settings. Keep network bodies off unless a bounded preview is needed.
+
+Overlay report copies are prepared in the background. Clipboard output above 200,000 characters
+is explicitly truncated; use a recording for full retained evidence. Public `build*Report()` and
+`evidenceBundle()` calls remain synchronous for compatibility: call them from a worker, for example
+`withContext(Dispatchers.Default) { QaLens.buildFullReport() }`. Initial input redaction still runs
+on the logging caller's thread, and host snapshot providers still run on main; keep messages and
+providers small and avoid expensive custom regular expressions.
+
 ## Step 6 — Enrichment (L4, all optional)
 
 ```kotlin

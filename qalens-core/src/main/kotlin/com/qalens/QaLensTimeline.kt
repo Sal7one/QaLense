@@ -124,8 +124,11 @@ object ReproStepGenerator {
             )
         }
 
-        val steps = mutableListOf<String>()
+        // Only twelve distinct steps are displayed/exported. Avoid allocating a second history
+        // of every error/action in a chatty session merely to discard it afterwards.
+        val steps = linkedSetOf<String>()
         timeline.forEach { e ->
+            if (steps.size >= 12) return@forEach
             when (e.kind) {
                 TimelineKind.SCREEN, TimelineKind.NAVIGATION -> steps += e.title
                 TimelineKind.ACTION -> steps += "Trigger: ${e.title}"
@@ -136,7 +139,7 @@ object ReproStepGenerator {
         }
 
         val firstError = timeline.firstOrNull { it.isError }
-        val numbered = steps.distinct().take(12).mapIndexed { i, s -> "${i + 1}. $s" }
+        val numbered = steps.mapIndexed { i, s -> "${i + 1}. $s" }
 
         val (expected, actual) = if (firstError != null) {
             "The action should complete successfully, or surface a specific, handled error." to

@@ -1,9 +1,16 @@
 # Current backlog
 
-Updated 2026-09-24. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
+Updated 2026-10-01. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
 ## Priority 1: make the client useful to real QA teams
+
+- **Validate the responsiveness fix in real host apps.** Dashboard queues are now bounded and
+  batched, Repro/evidence/filter/search processing runs off main, and large tracks render lazily.
+  The emulator load regression exercises a continuous stream; retest the reported overlay/Repro
+  ANRs in the consuming app. Capture a trace if a stall remains. Stress very large individual log
+  payloads and custom regex/provider code: input redaction runs on the caller and snapshot providers
+  retain their main-thread contract. Keep recording coverage honest if further ingress limits are added.
 
 1. **Validate the simplified tester flow on devices.** The default sheet now exposes record,
    screenshot and mark-a-bug actions; team upload appears after setup and a recording exists.

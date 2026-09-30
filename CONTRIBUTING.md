@@ -36,6 +36,21 @@ Require the runner's `OK:` message. An adb process exit code alone does not prov
 The runner changes sample activity contents/preferences and creates synthetic recordings; HTTP
 fixtures bind loopback only.
 
+For only the overlay/log-flood regression, use the same installed APKs on a disposable emulator:
+
+```sh
+adb -s emulator-5554 shell pm grant com.qalens.sample android.permission.POST_NOTIFICATIONS
+adb -s emulator-5554 shell input keyevent KEYCODE_WAKEUP
+adb -s emulator-5554 shell wm dismiss-keyguard
+adb -s emulator-5554 shell am instrument -w -e overlayLoadOnly true com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: Overlay/Repro/Logs/Network remain responsive`. The case sends a 12,000-line burst,
+then keeps background/main-thread logs and network observations flowing during tab switches.
+`adb logcat -d -s QaLensLoadTest:I` shows its worst measured main-thread heartbeat delay; each
+heartbeat must complete within 2.5 seconds. This is a synthetic regression, not a real-host ANR trace
+or a frame-rate guarantee. The full runner includes the same case.
+
 ## Review expectations
 
 - Keep pure policies and models in core; Android behavior belongs in the Android modules.

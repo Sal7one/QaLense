@@ -1,6 +1,6 @@
 # QaLens architecture
 
-Describes the Android client through the Compose inspection and data-hook changes in `a16ca21`.
+Describes the Android client including the 2026-10-01 continuous-log responsiveness changes.
 Start with [HANDOVER.md](../HANDOVER.md) for dated verification and [next.md](../next.md) for
 unresolved work.
 
@@ -40,6 +40,11 @@ analysis; avoid claiming a service-oriented rewrite is complete.
   Other Compose versions and physical-device windows still need validation.
 - Network/log/crash adapters apply shared gating/redaction and feed bounded dashboard histories.
   Declared network sources describe wiring intent, not proof all traffic was observed.
+- Log/network admission into the recording journal is independent of the dashboard. A single
+  scheduled publication drains bounded pending dashboard queues approximately every 100 ms.
+  Log history has entry, text-budget and field-preview bounds; network history keeps 250 requests.
+  Disable discards pending dashboard observations, and clearing one track also clears that track's
+  pending queue. Exports flush pending observations before taking one consistent state snapshot.
 - Dirty/debounced analysis derives warnings, score, likely owner, build safety, screen quality,
   flags and provider data. Room invalidations and DataStore Flow updates refresh registered cached
   snapshots for subsequent recording state samples. The archive counts observed changes and marks
@@ -48,6 +53,13 @@ analysis; avoid claiming a service-oriented rewrite is complete.
 - On-demand `EvidenceBuilder`/reports use the same scoring inputs, including frame metrics.
   Snapshot macros in core validate state; the Android named macro driver performs real semantics
   actions and waits for asynchronous outcomes. These are different APIs.
+
+Repro/Bug Bundle evidence, log grouping/filtering and global search run on background workers over
+immutable inputs. Updates are conflated and processed serially, so continuous traffic cannot keep
+restarting a computation before it finishes. The panels render visible rows lazily. Report copies
+format off main and return to main for the clipboard operation; synchronous public report APIs
+remain available. Semantics/View traversal, host snapshot providers and initial input redaction on
+the calling thread remain explicit boundaries rather than being moved to an unsafe thread.
 
 ## Recording and media
 

@@ -18,6 +18,7 @@ data class QaLensConfig(
     val featureFlags: Map<String, Boolean> = emptyMap(),
     val userType: String? = null,
     val redactionRules: List<RedactionRule> = RedactionRule.defaultRules(),
+    /** Newest dashboard events, up to 10,000 and ~1M text characters; recording has separate budgets. */
     val maxEventHistory: Int = 600,
     val touchTargetMinDp: Float = 48f,
     val slowNetworkThresholdMs: Long = 2000L,
@@ -100,7 +101,7 @@ data class QaLensConfig(
             featureFlags = featureFlags,
             userType = userType,
             redactionRules = redactionRules,
-            maxEventHistory = maxEventHistory.coerceAtLeast(20),
+            maxEventHistory = maxEventHistory.coerceIn(20, 10_000),
             touchTargetMinDp = touchTargetMinDp.coerceAtLeast(24f),
             slowNetworkThresholdMs = slowNetworkThresholdMs.coerceAtLeast(250L),
             requireTestTagsForClickable = requireTestTagsForClickable,

@@ -42,12 +42,18 @@ object QaLens {
     private val mainHandler = Handler(Looper.getMainLooper())
     /** True when a recompute is pending (set on any thread, consumed on main). */
     private val analysisDirty = AtomicBoolean(false)
+    private val dashboardEvents = DashboardEventBuffer()
+    private val dashboardNetwork = DashboardQueue<NetworkEvent>(250)
+    private val eventPublishScheduled = AtomicBoolean(false)
+    private val publishEvents = Runnable {
+        publishDashboard()
+    }
     /** A pending recompute runnable, deduped so bursts coalesce into one pass. */
     private var analysisPending: Runnable? = null
     /** Debounce window for [markAnalysisDirty]. Tuned so a burst of 10 network calls → 1 recompute. */
     private const val ANALYSIS_DEBOUNCE_MS = 250L
     private var lastScreenKey: String? = null
-    private var lastScreenshot: EvidenceAttachment? = null
+    @Volatile private var lastScreenshot: EvidenceAttachment? = null
     private val contracts = linkedMapOf<String, ScreenContract>()
     private val dataSourceProviders = linkedMapOf<String, DataSourceEntry>()
     /** B3: registered custom tab providers — appended after the built-in tabs in the panel. */
@@ -98,6 +104,7 @@ object QaLens {
                 QaLensSessionRecorder.stop(share = false)
             }
             if (!nowEnabled) {
+                clearPendingEvents()
                 pendingRecordingVideo = null
                 QaLensMacros.cancel()
                 QaLensWebhook.stop()
@@ -590,24 +597,57 @@ object QaLens {
     fun integrationReport(): String = QaLensIntegrationDiagnostics.report(configState.value, state.value)
 
     fun logNetwork(event: NetworkEvent) {
-        val safe = runCatching { QaLensNetworkCapture.sanitize(event, configState.value) }.getOrNull() ?: return
-        QaLensSessionRecorder.evidence?.network(safe)
-        // OkHttp interceptors run on OkHttp's dispatcher thread; confine the state mutation to main
-        // so the read-compute-write in recomputeAnalysis can't race with another concurrent call.
         val epoch = captureEpoch
-        mainHandler.post {
-            if (!configState.value.enabled || epoch != captureEpoch) return@post
-            uiStateMutable.update { old ->
-                // 250: heavy apps fire 8+ calls per screen; 50 rolled over within a couple of screens.
-                old.copy(networkEvents = (old.networkEvents + safe).takeLast(250), networkAvailable = true,
-                    networkSources = old.networkSources.ifEmpty { setOf("Manual") })
-            }
-            markAnalysisDirty()
+        val recording = QaLensSessionRecorder.evidence
+        val safe = runCatching { QaLensNetworkCapture.sanitize(event, configState.value) }.getOrNull() ?: return
+        if (!configState.value.enabled || epoch != captureEpoch) return
+        recording?.network(safe)
+        synchronized(dashboardEvents) {
+            if (!configState.value.enabled || epoch != captureEpoch) return
+            dashboardNetwork.add(safe)
+            scheduleDashboardPublication()
         }
     }
 
-    fun clearNetworkLog() = uiStateMutable.update { it.copy(networkEvents = emptyList()) }
-    fun clearLogs() = uiStateMutable.update { it.copy(events = emptyList()) }
+    fun clearNetworkLog() = onMain {
+        synchronized(dashboardEvents) { dashboardNetwork.clear() }
+        uiStateMutable.update { it.copy(networkEvents = emptyList()) }
+        markAnalysisDirty()
+    }
+    fun clearLogs() = onMain {
+        synchronized(dashboardEvents) { dashboardEvents.clear() }
+        uiStateMutable.update { it.copy(events = emptyList()) }
+    }
+
+    private fun clearPendingEvents() = synchronized(dashboardEvents) {
+        mainHandler.removeCallbacks(publishEvents)
+        eventPublishScheduled.set(false)
+        dashboardEvents.clear()
+        dashboardNetwork.clear()
+    }
+
+    /** Called under the shared queue lock; at most one delayed publication exists. */
+    private fun scheduleDashboardPublication() {
+        if (eventPublishScheduled.compareAndSet(false, true)) mainHandler.postDelayed(publishEvents, 100)
+    }
+
+    private fun publishDashboard() {
+        val (events, network) = synchronized(dashboardEvents) {
+            mainHandler.removeCallbacks(publishEvents)
+            eventPublishScheduled.set(false)
+            dashboardEvents.drain() to dashboardNetwork.drain()
+        }
+        if (!configState.value.enabled || (events.isEmpty() && network.isEmpty())) return
+        uiStateMutable.update { old -> old.copy(
+            events = if (events.isEmpty()) old.events else
+                DashboardEventBuffer.append(old.events, events, configState.value.maxEventHistory),
+            networkEvents = if (network.isEmpty()) old.networkEvents else (old.networkEvents + network).takeLast(250),
+            networkAvailable = old.networkAvailable || network.isNotEmpty(),
+            networkSources = if (network.isNotEmpty()) old.networkSources.ifEmpty { setOf("Manual") }
+                else old.networkSources
+        ) }
+        if (network.isNotEmpty()) markAnalysisDirty()
+    }
     fun resetRecomposeCounters() {
         recomposeBuffer.clear()
         uiStateMutable.update { it.copy(recomposeCounts = emptyMap()) }
@@ -731,7 +771,10 @@ object QaLens {
 
     fun snapshot(): InspectionSnapshot {
         val state = uiStateMutable.value
-        return InspectionSnapshot(
+        return snapshotOf(state)
+    }
+
+    private fun snapshotOf(state: QaLensUiState): InspectionSnapshot = InspectionSnapshot(
             screen = state.screen,
             device = state.device,
             nodes = state.nodes,
@@ -740,12 +783,13 @@ object QaLens {
             events = state.events,
             selectedNode = state.selectedNode
         )
-    }
 
     /** Records the outcome of the most recent screenshot capture for evidence completeness. */
     internal fun recordScreenshot(path: String?, available: Boolean, note: String? = null) {
         lastScreenshot = EvidenceAttachment("annotated_screenshot", path, available, note)
     }
+
+    internal fun evidenceAttachments(): List<EvidenceAttachment> = listOfNotNull(lastScreenshot)
 
     /** Assemble the full in-memory evidence bundle from everything observed so far. */
     fun evidenceBundle(attachments: List<EvidenceAttachment> = emptyList()): EvidenceBundle {
@@ -754,7 +798,7 @@ object QaLens {
         val cfg = configState.value
         val allAttachments = if (attachments.isNotEmpty()) attachments else listOfNotNull(lastScreenshot)
         return EvidenceBuilder.build(
-            snapshot = snapshot(),
+            snapshot = snapshotOf(s),
             network = s.networkEvents,
             config = cfg,
             featureFlags = s.featureFlags,
@@ -898,8 +942,9 @@ object QaLens {
      * on a background thread, blocks until the main-thread recompute completes (bounded).
      */
     private fun flushAnalysis() {
-        if (!analysisDirty.get() && analysisPending == null) return
+        if (!analysisDirty.get() && analysisPending == null && !eventPublishScheduled.get()) return
         if (Looper.myLooper() == Looper.getMainLooper()) {
+            publishDashboard()
             analysisPending?.let { mainHandler.removeCallbacks(it) }
             analysisPending = null
             if (analysisDirty.compareAndSet(true, false)) runAnalysis()
@@ -907,6 +952,7 @@ object QaLens {
             // Post and await so a report built on a background thread sees the fresh state.
             val latch = CountDownLatch(1)
             mainHandler.post {
+                publishDashboard()
                 analysisPending?.let { mainHandler.removeCallbacks(it) }
                 analysisPending = null
                 if (analysisDirty.compareAndSet(true, false)) runAnalysis()
@@ -960,23 +1006,17 @@ object QaLens {
     }
 
     private fun pushEvent(event: QaEvent) {
+        val epoch = captureEpoch
+        val recording = QaLensSessionRecorder.evidence
         val config = configState.value
         if (!config.enabled) return
         val safe = event.copy(message = config.redact(event.message), tag = event.tag?.let(config::redact))
-        QaLensSessionRecorder.evidence?.event(safe)
-        // Confine to main so events appended from coroutines/IO threads can't race the analysis read.
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            uiStateMutable.update { old ->
-                old.copy(events = (old.events + safe).takeLast(config.maxEventHistory))
-            }
-        } else {
-            val epoch = captureEpoch
-            mainHandler.post {
-                if (!configState.value.enabled || epoch != captureEpoch) return@post
-                uiStateMutable.update { old ->
-                    old.copy(events = (old.events + safe).takeLast(config.maxEventHistory))
-                }
-            }
+        if (!configState.value.enabled || epoch != captureEpoch) return
+        recording?.event(safe)
+        synchronized(dashboardEvents) {
+            if (!configState.value.enabled || epoch != captureEpoch) return
+            dashboardEvents.add(safe, config.maxEventHistory)
+            scheduleDashboardPublication()
         }
     }
 

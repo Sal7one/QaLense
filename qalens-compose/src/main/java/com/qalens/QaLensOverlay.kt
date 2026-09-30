@@ -111,7 +111,7 @@ internal fun QaLensOverlay() {
                 inspectMode = state.isInspectMode,
                 warningCount = state.warnings.size,
                 colors = colors,
-                onTap = { QaLens.togglePanel(); QaLens.refreshInspection(view.rootView) },
+                onTap = { QaLens.togglePanel() },
                 onLongPress = { QaLens.toggleInspectMode(); QaLens.refreshInspection(view.rootView) }
             )
         }

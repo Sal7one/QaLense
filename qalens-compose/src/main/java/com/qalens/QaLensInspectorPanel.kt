@@ -11,6 +11,8 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -368,7 +370,7 @@ internal fun QaLensInspectorPanel(
                     InspectorTab.ACCESS        -> ScrollContent { WarningsTab(state) }
                     InspectorTab.TAGS          -> ScrollContent { TestTagsTab(state, context) }
                     InspectorTab.DEVICE        -> ScrollContent { DeviceTab(state) }
-                    InspectorTab.LOGS          -> ScrollContent { LogsTab(state, context) }
+                    InspectorTab.LOGS          -> LogsTab(state, context)
                     InspectorTab.NETWORK       -> NetworkTab(state)
                     InspectorTab.TOOLS         -> ScrollContent { ToolsTab(state, context) }
                 }
@@ -726,29 +728,18 @@ private fun DeviceTab(state: QaLensUiState) {
 
 @Composable
 private fun LogsTab(state: QaLensUiState, context: Context) {
+    val copyAsync = backgroundCopier(context)
     // Built for log-heavy apps (8+ network calls per screen, chatty Timber): text filter,
     // level chips, and consecutive-duplicate collapsing so spam compresses to "message ×N".
     var filter by remember { mutableStateOf("") }
     var level by remember { mutableStateOf<QaEventType?>(null) }   // null = all
 
-    val filtered = state.events.asReversed().filter { e ->
-        (level == null || e.type == level) &&
-            (filter.isBlank() ||
-                e.message.contains(filter, ignoreCase = true) ||
-                e.tag?.contains(filter, ignoreCase = true) == true)
-    }
-    val grouped = mutableListOf<Pair<QaEvent, Int>>()
-    filtered.forEach { e ->
-        val last = grouped.lastOrNull()
-        if (last != null && last.first.message == e.message &&
-            last.first.type == e.type && last.first.tag == e.tag) {
-            grouped[grouped.size - 1] = last.first to (last.second + 1)
-        } else {
-            grouped += e to 1
-        }
-    }
+    val result by backgroundPanelState(PanelLogInput(state.events, level, filter), PanelLogRows.EMPTY,
+        PanelLogRows::build)
+    val filtered = result.events
+    val grouped = result.rows
 
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         // Filter field
         Box(
             Modifier.fillMaxWidth()
@@ -784,32 +775,36 @@ private fun LogsTab(state: QaLensUiState, context: Context) {
         ) {
             Text("${grouped.size} rows · ${state.events.size} events kept", color = PanelMuted, fontSize = 10.sp)
             PanelButton("Copy") {
-                copy(context, "QaLens Logs", filtered.asReversed().joinToString("\n") {
+                copyAsync("QaLens Logs") { filtered.asReversed().joinToString("\n") {
                     "${it.timestampMillis} [${it.type}] ${it.tag.orEmpty()} ${it.message}"
-                })
+                } }
             }
         }
 
         if (grouped.isEmpty()) Text("No matching log entries.", color = PanelMuted, fontSize = 11.sp)
-        grouped.take(250).forEach { (event, count) ->
-            val color = when (event.type) {
-                QaEventType.EVENT      -> PanelAccent
-                QaEventType.BREADCRUMB -> PanelWarn
-                else                   -> PanelMuted
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                Text(
-                    "[${event.type}] ${event.tag.orEmpty().let { if (it.isNotBlank()) "$it · " else "" }}${event.message}",
-                    color = color, fontSize = 11.sp, modifier = Modifier.weight(1f)
-                )
-                if (count > 1) {
+        Text("Live dashboard window · recordings retain separate evidence", color = PanelMuted, fontSize = 10.sp)
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(grouped) { (event, count) ->
+                val color = when (event.type) {
+                    QaEventType.EVENT      -> PanelAccent
+                    QaEventType.BREADCRUMB -> PanelWarn
+                    else                   -> PanelMuted
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                     Text(
-                        "×$count", color = PanelWarn, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .padding(start = 4.dp)
-                            .background(PanelWarn.copy(alpha = 0.15f), MaterialTheme.shapes.extraSmall)
-                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                        "[${event.type}] ${event.tag.orEmpty().let { if (it.isNotBlank()) "$it · " else "" }}${event.message.take(2_000)}",
+                        color = color, fontSize = 11.sp, modifier = Modifier.weight(1f),
+                        maxLines = 8, overflow = TextOverflow.Ellipsis
                     )
+                    if (count > 1) {
+                        Text(
+                            "×$count", color = PanelWarn, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .padding(start = 4.dp)
+                                .background(PanelWarn.copy(alpha = 0.15f), MaterialTheme.shapes.extraSmall)
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
                 }
             }
         }
@@ -899,9 +894,9 @@ private fun NetworkTab(state: QaLensUiState) {
             }
             Spacer(Modifier.height(8.dp))
 
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                events.forEach { event -> NetworkEventRow(event) }
-                Spacer(Modifier.height(16.dp))
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                items(events) { event -> NetworkEventRow(event) }
+                item { Spacer(Modifier.height(16.dp)) }
             }
         }
     }
@@ -943,9 +938,9 @@ private fun NetworkEventRow(event: NetworkEvent) {
                 buildString {
                     append(event.latencyLabel)
                     if (event.responseBodyBytes > 0) append(" · ${event.responseBodyBytes / 1024}kb")
-                    event.error?.let { append(" · $it") }
+                    event.error?.let { append(" · ${it.take(2_000)}") }
                 },
-                color = PanelMuted, fontSize = 10.sp
+                color = PanelMuted, fontSize = 10.sp, maxLines = 6, overflow = TextOverflow.Ellipsis
             )
         }
         Spacer(Modifier.width(6.dp))
@@ -960,6 +955,7 @@ private fun NetworkEventRow(event: NetworkEvent) {
 
 @Composable
 private fun ToolsTab(state: QaLensUiState, context: Context) {
+    val copyAsync = backgroundCopier(context)
     var deepLink by remember { mutableStateOf("") }
     var bookmarkText by remember { mutableStateOf("") }
     var bookmarkSeverity by remember { mutableStateOf(BookmarkSeverity.INFO) }
@@ -1064,8 +1060,8 @@ private fun ToolsTab(state: QaLensUiState, context: Context) {
         Text("Quick Actions", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         PanelButton("🛠  Open Control Room", tint = PanelAccent) { openControlRoom(context) }
         PanelButton("📷  Share Screenshot") { QaLens.takeScreenshot() }
-        PanelButton("Copy Jira Bug") { copy(context, "QaLens Jira Bug", QaLens.buildJiraReport()) }
-        PanelButton("Copy Full QA Report") { copy(context, "QaLens Full Report", QaLens.buildFullReport()) }
+        PanelButton("Copy Jira Bug") { copyAsync("QaLens Jira Bug") { QaLens.buildJiraReport() } }
+        PanelButton("Copy Full QA Report") { copyAsync("QaLens Full Report") { QaLens.buildFullReport() } }
 
         HorizontalDivider(color = PanelLine)
 
@@ -1238,6 +1234,7 @@ internal fun QaLensWatchHud(
 
 @Composable
 private fun OverviewTab(state: QaLensUiState, context: Context, onNavigateTab: (InspectorTab) -> Unit) {
+    val copyAsync = backgroundCopier(context)
     val config by QaLens.config.collectAsState()
     val score = state.score
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1294,8 +1291,8 @@ private fun OverviewTab(state: QaLensUiState, context: Context, onNavigateTab: (
                 color = PanelError, fontSize = 12.sp, maxLines = 3)
             PanelButton("Copy crash with evidence", tint = PanelError) {
                 val config = QaLens.config.value
-                copy(context, "QaLens Crash", config.redact(
-                    "${crash.type.display}: ${crash.throwable}\n${crash.stackTrace}\n\n${QaLens.buildFullReport()}"))
+                copyAsync("QaLens Crash") { config.redact(
+                    "${crash.type.display}: ${crash.throwable}\n${crash.stackTrace}\n\n${QaLens.buildFullReport()}") }
             }
         }
 
@@ -1325,8 +1322,8 @@ private fun OverviewTab(state: QaLensUiState, context: Context, onNavigateTab: (
             PanelButton("●  Record Session (.sal)", tint = PanelGreen) { QaLens.startRecording() }
         }
         PanelButton("📷  Capture Evidence", tint = PanelAccent) { QaLens.takeScreenshot() }
-        PanelButton("Copy Jira Bug") { copy(context, "QaLens Jira Bug", QaLens.buildJiraReport()) }
-        PanelButton("Copy Repro Steps") { copy(context, "QaLens Repro Steps", QaLens.buildReproSteps()) }
+        PanelButton("Copy Jira Bug") { copyAsync("QaLens Jira Bug") { QaLens.buildJiraReport() } }
+        PanelButton("Copy Repro Steps") { copyAsync("QaLens Repro Steps") { QaLens.buildReproSteps() } }
         PanelButton("Open Screen Health →") { onNavigateTab(InspectorTab.SCREEN_HEALTH) }
         PanelButton("🛠  Open Control Room") { openControlRoom(context) }
     }
@@ -1336,13 +1333,19 @@ private fun OverviewTab(state: QaLensUiState, context: Context, onNavigateTab: (
 
 @Composable
 private fun BugBundleTab(state: QaLensUiState, context: Context) {
+    val copyAsync = backgroundCopier(context)
+    val bundle by panelEvidence(state)
+    val evidence = bundle
+    if (evidence == null) {
+        Text("Preparing evidence…", color = PanelMuted, fontSize = 12.sp)
+        return
+    }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("One-tap evidence bundle for the current screen. Nothing is uploaded — exports go to your clipboard or the share sheet.",
             color = PanelMuted, fontSize = 11.sp)
 
         // Completeness
-        val bundle = remember(state) { QaLens.evidenceBundle() }
-        val c = bundle.completeness
+        val c = evidence.completeness
         Column(
             Modifier.fillMaxWidth()
                 .background(Color.White.copy(alpha = 0.05f), MaterialTheme.shapes.small)
@@ -1356,7 +1359,7 @@ private fun BugBundleTab(state: QaLensUiState, context: Context) {
                 Spacer(Modifier.height(4.dp))
                 c.missing.forEach { Text("• missing $it", color = PanelMuted, fontSize = 11.sp) }
             }
-            if (!bundle.networkAvailable) {
+            if (!evidence.networkAvailable) {
                 Text("⚠ Network capture unavailable — add QaLensOkHttpInterceptor.", color = PanelWarn, fontSize = 11.sp)
             }
         }
@@ -1367,21 +1370,21 @@ private fun BugBundleTab(state: QaLensUiState, context: Context) {
                 .background(Color.White.copy(alpha = 0.05f), MaterialTheme.shapes.small)
                 .padding(10.dp)
         ) {
-            Text("Likely Owner: ${bundle.classification.category.display} (${bundle.classification.confidence})",
+            Text("Likely Owner: ${evidence.classification.category.display} (${evidence.classification.confidence})",
                 color = PanelAccent, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-            bundle.classification.reasons.forEach { Text("• $it", color = PanelText, fontSize = 11.sp) }
+            evidence.classification.reasons.forEach { Text("• $it", color = PanelText, fontSize = 11.sp) }
         }
 
         HorizontalDivider(color = PanelLine)
         Text("Export", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
         PanelButton("📷  Share Annotated Screenshot", tint = PanelAccent) { QaLens.takeScreenshot() }
-        PanelButton("Copy Jira Bug") { copy(context, "QaLens Jira Bug", QaLens.buildJiraReport()) }
-        PanelButton("Copy Slack Summary") { copy(context, "QaLens Slack Summary", QaLens.buildSlackSummary()) }
-        PanelButton("Copy GitHub Issue") { copy(context, "QaLens GitHub Issue", QaLens.buildGitHubIssue()) }
-        PanelButton("Copy Linear Issue") { copy(context, "QaLens Linear Issue", QaLens.buildLinearIssue()) }
-        PanelButton("Copy Markdown Report") { copy(context, "QaLens Markdown", QaLens.buildMarkdownReport()) }
-        PanelButton("Copy Repro Steps") { copy(context, "QaLens Repro Steps", QaLens.buildReproSteps()) }
-        PanelButton("Copy Full QA Report") { copy(context, "QaLens Full Report", QaLens.buildFullReport()) }
+        PanelButton("Copy Jira Bug") { copyAsync("QaLens Jira Bug") { QaLens.buildJiraReport() } }
+        PanelButton("Copy Slack Summary") { copyAsync("QaLens Slack Summary") { QaLens.buildSlackSummary() } }
+        PanelButton("Copy GitHub Issue") { copyAsync("QaLens GitHub Issue") { QaLens.buildGitHubIssue() } }
+        PanelButton("Copy Linear Issue") { copyAsync("QaLens Linear Issue") { QaLens.buildLinearIssue() } }
+        PanelButton("Copy Markdown Report") { copyAsync("QaLens Markdown") { QaLens.buildMarkdownReport() } }
+        PanelButton("Copy Repro Steps") { copyAsync("QaLens Repro Steps") { QaLens.buildReproSteps() } }
+        PanelButton("Copy Full QA Report") { copyAsync("QaLens Full Report") { QaLens.buildFullReport() } }
     }
 }
 
@@ -1389,38 +1392,52 @@ private fun BugBundleTab(state: QaLensUiState, context: Context) {
 
 @Composable
 private fun ReproTab(state: QaLensUiState, context: Context) {
-    val bundle = remember(state) { QaLens.evidenceBundle() }
+    val copyAsync = backgroundCopier(context)
+    val bundle by panelEvidence(state)
+    val evidence = bundle
+    if (evidence == null) {
+        Text("Preparing timeline…", color = PanelMuted, fontSize = 12.sp)
+        return
+    }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
-            Text("Timeline (${bundle.timeline.size})", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            Text("Timeline (${evidence.timeline.size})", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
             Text("Copy Steps", color = PanelAccent, fontSize = 11.sp,
-                modifier = Modifier.clickable { copy(context, "QaLens Repro Steps", QaLens.buildReproSteps()) }.padding(4.dp))
+                modifier = Modifier.clickable { copyAsync("QaLens Repro Steps") { QaLens.buildReproSteps() } }.padding(4.dp))
         }
         Spacer(Modifier.height(6.dp))
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-            if (bundle.timeline.isEmpty()) {
-                Text("No timeline events yet. Navigate, trigger network calls, or call QaLens.event() — then reopen.",
-                    color = PanelMuted, fontSize = 11.sp)
-            } else {
-                bundle.timeline.forEach { e -> TimelineRow(e) }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+            if (evidence.timeline.isEmpty()) {
+                item {
+                    Text("No timeline events yet. Navigate, trigger network calls, or call QaLens.event().",
+                        color = PanelMuted, fontSize = 11.sp)
+                }
             }
-
-            Spacer(Modifier.height(12.dp))
-            HorizontalDivider(color = PanelLine)
-            Spacer(Modifier.height(8.dp))
-
-            Text("Generated Steps", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-            Spacer(Modifier.height(4.dp))
-            bundle.repro.steps.forEach { Text(it, color = PanelText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 1.dp)) }
-            Spacer(Modifier.height(8.dp))
-            Text("Expected", color = PanelMuted, fontSize = 11.sp)
-            Text(bundle.repro.expected, color = PanelGreen, fontSize = 12.sp)
-            Spacer(Modifier.height(4.dp))
-            Text("Actual", color = PanelMuted, fontSize = 11.sp)
-            Text(bundle.repro.actual, color = PanelError, fontSize = 12.sp)
-            Spacer(Modifier.height(16.dp))
+            // Rows are composed only when visible; the evidence retains the complete timeline.
+            items(evidence.timeline) { e -> TimelineRow(e) }
+            item {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = PanelLine)
+                Spacer(Modifier.height(8.dp))
+                Text("Generated Steps", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Spacer(Modifier.height(4.dp))
+                evidence.repro.steps.forEach {
+                    Text(it.take(2_000), color = PanelText, fontSize = 12.sp,
+                        maxLines = 8, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(vertical = 1.dp))
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Expected", color = PanelMuted, fontSize = 11.sp)
+                Text(evidence.repro.expected.take(2_000), color = PanelGreen, fontSize = 12.sp,
+                    maxLines = 8, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(4.dp))
+                Text("Actual", color = PanelMuted, fontSize = 11.sp)
+                Text(evidence.repro.actual.take(2_000), color = PanelError, fontSize = 12.sp,
+                    maxLines = 8, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(16.dp))
+            }
         }
     }
 }
@@ -1438,9 +1455,11 @@ private fun TimelineRow(event: TimelineEvent) {
         Text(formatClock(event.timestampMillis), color = PanelMuted, fontSize = 10.sp,
             modifier = Modifier.width(56.dp))
         Column(Modifier.weight(1f)) {
-            Text(event.title, color = color, fontSize = 11.sp,
+            Text(event.title.take(2_000), color = color, fontSize = 11.sp,
+                maxLines = 8, overflow = TextOverflow.Ellipsis,
                 fontWeight = if (event.isError) FontWeight.SemiBold else FontWeight.Normal)
-            event.detail?.let { Text(it, color = PanelMuted, fontSize = 10.sp) }
+            event.detail?.let { Text(it.take(2_000), color = PanelMuted, fontSize = 10.sp,
+                maxLines = 6, overflow = TextOverflow.Ellipsis) }
         }
     }
 }
@@ -1449,6 +1468,7 @@ private fun TimelineRow(event: TimelineEvent) {
 
 @Composable
 private fun ScreenHealthTab(state: QaLensUiState, context: Context) {
+    val copyAsync = backgroundCopier(context)
     val screens = state.screenQuality.values.sortedBy { it.latestScore }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Current-screen contract (only when the app registered one for this screen)
@@ -1483,7 +1503,7 @@ private fun ScreenHealthTab(state: QaLensUiState, context: Context) {
             verticalAlignment = Alignment.CenterVertically) {
             Text("Visited Screens (${screens.size})", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
             Text("Copy Summary", color = PanelAccent, fontSize = 11.sp,
-                modifier = Modifier.clickable { copy(context, "QaLens Session Summary", QaLens.buildSessionSummary()) }.padding(4.dp))
+                modifier = Modifier.clickable { copyAsync("QaLens Session Summary") { QaLens.buildSessionSummary() } }.padding(4.dp))
         }
         if (screens.isEmpty()) {
             Text("Navigate around the app (with QaLensNavHost) to build the session quality map.",
@@ -1584,6 +1604,9 @@ private enum class SearchGroup(val header: String) {
     COMPONENTS("Components")
 }
 
+private data class SearchInput(val events: List<QaEvent>, val networkEvents: List<NetworkEvent>,
+    val nodes: List<InspectNode>, val query: String)
+
 private data class SearchHit(
     val group: SearchGroup,
     val label: String,
@@ -1600,10 +1623,13 @@ private fun GlobalSearchResults(
     onOpenNetwork: () -> Unit,
     onOpenLogs: () -> Unit
 ) {
-    val hits = remember(state, query) {
+    val hits by backgroundPanelState(
+        SearchInput(state.events, state.networkEvents, state.nodes, query), emptyList<SearchHit>()
+    ) { input ->
+        val query = input.query
         val out = mutableListOf<SearchHit>()
         // Events + logs (both live in state.events; LOG type surfaces under the Logs group).
-        state.events.forEach { e ->
+        input.events.forEach { e ->
             if (e.message.contains(query, ignoreCase = true) ||
                 (e.tag?.contains(query, ignoreCase = true) == true)) {
                 out.add(SearchHit(
@@ -1614,7 +1640,7 @@ private fun GlobalSearchResults(
             }
         }
         // Network: url / method / error / status.
-        state.networkEvents.forEach { ne ->
+        input.networkEvents.forEach { ne ->
             if (ne.url.contains(query, ignoreCase = true) ||
                 ne.method.contains(query, ignoreCase = true) ||
                 (ne.error?.contains(query, ignoreCase = true) == true) ||
@@ -1631,7 +1657,7 @@ private fun GlobalSearchResults(
             }
         }
         // Components: qaName / testTag / text / contentDescription.
-        state.nodes.forEach { node ->
+        input.nodes.forEach { node ->
             if (node.qaName?.contains(query, ignoreCase = true) == true ||
                 node.testTag?.contains(query, ignoreCase = true) == true ||
                 node.text.any { it.contains(query, ignoreCase = true) } ||
@@ -1647,20 +1673,24 @@ private fun GlobalSearchResults(
         out
     }
 
-    ScrollContent {
+    LazyColumn(Modifier.fillMaxSize()) {
         if (hits.isEmpty()) {
-            Text("No matches for \"$query\"", color = PanelMuted, fontSize = 12.sp,
+            item {
+                Text("No matches for \"$query\"", color = PanelMuted, fontSize = 12.sp,
                 modifier = Modifier.padding(16.dp))
+            }
         } else {
-            Text("${hits.size} result${if (hits.size != 1) "s" else ""} across all tracks",
+            item {
+                Text("${hits.size} result${if (hits.size != 1) "s" else ""} across all tracks",
                 color = PanelMuted, fontSize = 11.sp,
                 modifier = Modifier.padding(bottom = 6.dp))
+            }
             SearchGroup.entries.forEach { group ->
                 val grouped = hits.filter { it.group == group }
                 if (grouped.isNotEmpty()) {
-                    Text(group.header, color = PanelText, fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-                    grouped.forEach { hit -> SearchHitRow(hit, onOpenNode, onOpenNetwork, onOpenLogs) }
+                    item { Text(group.header, color = PanelText, fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) }
+                    items(grouped) { hit -> SearchHitRow(hit, onOpenNode, onOpenNetwork, onOpenLogs) }
                 }
             }
         }

@@ -1,8 +1,8 @@
 # QaLens: start here
 
-Updated 2026-09-24. This is the authoritative handover for a contributor or AI with no prior
+Updated 2026-10-01. This is the authoritative handover for a contributor or AI with no prior
 conversation context. It covers the tester flow, local backend, Compose inspection and data hooks
-through `a16ca21`. Check `git status` and `git log` on arrival because code and publication state
+through `a16ca21`, plus the continuous-log responsiveness fixes below. Check `git status` and `git log` because code and publication state
 may have changed. Historical claims in CHANGELOG are not a current verification matrix.
 
 ## Product and user priorities
@@ -179,6 +179,31 @@ verification after the tester-sheet and backend changes.
   `OK:` with real Room and Preferences DataStore writes/unsubscribe, plus a recorded preference
   snapshot update in `state.json` and change count in `analysis.json`. Physical-device and broader
   library-version compatibility remain open.
+
+## Continuous-log responsiveness — 2026-10-01
+
+The user reported ANRs in a consuming app when opening the overlay and Repro while logs/network
+traffic kept arriving. No original ANR trace was available. Source review found synchronous evidence
+construction in composition, eager timeline/log/network rows and one main-thread post per background
+observation. Dashboard log/network publication now uses bounded queues and one 100 ms batch;
+evidence/filter/search work runs in the background with conflated inputs, and large tracks render
+lazily. Report copies format off main. Bubble taps no longer force a second semantics scan, screen
+warning lookup is indexed by node, and reproduction steps avoid allocating an unlimited intermediate
+list. See [integration.md](integration.md) for limits and synchronous API boundaries.
+
+- Final checks: 168 core, 30 Compose and 2 no-op unit tests passed without failures/skips. Compose,
+  Android and sample debug lint passed with zero errors, 26 warnings and 2 informational findings
+  across those modules; remaining warnings concern dependency freshness and existing platform/UI work.
+- Sample debug/release and instrumentation APKs, sample release isolation, and independent-consumer
+  debug/release/isolation checks passed with the documented JDK 17/Gradle 9.1.0 toolchain.
+- The full runner returned `OK:` on a disposable API 36 emulator, preserving 600-request/log
+  recording retention, privacy, disable/resume, real Room/DataStore, Chucker, replay and uploads.
+  Its new load case emitted a 12,000-line burst followed by 4,409 continuous background logs,
+  periodic 100-line main-thread bursts and network events while switching Repro/Network/Logs.
+  The worst measured main-thread heartbeat delay was 46 ms. It also checked immediate exports
+  flush pending observations. This is synthetic coverage; retest the reported host app.
+- Initial input redaction and host snapshot providers retain their caller/main-thread contracts;
+  custom regexes, huge individual messages and blocking providers can still be expensive.
 
 ## What changed recently
 

@@ -37,11 +37,22 @@ import java.util.zip.ZipFile
  * Exercises the real SDK observation hooks, UI clearing, async writer and Android ZIP producer.
  */
 class RecordingRetentionInstrumentation : Instrumentation() {
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    private var overlayLoadOnly = false
+    override fun onCreate(arguments: Bundle?) {
+        overlayLoadOnly = arguments?.getString("overlayLoadOnly") == "true"
+        super.onCreate(arguments)
+        start()
+    }
 
     override fun onStart() {
         val result = Bundle()
         try {
+            if (overlayLoadOnly) {
+                verifyContinuousOverlayLoad()
+                result.putString("stream", "\nOK: Overlay/Repro/Logs/Network remain responsive under continuous log and network load.\n")
+                finish(android.app.Activity.RESULT_OK, result)
+                return
+            }
             val retained = record("retention", 600, null, clearUi = true)
             ZipFile(retained).use { zip ->
                 val requests = JSONArray(read(zip, "network.json"))
@@ -59,6 +70,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             verifyRealDataStoreIntegration()
             verifyClientSafety()
             verifyComposeInspection()
+            verifyContinuousOverlayLoad()
             val limited = record("budget", 100, "x".repeat(100_000), clearUi = false)
             ZipFile(limited).use { zip ->
                 val coverage = coverage(zip)
@@ -283,14 +295,18 @@ class RecordingRetentionInstrumentation : Instrumentation() {
                 check(it.code == 201 && it.body?.string() == payload) { "Inspector altered the response" }
             }
             worker.get(5, java.util.concurrent.TimeUnit.SECONDS)
-            waitForIdleSync()
+            waitUntil("Chucker request was not published") {
+                QaLens.state.value.networkEvents.any { it.url.contains("/oss-check") }
+            }
             val events = QaLens.state.value.networkEvents.filter { it.url.contains("/oss-check") }
             check(events.size == 1 && events.single().status == 201) { "Chucker coexistence lost or duplicated the request" }
             check(!events.single().url.contains("fixture-secret") && events.single().responseBodyPreview == null)
         }
         val sink = QaLens.networkSink("Test transport")
         sink.record(NetworkEvent(method = "GET", url = "https://example.test/adapter", error = "person@example.test"))
-        waitForIdleSync()
+        waitUntil("Adapter request was not published") {
+            QaLens.state.value.networkEvents.lastOrNull()?.url?.contains("/adapter") == true
+        }
         check(QaLens.state.value.networkEvents.last().error == "[EMAIL_REDACTED]")
         val count = QaLens.state.value.networkEvents.size
         runOnMainSync { QaLens.configure { captureNetwork = false } }
@@ -316,6 +332,123 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         val deadline = System.currentTimeMillis() + 30_000
         while (!check() && System.currentTimeMillis() < deadline) Thread.sleep(100)
         check(check()) { message }
+    }
+
+    /** Exercise actual panel composition while producers never become idle. */
+    private fun verifyContinuousOverlayLoad() {
+        startActivitySync(Intent(targetContext, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        waitForIdleSync()
+        val originalLimit = QaLens.config.value.maxEventHistory
+        val originalPanel = QaLens.state.value.minimalPanel
+        val running = java.util.concurrent.atomic.AtomicBoolean(true)
+        val produced = java.util.concurrent.atomic.AtomicInteger()
+        var worstHeartbeatMs = 0L
+        fun heartbeat() {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            val start = android.os.SystemClock.elapsedRealtime()
+            android.os.Handler(android.os.Looper.getMainLooper()).post { latch.countDown() }
+            check(latch.await(2500, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                "Main thread stalled under continuous capture"
+            }
+            worstHeartbeatMs = maxOf(worstHeartbeatMs, android.os.SystemClock.elapsedRealtime() - start)
+        }
+        // Compose virtual nodes support traversal; framework find-by-text is not reliable here.
+        fun visibleText(text: String, exact: Boolean = true): android.view.accessibility.AccessibilityNodeInfo? {
+            fun find(node: android.view.accessibility.AccessibilityNodeInfo): android.view.accessibility.AccessibilityNodeInfo? {
+                val label = node.text?.toString()?.trim().orEmpty()
+                if (node.isVisibleToUser && (if (exact) label == text else label.contains(text))) return node
+                repeat(node.childCount) { index -> node.getChild(index)?.let { find(it)?.let { found -> return found } } }
+                return null
+            }
+            return uiAutomation.rootInActiveWindow?.let(::find)
+        }
+        fun openTab(label: String, heading: String) {
+            val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
+            var target = visibleText(label)
+            while (target == null && android.os.SystemClock.elapsedRealtime() < deadline) {
+                // The tab strip is horizontal and some tabs begin outside the viewport.
+                fun scroll(node: android.view.accessibility.AccessibilityNodeInfo): Boolean {
+                    if (node.isScrollable && node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true
+                    repeat(node.childCount) { index -> node.getChild(index)?.let { if (scroll(it)) return true } }
+                    return false
+                }
+                uiAutomation.rootInActiveWindow?.let(::scroll)
+                heartbeat()
+                Thread.sleep(100)
+                target = visibleText(label)
+            }
+            var clickable = checkNotNull(target) {
+                val labels = mutableListOf<String>()
+                fun collect(node: android.view.accessibility.AccessibilityNodeInfo) {
+                    node.text?.let { labels += it.toString().take(100) }
+                    repeat(node.childCount) { index -> node.getChild(index)?.let(::collect) }
+                }
+                uiAutomation.rootInActiveWindow?.let(::collect)
+                "Panel tab $label was not reachable (open=${QaLens.state.value.isPanelOpen}, " +
+                    "minimal=${QaLens.state.value.minimalPanel}, overlay=${QaLens.state.value.overlayEnabled}): ${labels.take(30)}"
+            }
+            while (!clickable.isClickable && clickable.parent != null) clickable = clickable.parent
+            check(clickable.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
+            waitUntil("$label did not produce content while logs kept arriving") {
+                heartbeat()
+                visibleText(heading, exact = false) != null
+            }
+            repeat(10) { heartbeat(); Thread.sleep(100) }
+        }
+        val producer = Thread({
+            while (running.get()) {
+                val n = produced.incrementAndGet()
+                QaLens.log("continuous-overlay-$n " + "payload ".repeat(20))
+                if (n % 5 == 0) QaLens.logNetwork(NetworkEvent(method = "GET",
+                    url = "https://overlay.test/$n", status = if (n % 50 == 0) 500 else 200))
+                if (n % 100 == 0) android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (running.get()) repeat(100) { QaLens.log("main-thread-log-$n-$it " + "payload ".repeat(20)) }
+                }
+                Thread.sleep(1)
+            }
+        }, "qalens-continuous-fixture")
+        try {
+            runOnMainSync {
+                QaLens.configure { maxEventHistory = 20_000 }
+                QaLens.clearLogs()
+                QaLens.clearNetworkLog()
+                QaLens.setPanelMinimal(false)
+            }
+            repeat(12_000) { QaLens.log("overlay-flood-$it " + "payload ".repeat(20)) }
+            waitUntil("Flood history did not publish") { QaLens.state.value.events.size > 1000 }
+            producer.start()
+            heartbeat()
+            runOnMainSync { QaLens.openPanel() }
+            Thread.sleep(300)
+            openTab("Repro", "Timeline (")
+            openTab("Network", "requests")
+            openTab("Logs", "events kept")
+            check(produced.get() > 100) { "Load stopped before the tabs were exercised" }
+            check(QaLens.state.value.events.size <= 10_000)
+            check(QaLens.state.value.events.sumOf { it.message.length + (it.tag?.length ?: 0) } <= 1_048_576)
+            check(QaLens.state.value.networkEvents.size <= 250)
+            android.util.Log.i("QaLensLoadTest", "produced=${produced.get()} worstMainHeartbeatMs=$worstHeartbeatMs")
+        } finally {
+            running.set(false)
+            producer.join(5000)
+            runOnMainSync {
+                QaLens.closePanel()
+                QaLens.setPanelMinimal(originalPanel)
+                QaLens.configure { maxEventHistory = originalLimit }
+                QaLens.clearLogs()
+                QaLens.clearNetworkLog()
+            }
+        }
+        runOnMainSync {
+            QaLens.log("immediate-export-fixture")
+            QaLens.logNetwork(NetworkEvent(method = "GET", url = "https://overlay.test/immediate-export", status = 500))
+            val exported = QaLens.evidenceBundle()
+            check(exported.snapshot.events.any { it.message == "immediate-export-fixture" })
+            check(exported.networkEvents.any { it.url.endsWith("/immediate-export") })
+            QaLens.clearLogs()
+            QaLens.clearNetworkLog()
+        }
     }
 
     private fun verifyClientSafety() {

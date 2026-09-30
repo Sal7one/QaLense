@@ -57,6 +57,7 @@ internal fun QaLensMinimalPanel(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
+    val copyAsync = backgroundCopier(context)
     val colors = qaLensColorsFor(context)
     val macros = remember { QaLensAppSal.recentMacros(context, limit = 5) }
     val uploadStates by QaLensWebhook.states.collectAsState()
@@ -219,7 +220,7 @@ internal fun QaLensMinimalPanel(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(Modifier.weight(1f)) {
                     CompactAction("Copy bug report", "▤", colors.accent, colors) {
-                        copyText(context, "QaLens Bug", QaLens.buildJiraReport())
+                        copyAsync("QaLens Bug") { QaLens.buildJiraReport() }
                         QaLens.log("Bug report copied")
                     }
                 }

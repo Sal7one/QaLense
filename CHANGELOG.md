@@ -2,6 +2,22 @@
 
 ## Unreleased — post-0.9.0
 
+### Overlay responsiveness under continuous logging — 2026-10-01
+- Batch log and network dashboard updates every 100 ms with bounded pending queues, instead of
+  posting a main-thread task and copying history for each observation. Keep recording admission
+  independent; clearing or evicting dashboard rows does not discard recording evidence.
+- Bound dashboard logs to the requested history (20–10,000 entries), 1,048,576 text characters
+  across messages/tags, and 16,384-character previews per field plus a truncation notice. Network
+  dashboard history remains capped at 250 requests. These are text/entry limits, not a heap guarantee.
+- Prepare Repro/Bug Bundle evidence, log filtering/grouping and global search on a background
+  worker. Conflate updates so a stream that never stops cannot starve computation. Render Repro,
+  Logs, Network and search results lazily; bound visible text layout for very long messages.
+- Move overlay report/clipboard formatting off main, cap clipboard output with an explicit notice,
+  remove the redundant semantics scan from the bubble tap, and index screen warnings by node.
+  Preserve synchronous report APIs and flush queued observations when building an export.
+- Add concurrency/queue/evidence regressions and a device load case covering a 12,000-line burst,
+  continuous background and main-thread logs, network events, tab switching and main-thread heartbeats.
+
 ### Data hooks and recording insights — 2026-09-24
 - Refresh registered app-data snapshots when Room invalidates a table or an observed DataStore
   Flow changes, so subsequent recording state samples do not retain stale values. Add explicit
