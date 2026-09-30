@@ -276,7 +276,7 @@
           <div class="card-body">
             <label class="as-field"><span>Panel style</span>
               <select data-as="ui.panelMode">
-                <option value="minimal" ${AS.ui.panelMode === "minimal" ? "selected" : ""}>QA Minimal</option>
+                <option value="minimal" ${AS.ui.panelMode === "minimal" ? "selected" : ""}>Tester quick actions</option>
                 <option value="full" ${AS.ui.panelMode !== "minimal" ? "selected" : ""}>Full developer</option>
               </select></label>
             <label class="as-field"><span>Overlay opacity — <b id="asAlphaVal">${Math.round(AS.ui.overlayAlpha * 100)}%</b></span>
@@ -422,6 +422,7 @@
     saveRecent(session, name, size);
     els.landing.hidden = true;
     els.session.hidden = false;
+    SAL.showRecordingCoverage(session, els.session);
     els.exportBtn.hidden = false;
     els.exportSalBtn.hidden = false;
     els.closeSessionBtn.hidden = false;
@@ -516,6 +517,7 @@
   function renderDiff() {
     if (!S || !S2) return;
     const a = sessionSummary(S), b = sessionSummary(S2);
+    const partialComparison = SAL.recordingCoverage(S).partial || SAL.recordingCoverage(S2).partial;
     const scoreDelta = (b.score ?? 0) - (a.score ?? 0);
     const addedFail = b.failedRequests.filter((f) => !a.failedRequests.includes(f));
     const resolved = a.failedRequests.filter((f) => !b.failedRequests.includes(f));
@@ -525,7 +527,9 @@
     const isRegression = scoreDelta < 0 || addedFail.length > 0 || b.crashCount > a.crashCount;
     const ownerChanged = a.likelyOwner !== b.likelyOwner;
 
-    const regBanner = isRegression
+    const regBanner = partialComparison
+      ? `<div class="diff-banner err">Partial evidence — fixes and regressions cannot be confirmed from this comparison.</div>`
+      : isRegression
       ? `<div class="diff-banner err">⚠ Regression — score ${scoreDelta >= 0 ? "+" : ""}${scoreDelta}, +${addedFail.length} new failures, ${b.crashCount - a.crashCount >= 0 ? "+" : ""}${b.crashCount - a.crashCount} crashes</div>`
       : `<div class="diff-banner ok">✓ No regression — score ${scoreDelta >= 0 ? "+" : ""}${scoreDelta}, ${resolved.length} resolved</div>`;
 
@@ -546,7 +550,7 @@
       lists.push(`<div class="diff-section"><h4>New failures (not in baseline)</h4><ul>${addedFail.map((f) => `<li class="err">${esc(f)}</li>`).join("")}</ul></div>`);
     }
     if (resolved.length) {
-      lists.push(`<div class="diff-section"><h4>Resolved (fixed since baseline)</h4><ul>${resolved.map((f) => `<li class="ok">${esc(f)}</li>`).join("")}</ul></div>`);
+      lists.push(`<div class="diff-section"><h4>${partialComparison ? "Absent from retained evidence (fix unverified)" : "Resolved (fixed since baseline)"}</h4><ul>${resolved.map((f) => `<li class="ok">${esc(f)}</li>`).join("")}</ul></div>`);
     }
     if (addedScreens.length) {
       lists.push(`<div class="diff-section"><h4>New screens</h4><ul>${addedScreens.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>`);
@@ -822,7 +826,9 @@
     if (heavy) {
       renderState();
       highlightFilmstrip();
-      if (prefs.follow && activeTrack !== "report" && activeTrack !== "aibrief") renderTrack();
+      // BUGFIX: while the compare/diff view is open, the track list is the diff — playback
+      // must not rebuild it with track rows (which used to silently destroy the diff).
+      if (prefs.follow && activeTrack !== "report" && activeTrack !== "aibrief" && !S2) renderTrack();
     }
   }
 
@@ -1031,9 +1037,10 @@
     let items;
     if (track === "timeline") {
       const markItems = (S.marks || []).concat(S._localMarks || []).map((m) => ({
-        ts: m.ts, isError: false, main: "★ " + (m.label || "bookmark"), sub: m.severity || "",
+        ts: m.ts, isError: false, main: "★ " + (m.label || "bookmark"),
+        sub: (m.local ? "" : "from the recording · ") + (m.severity || "info"),
         tag: "bookmark", text: ("★ " + (m.label || "") + " " + (m.severity || "")).toLowerCase(),
-        _bookmark: true, _severity: m.severity,
+        _bookmark: true, _severity: m.severity || "info", _markId: m.id || null, _local: !!m.local,
       }));
       items = S.timeline.map((e) => ({
         ts: e.ts, isError: !!e.isError, main: e.title || "", sub: e.detail || "", tag: e.kind || "",
@@ -1102,14 +1109,19 @@
     const html = visible.map((i, idx) => {
       const cur = idx === curIdx;
       const future = follow && i.ts > playhead;
-      const bkmrk = i._bookmark ? " row-bookmark" : "";
+      const bkmrk = i._bookmark ? " row-bookmark sev-" + (i._severity || "info") : "";
+      const sevChip = i._bookmark ? '<span class="sev-chip ' + (i._severity || "info") + '">' + esc(i._severity || "info") + '</span>' : "";
+      const del = i._bookmark && i._local
+        ? '<button class="mark-del" data-mark-id="' + esc(i._markId) + '" title="Delete this mark">✕</button>'
+        : "";
       return `<div class="row ${i.isError ? "row-err" : ""} ${bkmrk} ${cur ? "row-cur" : ""} ${future ? "row-future" : ""}" data-ts="${i.ts}" data-detail="${i.detail ? esc(i.detail) : ""}" title="Click to jump the player to ${fmtFine(i.ts - S.start)}">
         <div class="row-time">${fmtFine(i.ts - S.start)}</div>
         <div class="row-body">
-          <div class="row-main">${i.pill || ""}${i.tag ? `<span class="kind">${esc(i.tag)}</span>` : ""}<span>${esc(i.main)}</span></div>
+          <div class="row-main">${i.pill || ""}${i.tag ? `<span class="kind">${esc(i.tag)}</span>` : ""}<span>${esc(i.main)}</span>${sevChip}</div>
           ${i.sub ? `<div class="row-sub">${esc(i.sub)}</div>` : ""}
           ${i.extra || ""}
         </div>
+        ${del}
         <button class="row-jump" title="Jump here">↧</button>
       </div>`;
     }).join("");
@@ -1159,6 +1171,9 @@
   }
 
   function setTrack(track) {
+    // BUGFIX: tab switching while the compare view is open used to silently replace the diff
+    // DOM with track rows. Close the compare first — the user asked for a track.
+    if (S2) { revokeS2Urls(); S2 = null; }
     activeTrack = track; prefs.track = track; LS.set("track", track);
     lastRenderSig = "";  // C2: force a rebuild on tab switch
     [...els.trackTabs.children].forEach((b) => b.classList.toggle("active", b.dataset.track === track));
@@ -1221,6 +1236,9 @@
       marks.forEach((mk) => lines.push(`- \`t=${((mk.ts - S.start) / 1000).toFixed(1)}\` ★ ${mk.label || "bookmark"}${mk.severity ? " (" + mk.severity + ")" : ""}`));
     }
     if (S.forAi) lines.push("", "**AI brief** (`for_ai.md`) is embedded in the .sal — paste it into your AI of choice.");
+    const coverage = SAL.recordingCoverage(S);
+    if (coverage.partial) lines.unshift(
+      "> **Partial recording — conclusions cover retained evidence only.**", ...coverage.warnings.map((w) => "> " + w), "");
     const text = lines.join("\n");
     (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
       .then(() => toast("Session summary copied as markdown ✓"))
@@ -1230,10 +1248,23 @@
   // ── C9: in-viewer bookmarks ("⭐ Mark moment") ─────────────────────────────
   function markNow() {
     if (!S) return;
-    S._localMarks.push({ id: "m" + Date.now(), ts: playhead, label: "Marked by QA", severity: "info" });
+    const all = (S.marks || []).concat(S._localMarks || []);
+    if (all.some((m) => Math.abs(m.ts - playhead) < 300)) {
+      toast("This moment is already marked — delete the existing mark first", 3000);
+      return;
+    }
+    const label = (window.prompt("What happened at this moment?", "Marked by QA") || "").trim() || "Marked by QA";
+    const severity = (window.prompt("Severity: info / warning / bug", "info") || "info").trim().toLowerCase();
+    S._localMarks.push({ id: "m" + Date.now(), ts: playhead, label: label, severity: ["info", "warning", "bug"].includes(severity) ? severity : "info", local: true });
     renderScrubMarks();
     if (activeTrack === "timeline") renderTrack();
-    toast("★ Marked " + fmtFine(playhead - S.start) + " — included in Export (this viewer only, not the file)");
+    toast("★ Marked " + fmtFine(playhead - S.start) + " (" + (["info", "warning", "bug"].includes(severity) ? severity : "info") + ")");
+  }
+  function deleteMark(id) {
+    S._localMarks = (S._localMarks || []).filter((m) => m.id !== id);
+    renderScrubMarks();
+    if (activeTrack === "timeline") renderTrack();
+    toast("Mark removed");
   }
 
   // ── Backend hook: send the open session to the configured Mission Control backend ──
@@ -1506,6 +1537,8 @@
     // Row interactions: clicking ANY row (or insight/screen-visit) seeks the player to that exact
     // moment — forward or backward. Rows with a detail payload also expand it.
     els.trackList.onclick = (e) => {
+      const del = e.target.closest(".mark-del");
+      if (del) { deleteMark(del.dataset.markId); return; }
       const jump = e.target.closest(".row-jump");
       if (jump) {
         const holder = jump.dataset.ts ? jump : jump.closest("[data-ts]");

@@ -28,7 +28,9 @@ object QaLensAnalysis {
         /** Config-driven capture modes — lets the digest say "disabled by config" vs "not installed". */
         val networkCaptureEnabled: Boolean = true,
         val logCaptureEnabled: Boolean = true,
-        val networkFromChucker: Boolean = false
+        val networkFromChucker: Boolean = false,
+        val recordingRetention: RecordingEvidenceStore.Retention? = null,
+        val networkSources: List<String> = emptyList()
     )
 
     fun digest(
@@ -51,12 +53,13 @@ object QaLensAnalysis {
 
         // ── Coverage notes: what is missing and why it matters ──────────────
         val notes = mutableListOf<String>()
+        coverage.recordingRetention?.let { notes += it.notes() }
         if (!coverage.networkCaptureEnabled)
             notes += "Network capture DISABLED via QaLensConfig.captureNetwork — network.json is blind by configuration."
         else if (coverage.networkFromChucker)
-            notes += "Network sourced from Chucker (TransactionListener) — no QaLensOkHttpInterceptor in the pipeline."
+            notes += "Legacy Chucker-source flag is set, but live transaction forwarding is unsupported. Verify the actual interceptor or adapter wiring."
         else if (!coverage.networkInterceptorInstalled)
-            notes += "Network capture NOT installed (QaLensOkHttpInterceptor missing) — network.json is blind, do not infer 'no traffic'."
+            notes += "Network capture NOT installed (no interceptor or external source declared) — network.json is blind, do not infer 'no traffic'."
         else if (coverage.networkCount == 0)
             notes += "Interceptor installed but no requests in the window — screens may be cached/offline."
         if (!coverage.logCaptureEnabled)
@@ -76,15 +79,19 @@ object QaLensAnalysis {
         if (coverage.connectivityCount == 0)
             notes += "No connectivity transitions — QaLensConnectivity may not be started. A device that stays on WiFi the whole session looks identical to one that was offline."
 
+        val roomChanges = events.filter { it.tag == QaLensDataEvents.ROOM }
+        val preferenceChanges = events.filter { it.tag == QaLensDataEvents.DATASTORE }
+        if (roomChanges.isEmpty() && preferenceChanges.isEmpty())
+            notes += "No Room/DataStore changes observed — hooks may be absent, or app data may have stayed unchanged."
+
         // ── Stats ────────────────────────────────────────────────────────────
         val failed = network.filter { it.isError }
         val slow = network.filter { !it.isError && it.latencyMs >= slowMs }
         val errorLogs = events.filter {
-            it.message.contains("error", true) || it.message.contains("[ERROR]") || it.message.contains("exception", true)
+            it.tag != QaLensDataEvents.ROOM && it.tag != QaLensDataEvents.DATASTORE &&
+                (it.message.contains("error", true) || it.message.contains("[ERROR]") || it.message.contains("exception", true))
         }
         val latencies = network.filter { it.error == null }.map { it.latencyMs }.sorted()
-        fun p(pct: Int): Long =
-            if (latencies.isEmpty()) 0 else latencies[((pct / 100.0) * latencies.size).toInt().coerceAtMost(latencies.size - 1)]
 
         // ── Per-endpoint aggregates (redacted method+path, query stripped) ──
         fun endpointKey(e: NetworkEvent): String {
@@ -173,6 +180,33 @@ object QaLensAnalysis {
             )
         }
 
+        // Timing is evidence, not causation. Only relate a data observation that preceded the
+        // start of a failed request in the same five-second window, and bound the digest size.
+        val dataChanges = (roomChanges + preferenceChanges).sortedBy { it.timestampMillis }
+        val dataFailureLinks = failed.mapNotNull { request ->
+            var low = 0
+            var high = dataChanges.size
+            while (low < high) {
+                val mid = (low + high) ushr 1
+                if (dataChanges[mid].timestampMillis <= request.timestampMillis) low = mid + 1
+                else high = mid
+            }
+            dataChanges.getOrNull(low - 1)
+                ?.takeIf { request.timestampMillis - it.timestampMillis <= 5_000 }
+                ?.let { request to it }
+        }
+        if (dataFailureLinks.size > 20)
+            notes += "${dataFailureLinks.size - 20} additional data-change/failure timing links omitted from the anomaly list; stats count all observed links."
+        dataFailureLinks.take(20).forEach { (request, change) ->
+            val source = if (change.tag == QaLensDataEvents.ROOM) "Room" else "DataStore"
+            anomalies += mapOf(
+                "tMs" to (request.timestampMillis - startMillis),
+                "kind" to "data_change_near_failure",
+                "title" to "$source change preceded failed ${endpointKey(request)}",
+                "detail" to "Observed ${request.timestampMillis - change.timestampMillis}ms before request start; timing does not prove cause."
+            )
+        }
+
         // Crash/ANR anomalies — the most severe signal in the session.
         crashes.forEach { c ->
             anomalies += mapOf(
@@ -195,10 +229,12 @@ object QaLensAnalysis {
         return SalJson.obj(
             "schema" to SCHEMA,
             "coverage" to mapOf(
+                "recording" to coverage.recordingRetention?.asMap(),
                 "frames" to coverage.hasFrames,
                 "video" to coverage.hasVideo,
                 "network" to (coverage.networkCount > 0),
                 "networkInterceptorInstalled" to coverage.networkInterceptorInstalled,
+                "networkSources" to coverage.networkSources.map(config::redact),
                 "networkCaptureEnabled" to coverage.networkCaptureEnabled,
                 "networkFromChucker" to coverage.networkFromChucker,
                 "logs" to (coverage.logCount > 0),
@@ -207,6 +243,8 @@ object QaLensAnalysis {
                 "crashes" to (coverage.crashCount > 0),
                 "performance" to (coverage.frameMetricsCount > 0),
                 "connectivity" to (coverage.connectivityCount > 0),
+                "roomChanges" to roomChanges.size,
+                "preferenceChanges" to preferenceChanges.size,
                 "notes" to notes
             ),
             "stats" to mutableMapOf<String, Any?>(
@@ -218,9 +256,12 @@ object QaLensAnalysis {
                 "slowThresholdMs" to slowMs,
                 "logEvents" to events.size,
                 "errorLogs" to errorLogs.size,
+                "roomChanges" to roomChanges.size,
+                "preferenceChanges" to preferenceChanges.size,
+                "dataChangeFailureLinks" to dataFailureLinks.size,
                 "crashes" to crashes.size,
                 "avgLatencyMs" to (latencies.takeIf { it.isNotEmpty() }?.average()?.toLong() ?: 0L),
-                "p95LatencyMs" to p(95)
+                "p95LatencyMs" to nearestRankPercentile(latencies, 95)
             ).apply {
                 if (assertionFailures > 0) this["assertionFailures"] = assertionFailures
             },
@@ -253,7 +294,8 @@ object QaLensAnalysis {
 # How to analyze this QaLens `.sal` session recording
 
 You are looking inside a `.sal` file: a ZIP captured on-device during a manual QA session of an
-Android app. Everything is pre-redacted (tokens, emails, card/phone numbers are masked). All
+Android app. Configured text redaction masks common tokens, emails and card/phone numbers, but
+host-authored data may need additional rules. All
 timestamps are epoch milliseconds; `manifest.json.startMillis` is t0 — join ANY two tracks by
 comparing `ts`. `analysis.json.anomalies[].tMs` are relative to t0.
 
@@ -261,7 +303,7 @@ comparing `ts`. `analysis.json.anomalies[].tMs` are relative to t0.
 | File | What it is |
 |---|---|
 | `manifest.json` | Session/app/device/build context. `frameIndex` maps epoch-ms → frame image. `videoStartMillis` (if video) is when `video.mp4` t=0 occurred. |
-| `analysis.json` | PRECOMPUTED digest — read this FIRST: coverage, stats, per-endpoint aggregates, screen spans, timestamped anomalies, likely owner. |
+| `analysis.json` | PRECOMPUTED digest — read this FIRST: coverage, stats (including observed Room/DataStore changes), per-endpoint aggregates, screen spans, timestamped anomalies, likely owner. |
 | `timeline.json` | Merged user-visible events: `{ts, kind: NAVIGATION|SCREEN|NETWORK|ACTION|ERROR|LOG, title, detail, isError}` |
 | `network.json` | Requests: `{ts, method, url, status, latencyMs, requestBytes, responseBytes, error}` (no bodies — privacy) |
 | `logs.json` | App logs: `{ts, type: LOG|EVENT|BREADCRUMB, tag, message}` |
@@ -271,12 +313,17 @@ comparing `ts`. `analysis.json.anomalies[].tMs` are relative to t0.
 | `frames/*.jpg` or `video.mp4` | What the screen showed. Frames are ~2fps — fast glitches can fall between frames. |
 
 ## Rules
-1. **Respect `analysis.json.coverage`.** If a track is missing/empty, say so — do NOT infer health
+1. **Respect `analysis.json.coverage`.** Recording retention limits and Android callback drops
+   are reported in `coverage.recording` when available; any omitted observations limit conclusions.
+   If a track is missing/empty, say so — do NOT infer health
    from absent data (e.g. empty network.json with `networkInterceptorInstalled=false` means blind,
    not "no traffic").
 2. Anchor every claim to evidence: quote `ts`/`tMs`, endpoint, screen, or log line.
 3. Correlate across tracks: a failed request + error log + screen change within ~2s is one story.
 4. `featureFlags` flips mid-session change expected behavior — check before calling something a bug.
+5. Room events mean table invalidation, not row contents; DataStore event labels are host supplied.
+   A `data_change_near_failure` anomaly means a change was observed within five seconds before a
+   failed request's start. Timing alone does not establish causation.
 
 ## Produce three sections
 - **For developers** — root cause hypothesis with the evidence chain (timestamps, endpoint,

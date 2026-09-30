@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="qalens_screenshots" path="qalens/" />
+    <files-path name="qalens_recordings" path="qalens/recordings/" />
 </paths>

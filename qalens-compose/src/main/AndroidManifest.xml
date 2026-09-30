@@ -10,6 +10,8 @@
     <!-- Webhook upload of .sal recordings to the QA/AI-analysis backend (Control Room). -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application>
         <provider
             android:name="androidx.startup.InitializationProvider"

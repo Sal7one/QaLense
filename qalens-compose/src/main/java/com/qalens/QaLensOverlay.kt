@@ -3,21 +3,27 @@ package com.qalens
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -35,22 +41,45 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qalens.android.QaLensPrefs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
+
+/*
+ * Overlay surfaces now read their colours from QaLensTokens instead of per-file literals.
+ * The old build used #111827/#FFC107/#00C853/#E53935 here for every host app, which is why
+ * the floating layer looked pasted on. `colors` is resolved once per composition from the
+ * configuration (the overlay is decor-attached, so it cannot read the host's MaterialTheme).
+ */
 
 @Composable
 internal fun QaLensOverlay() {
     val state by QaLens.state.collectAsState()
     val view = LocalView.current
+    val colors = qaLensColorsFor(LocalContext.current)
 
     // Only refresh on inspect/tag mode toggle — not on panel open/close, which would capture the
     // panel's own nodes and create a "double UI" effect in the canvas.
     LaunchedEffect(state.isInspectMode, state.isTagMode) {
         if (state.isInspectMode || state.isTagMode) {
+            QaLens.refreshInspection(view.rootView)
+        }
+    }
+
+    // Compose semantics can change without a View layout pass (for example a toggle state or
+    // content description). Keep the live visual modes current without polling in normal use.
+    LaunchedEffect(state.isInspectMode, state.isTagMode, state.isWatchMode, view) {
+        while ((state.isInspectMode || state.isTagMode) && !state.isWatchMode) {
+            delay(500)
             QaLens.refreshInspection(view.rootView)
         }
     }
@@ -68,11 +97,12 @@ internal fun QaLensOverlay() {
             InspectCanvas(
                 nodes = state.nodes,
                 selectedNode = state.selectedNode,
-                onSelect = QaLens::selectNode
+                onSelect = QaLens::previewNode,
+                colors = colors
             )
         }
         if (state.isTagMode && !state.isPanelOpen && !state.isWatchMode) {
-            TagCanvas(nodes = state.nodes)
+            TagCanvas(nodes = state.nodes, colors = colors)
         }
 
         if (!state.isPanelOpen && !state.isWatchMode) {
@@ -80,7 +110,8 @@ internal fun QaLensOverlay() {
                 modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
                 inspectMode = state.isInspectMode,
                 warningCount = state.warnings.size,
-                onTap = { QaLens.togglePanel(); QaLens.refreshInspection(view.rootView) },
+                colors = colors,
+                onTap = { QaLens.togglePanel() },
                 onLongPress = { QaLens.toggleInspectMode(); QaLens.refreshInspection(view.rootView) }
             )
         }
@@ -98,11 +129,11 @@ internal fun QaLensOverlay() {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.25f))
+                    .background(colors.scrim)
                     .pointerInput(Unit) { detectTapGestures { QaLens.closePanel() } }
             )
             // Panel is drawn AFTER scrim so it is above it in z-order. QA chooses minimal vs full
-            // (Control Room / .appsal); the minimal sheet links back to the full panel.
+            // (Control Room / .appsal); the tester sheet links back to the full panel.
             if (state.minimalPanel) {
                 QaLensMinimalPanel(
                     modifier = Modifier.align(dockAlign).statusBarsPadding().padding(10.dp),
@@ -123,26 +154,39 @@ internal fun QaLensOverlay() {
     }
 }
 
+private enum class InspectFilter(val label: String) { ALL("All"), ACTIONS("Actions"), TAGGED("Tagged"), ISSUES("Issues") }
+
 @Composable
 private fun InspectCanvas(
     nodes: List<InspectNode>,
     selectedNode: InspectNode?,
-    onSelect: (InspectNode?) -> Unit
+    onSelect: (InspectNode?) -> Unit,
+    colors: QaLensOverlayColors
 ) {
+    var filter by remember { mutableStateOf(InspectFilter.ACTIONS) }
+    val visibleNodes = when (filter) {
+        InspectFilter.ALL -> nodes
+        InspectFilter.ACTIONS -> nodes.filter { it.isClickable || it.isFocusable }
+        InspectFilter.TAGGED -> nodes.filter { it.testTag != null }
+        InspectFilter.ISSUES -> nodes.filter { it.warnings.isNotEmpty() }
+    }
+    val context = LocalContext.current
+    val config by QaLens.config.collectAsState()
+
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.04f))
+            .background(colors.canvasWash)
             // Only consume confirmed taps (no movement); drags pass through to the
             // underlying app so the user can scroll the page while in inspect mode.
-            .pointerInput(nodes) {
+            .pointerInput(visibleNodes) {
                 awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val down = awaitFirstDown(requireUnconsumed = true)
                     val up = waitForUpOrCancellation() ?: return@awaitEachGesture
                     val moved = (up.position - down.position).getDistance()
                     if (moved < viewConfiguration.touchSlop) {
                         up.consume()
-                        val selected = nodes
+                        val selected = visibleNodes
                             .filter { it.bounds.contains(down.position.x, down.position.y) }
                             .minByOrNull { it.bounds.width * it.bounds.height }
                         onSelect(selected)
@@ -151,14 +195,14 @@ private fun InspectCanvas(
             }
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            nodes.forEach { node ->
+            visibleNodes.forEach { node ->
                 val isSelected = selectedNode?.id == node.id
                 val hasWarnings = node.warnings.isNotEmpty()
                 val color = when {
-                    isSelected -> Color(0xFFFFC107)
-                    hasWarnings -> Color(0xFFE53935)
-                    node.testTag != null -> Color(0xFF00C853)
-                    else -> Color(0xFF2196F3)
+                    isSelected -> colors.accent
+                    hasWarnings -> colors.warn
+                    node.testTag != null -> colors.ok
+                    else -> colors.info
                 }
 
                 drawRect(
@@ -170,7 +214,7 @@ private fun InspectCanvas(
 
                 if (hasWarnings) {
                     drawCircle(
-                        color = Color(0xFFE53935),
+                        color = colors.warn,
                         radius = 6.dp.toPx(),
                         center = Offset(node.bounds.right.toFloat(), node.bounds.top.toFloat())
                     )
@@ -178,19 +222,79 @@ private fun InspectCanvas(
             }
         }
 
-        selectedNode?.let { node ->
-            Surface(
-                tonalElevation = 8.dp,
-                shadowElevation = 8.dp,
-                modifier = Modifier
-                    .offset { IntOffset(node.bounds.left, (node.bounds.top - 52).coerceAtLeast(16)) }
-                    .border(1.dp, Color(0xFFFFC107), MaterialTheme.shapes.small)
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 12.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            selectedNode?.let { node ->
+                Surface(
+                    color = colors.panel,
+                    contentColor = colors.fg,
+                    shape = RoundedCornerShape(QaLensDimens.rMd),
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            config.redact(node.label),
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            "${node.role ?: "Component"} · ${node.widthDp.toInt()}×${node.heightDp.toInt()}dp" +
+                                (node.testTag?.let { " · ${config.redact(it)}" } ?: ""),
+                            color = colors.fg2,
+                            fontSize = 11.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (node.warnings.isNotEmpty()) {
+                            Text(
+                                node.warnings.take(2).joinToString(" · ") { it.title },
+                                color = colors.warn,
+                                fontSize = 11.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        node.testTag?.let { tag ->
+                            Text(
+                                "Copy test tag",
+                                color = colors.accent,
+                                fontSize = 12.sp,
+                                modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
+                                    .clickable(role = Role.Button) {
+                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                            as android.content.ClipboardManager
+                                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("QaLens test tag", tag))
+                                    }
+                                    .padding(vertical = 10.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().background(colors.panel, RoundedCornerShape(QaLensDimens.rMd)).padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    text = node.label.take(48),
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelMedium
-                )
+                InspectFilter.entries.forEach { option ->
+                    Text(
+                        option.label,
+                        color = if (filter == option) colors.accent else colors.fg2,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f)
+                            .heightIn(min = QaLensDimens.touchMin)
+                            .background(if (filter == option) colors.accentWash else Color.Transparent,
+                                RoundedCornerShape(QaLensDimens.rSm))
+                            .clickable(role = Role.Button) { filter = option; onSelect(null) }
+                            .padding(horizontal = 2.dp, vertical = 12.dp)
+                    )
+                }
             }
         }
     }
@@ -203,7 +307,7 @@ private fun InspectCanvas(
  * copy its tag. Drags pass through so the app stays scrollable.
  */
 @Composable
-private fun TagCanvas(nodes: List<InspectNode>) {
+private fun TagCanvas(nodes: List<InspectNode>, colors: QaLensOverlayColors) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val tagged = nodes.filter { it.testTag != null }
     val untaggedInteractive = nodes.filter { it.testTag == null && it.isClickable }
@@ -218,7 +322,7 @@ private fun TagCanvas(nodes: List<InspectNode>) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.04f))
+            .background(colors.canvasWash)
             // Consume only confirmed taps (like InspectCanvas); drags pass through to the app.
             .pointerInput(tagged) {
                 awaitEachGesture {
@@ -238,7 +342,7 @@ private fun TagCanvas(nodes: List<InspectNode>) {
         Canvas(Modifier.fillMaxSize()) {
             tagged.forEach { node ->
                 drawRect(
-                    color = Color(0xFF00C853),
+                    color = colors.ok,
                     topLeft = Offset(node.bounds.left.toFloat(), node.bounds.top.toFloat()),
                     size = Size(node.bounds.width.toFloat(), node.bounds.height.toFloat()),
                     style = Stroke(width = 2.dp.toPx())
@@ -246,13 +350,13 @@ private fun TagCanvas(nodes: List<InspectNode>) {
             }
             untaggedInteractive.forEach { node ->
                 drawRect(
-                    color = Color(0xFFE53935),
+                    color = colors.err,
                     topLeft = Offset(node.bounds.left.toFloat(), node.bounds.top.toFloat()),
                     size = Size(node.bounds.width.toFloat(), node.bounds.height.toFloat()),
                     style = Stroke(width = 2.dp.toPx())
                 )
                 drawCircle(
-                    color = Color(0xFFE53935),
+                    color = colors.err,
                     radius = 5.dp.toPx(),
                     center = Offset(node.bounds.right.toFloat(), node.bounds.top.toFloat())
                 )
@@ -263,12 +367,12 @@ private fun TagCanvas(nodes: List<InspectNode>) {
         tagged.take(60).forEach { node ->
             Text(
                 text = node.testTag.orEmpty().take(36),
-                color = Color.White,
+                color = colors.fg,
                 fontSize = 10.sp,
                 maxLines = 1,
                 modifier = Modifier
                     .offset { IntOffset(node.bounds.left, (node.bounds.top - 36).coerceAtLeast(8)) }
-                    .background(Color(0xE6006428), MaterialTheme.shapes.extraSmall)
+                    .background(colors.panel3, MaterialTheme.shapes.extraSmall)
                     .padding(horizontal = 5.dp, vertical = 2.dp)
             )
         }
@@ -279,20 +383,20 @@ private fun TagCanvas(nodes: List<InspectNode>) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 24.dp)
-                .background(Color(0xE6111827), CircleShape)
+                .background(colors.panel, CircleShape)
                 .pointerInput(Unit) { detectTapGestures(onTap = { QaLens.setTagMode(false) }) }
                 .padding(horizontal = 14.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = "TAG MODE · ${tagged.size} tagged · ${untaggedInteractive.size} untagged · tap a tag to copy",
-                color = Color.White,
+                color = colors.fg,
                 fontSize = 11.sp
             )
             Spacer(Modifier.width(10.dp))
             Text(
                 text = "✕ EXIT",
-                color = Color(0xFFF87171),
+                color = colors.err,
                 fontSize = 11.sp,
                 style = MaterialTheme.typography.labelMedium
             )
@@ -311,6 +415,7 @@ private fun QaLensBubble(
     modifier: Modifier,
     inspectMode: Boolean,
     warningCount: Int,
+    colors: QaLensOverlayColors,
     onTap: () -> Unit,
     onLongPress: () -> Unit
 ) {
@@ -322,14 +427,17 @@ private fun QaLensBubble(
         }
     }
     val label = if (inspectMode) "INS" else "QA"
-    val color = if (inspectMode) Color(0xFFFFC107) else Color(0xFF111827)
+    val color = if (inspectMode) colors.accent else colors.panel
 
     Box(
         modifier = modifier
             .offset { IntOffset(bubbleOffset.x.roundToInt(), bubbleOffset.y.roundToInt()) }
-            .size(58.dp)
+            .size(QaLensDimens.bubble)
             .background(color, CircleShape)
-            .border(2.dp, Color.White.copy(alpha = 0.9f), CircleShape)
+            // Keep the crisp ring: a softened one measured worse against the cream host and
+            // read as a smudge rather than a deliberate edge. The ink disc plus this ring
+            // already clears contrast on both light and dark hosts.
+            .border(QaLensDimens.bubbleBorder, Color.White.copy(alpha = 0.9f), CircleShape)
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragEnd = { QaLensPrefs.setBubblePos(context, bubbleOffset.x, bubbleOffset.y) }
@@ -346,6 +454,9 @@ private fun QaLensBubble(
             },
         contentAlignment = Alignment.Center
     ) {
-        Text(text = if (warningCount > 0) "$label\n$warningCount" else label, color = Color.White)
+        Text(
+            text = if (warningCount > 0) "$label\n$warningCount" else label,
+            color = colors.fg
+        )
     }
 }

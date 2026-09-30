@@ -4,14 +4,17 @@ import android.Manifest
 import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsConfiguration
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getAllSemanticsNodes
@@ -41,6 +44,79 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     // Live host-activity count → detect when the app is fully gone (vs. just rotating/backgrounded)
     // so QaLens tears down with it instead of leaving an orphaned ongoing notification.
     private var liveActivities = 0
+    private val resumed = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Activity, Boolean>())
+    private val activities = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Activity, Boolean>())
+    private data class ExtraRoot(val owner: java.lang.ref.WeakReference<Activity>, var references: Int)
+    private val extraRoots = java.util.WeakHashMap<View, ExtraRoot>()
+
+    fun registerInspectionRoot(view: View) {
+        val activity = view.context.findActivity() ?: return
+        synchronized(extraRoots) {
+            val existing = extraRoots[view]
+            if (existing?.owner?.get() === activity) existing.references++
+            else extraRoots[view] = ExtraRoot(java.lang.ref.WeakReference(activity), 1)
+        }
+        QaLens.scheduleInspection()
+    }
+
+    fun unregisterInspectionRoot(view: View) {
+        synchronized(extraRoots) {
+            val entry = extraRoots[view] ?: return@synchronized
+            if (--entry.references <= 0) extraRoots.remove(view)
+        }
+        QaLens.scheduleInspection()
+    }
+
+    fun inspectionRoots(activity: Activity?): List<View> = if (activity == null) emptyList() else
+        synchronized(extraRoots) {
+            extraRoots.filter { (view, entry) -> entry.owner.get() === activity && view.isAttachedToWindow }.keys.toList()
+        }
+
+    /** Align qaTag layout hints from Dialog/Popup windows with the host decor coordinate space. */
+    fun mapToHostWindow(view: View, bounds: Rect): Rect {
+        val decor = QaLens.currentActivity?.window?.decorView ?: return bounds
+        val sourceScreen = IntArray(2)
+        val sourceWindow = IntArray(2)
+        val targetScreen = IntArray(2)
+        val targetWindow = IntArray(2)
+        view.getLocationOnScreen(sourceScreen)
+        view.getLocationInWindow(sourceWindow)
+        decor.getLocationOnScreen(targetScreen)
+        decor.getLocationInWindow(targetWindow)
+        val dx = (sourceScreen[0] - sourceWindow[0] - targetScreen[0] + targetWindow[0]).toFloat()
+        val dy = (sourceScreen[1] - sourceWindow[1] - targetScreen[1] + targetWindow[1]).toFloat()
+        return bounds.translate(dx, dy)
+    }
+
+    private fun Context.findActivity(): Activity? {
+        var current: Context? = this
+        while (current is ContextWrapper) {
+            if (current is Activity) return current
+            current = current.baseContext
+        }
+        return null
+    }
+
+    fun belongsToActivity(view: View, activity: Activity?): Boolean =
+        activity != null && view.context.findActivity() === activity
+
+    private val layoutListeners = java.util.WeakHashMap<Activity, android.view.ViewTreeObserver.OnGlobalLayoutListener>()
+    private fun observeLayout(activity: Activity) {
+        if (layoutListeners.containsKey(activity)) return
+        val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener { QaLens.scheduleInspection() }
+        layoutListeners[activity] = listener
+        activity.window.decorView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+    }
+    private fun stopLayout(activity: Activity) {
+        layoutListeners.remove(activity)?.let { activity.window.decorView.viewTreeObserver.removeOnGlobalLayoutListener(it) }
+    }
+
+    fun suspendCapture() {
+        activities.toList().forEach { stopLayout(it); detachOverlay(it); QaLensFrameMetrics.detach(it); stopShake(it) }
+    }
+
+    fun resumeCapture() { resumed.toList().forEach(::onActivityResumed) }
+
 
     // One shake detector per process
     private var shakeDetector: QaLensShakeDetector? = null
@@ -60,7 +136,7 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     }
 
     fun attachOverlay(activity: Activity) {
-        if (isInternal(activity)) return
+        if (isInternal(activity) || !QaLens.config.value.enabled) return
         if (!QaLens.state.value.overlayEnabled) return
         val decor = activity.window.decorView as? ViewGroup ?: return
         if (decor.findViewWithTag<View>(OVERLAY_TAG) != null) return
@@ -96,13 +172,19 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     fun rawSemanticsNodes(activity: Activity): List<SemanticsNode> =
         ComposeSemanticsReader.rawNodes(activity.window.decorView)
 
+    /** Capture must fail closed if a Compose root cannot be read. */
+    fun captureSemanticsNodes(activity: Activity): List<SemanticsNode> =
+        ComposeSemanticsReader.rawNodes(activity.window.decorView, strict = true)
+
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
-        if (!isInternal(activity)) liveActivities++
+        if (!isInternal(activity)) { liveActivities++; activities += activity }
     }
     override fun onActivityStarted(activity: Activity) = Unit
 
     override fun onActivityResumed(activity: Activity) {
         if (isInternal(activity)) return
+        resumed += activity
+        QaLens.trackActivity(activity)
         // Master run-condition (`QaLens.configure { enabled = false }`): fully inert — no overlay,
         // no notification, no shake. Cleans up anything attached before the app configured it off.
         if (!QaLens.config.value.enabled) {
@@ -111,6 +193,7 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
             return
         }
         QaLens.onActivityResumed(activity)
+        observeLayout(activity)
         attachOverlay(activity)
         QaLensFrameMetrics.attach(activity)
         healOverlayVisibility(activity)
@@ -127,6 +210,8 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
 
     override fun onActivityPaused(activity: Activity) {
         if (isInternal(activity)) return
+        resumed -= activity
+        stopLayout(activity)
         QaLens.onActivityPaused(activity)
         QaLensFrameMetrics.detach(activity)
         stopShake(activity)
@@ -143,9 +228,14 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
      */
     override fun onActivityDestroyed(activity: Activity) {
         if (isInternal(activity)) return
+        QaLensFrameMetrics.detach(activity)
+        QaLensSystemChip.detachFrom(activity)
+        activities -= activity
+        resumed -= activity
+        synchronized(extraRoots) { extraRoots.entries.removeAll { it.value.owner.get() === activity } }
         liveActivities = (liveActivities - 1).coerceAtLeast(0)
         if (liveActivities == 0 && !activity.isChangingConfigurations) {
-            if (QaLens.state.value.isRecording) QaLensSessionRecorder.cancel()
+            if (QaLens.state.value.isRecording) QaLensSessionRecorder.stop(share = false)
             QaLensSystemChip.hide()
             QaLensNotification.dismiss(activity)
         }
@@ -201,13 +291,64 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
 
 private object ComposeSemanticsReader {
     private const val OVERLAY_TAG = "qalens_overlay_compose_view"
+    private val rootIds = java.util.WeakHashMap<androidx.compose.ui.node.RootForTest, Long>()
+    private var nextRootId = 0L
 
     fun read(rootView: View): List<InspectNode> {
         val density = rootView.resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
-        return rawNodes(rootView)
-            .mapNotNull { node -> node.toInspectNode(density) }
-            .filterNot { it.hiddenFromReports }
+        val targetOrigin = windowOrigin(rootView)
+        val rootOrigins = java.util.IdentityHashMap<androidx.compose.ui.node.RootForTest, Pair<Int, Int>>()
+        val raw = rawNodes(rootView)
+        val merged = findComposeRoots(rootView).flatMap { root ->
+            runCatching { root.semanticsOwner.getAllSemanticsNodes(mergingEnabled = true) }
+                .getOrDefault(emptyList())
+        }.associateBy { node -> node.root?.let { "${rootId(it)}:${node.id}" } }
+        val ancestorsOfHidden = buildSet {
+            raw.filter { it.config.getOrNull(QaHiddenFromReportsKey) == true }.forEach { hidden ->
+                var ancestor = hidden.parent
+                while (ancestor != null) {
+                    ancestor.root?.let { add("${rootId(it)}:${ancestor.id}") }
+                    ancestor = ancestor.parent
+                }
+            }
+        }
+        return raw
+            .mapNotNull { node ->
+                val root = node.root ?: return@mapNotNull null
+                val key = "${rootId(root)}:${node.id}"
+                val sourceOrigin = rootOrigins.getOrPut(root) {
+                    (root as? View)?.let(::windowOrigin) ?: targetOrigin
+                }
+                node.toInspectNode(
+                    density, rootView.width, rootView.height,
+                    sourceOrigin.first - targetOrigin.first,
+                    sourceOrigin.second - targetOrigin.second,
+                    node.isHiddenFromReports(),
+                    if (key in ancestorsOfHidden) null else merged[key]?.config
+                )
+            }
             .distinctBy { it.id }
+    }
+
+    private fun windowOrigin(view: View): Pair<Int, Int> {
+        val screen = IntArray(2)
+        val window = IntArray(2)
+        view.getLocationOnScreen(screen)
+        view.getLocationInWindow(window)
+        return (screen[0] - window[0]) to (screen[1] - window[1])
+    }
+
+    private fun rootId(root: androidx.compose.ui.node.RootForTest): Long = synchronized(rootIds) {
+        rootIds.getOrPut(root) { ++nextRootId }
+    }
+
+    private fun SemanticsNode.isHiddenFromReports(): Boolean {
+        var current: SemanticsNode? = this
+        while (current != null) {
+            if (current.config.getOrNull(QaHiddenFromReportsKey) == true) return true
+            current = current.parent
+        }
+        return false
     }
 
     /**
@@ -216,46 +357,69 @@ private object ComposeSemanticsReader {
      * public `getAllSemanticsNodes`). The previous reflection on internal members silently broke
      * against newer Compose (1.8+/BOM 2025.x name-mangles them) — no reflection, no breakage.
      */
-    fun rawNodes(rootView: View): List<SemanticsNode> =
+    fun rawNodes(rootView: View, strict: Boolean = false): List<SemanticsNode> =
         findComposeRoots(rootView).flatMap { root ->
             runCatching {
                 root.semanticsOwner.getAllSemanticsNodes(mergingEnabled = false)
-            }.getOrDefault(emptyList())
+            }.getOrElse { if (strict) throw it else emptyList() }
         }
 
     private fun findComposeRoots(view: View): List<androidx.compose.ui.node.RootForTest> {
-        if (view.tag == OVERLAY_TAG) return emptyList()
         val result = mutableListOf<androidx.compose.ui.node.RootForTest>()
-        if (view is androidx.compose.ui.node.RootForTest) result += view
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) result += findComposeRoots(view.getChildAt(i))
+        val seen = java.util.IdentityHashMap<androidx.compose.ui.node.RootForTest, Boolean>()
+        fun collect(current: View) {
+            if (current.tag == OVERLAY_TAG) return
+            if (current is androidx.compose.ui.node.RootForTest && seen.put(current, true) == null) result += current
+            if (current is ViewGroup) {
+                for (i in 0 until current.childCount) collect(current.getChildAt(i))
+            }
         }
+        collect(view)
+        QaLensActivityInstaller.inspectionRoots(QaLens.currentActivity).forEach(::collect)
         return result
     }
 
-    private fun SemanticsNode.toInspectNode(density: Float): InspectNode? {
+    private fun SemanticsNode.toInspectNode(
+        density: Float,
+        viewportWidth: Int,
+        viewportHeight: Int,
+        offsetX: Int,
+        offsetY: Int,
+        inheritedHidden: Boolean,
+        accessibleConfig: SemanticsConfiguration?
+    ): InspectNode? {
         val config = this.config
         val bounds = this.boundsInWindow
         val rect   = QaRect(
-            left   = bounds.left.roundToInt(),
-            top    = bounds.top.roundToInt(),
-            right  = bounds.right.roundToInt(),
-            bottom = bounds.bottom.roundToInt()
+            left   = bounds.left.roundToInt() + offsetX,
+            top    = bounds.top.roundToInt() + offsetY,
+            right  = bounds.right.roundToInt() + offsetX,
+            bottom = bounds.bottom.roundToInt() + offsetY
         )
-        if (rect.width <= 0 || rect.height <= 0) return null
+        if (rect.width <= 0 || rect.height <= 0 ||
+            rect.right <= 0 || rect.bottom <= 0 || rect.left >= viewportWidth || rect.top >= viewportHeight) return null
 
         val testTag            = config.getOrNull(SemanticsProperties.TestTag)
         val text               = config.getOrNull(SemanticsProperties.Text)?.map { it.text }.orEmpty()
+            .ifEmpty { accessibleConfig?.getOrNull(SemanticsProperties.Text)?.map { it.text }.orEmpty() }
+        // A merged clickable row can inherit both a child's text and an image description.
+        // Prefer the visible text in that case; copying the image description onto the parent
+        // creates a duplicate accessibility warning for a single control.
         val contentDescription = config.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
+            .ifEmpty {
+                if (text.isEmpty()) accessibleConfig?.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
+                else emptyList()
+            }
         val role               = config.getOrNull(SemanticsProperties.Role)?.toString()
         val stateDescription   = config.getOrNull(SemanticsProperties.StateDescription)
+            ?: accessibleConfig?.getOrNull(SemanticsProperties.StateDescription)
         val selected           = config.getOrNull(SemanticsProperties.Selected) ?: false
         val disabled           = config.contains(SemanticsProperties.Disabled)
         val qaName             = config.getOrNull(QaNameKey)
         val hidden             = config.getOrNull(QaHiddenFromReportsKey) ?: false
 
         return InspectNode(
-            id                 = "semantics:${this.id}",
+            id                 = "semantics:${root?.let(::rootId) ?: return null}:${this.id}",
             testTag            = testTag,
             qaName             = qaName,
             contentDescription = contentDescription,
@@ -270,8 +434,8 @@ private object ComposeSemanticsReader {
             bounds             = rect,
             widthDp            = rect.width / density,
             heightDp           = rect.height / density,
-            source             = if (qaName != null) NodeSource.MANUAL_QA_TAG else NodeSource.SEMANTICS,
-            hiddenFromReports  = hidden
+            source             = NodeSource.SEMANTICS,
+            hiddenFromReports  = hidden || inheritedHidden
         )
     }
 }

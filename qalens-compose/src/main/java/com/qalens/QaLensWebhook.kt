@@ -1,6 +1,7 @@
 package com.qalens
 
 import android.content.Context
+import com.qalens.android.QaLensAndroidInfo
 import com.qalens.android.QaLensPrefs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -82,10 +83,42 @@ internal object QaLensWebhook {
         )
     }
 
-    private fun submit(block: () -> Unit) {
+    private val connectionLock = Any()
+    private val connections = mutableSetOf<HttpURLConnection>()
+    private val jobEpoch = ThreadLocal<Long>()
+    private val jobConnections = ThreadLocal<MutableList<HttpURLConnection>>()
+    private val inFlight = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+
+    fun stop() {
+        statesMutable.update { states -> states.mapValues { (_, state) ->
+            if (state is UploadState.Uploading) UploadState.Failed("SDK disabled") else state
+        } }
+        val active = synchronized(connectionLock) { connections.toList().also { connections.clear() } }
+        Thread({ active.forEach { runCatching { it.disconnect() } } }, "qalens-upload-cancel").apply { isDaemon = true; start() }
+    }
+
+    private fun activeJob(): Boolean = QaLens.config.value.enabled && jobEpoch.get() == QaLens.captureEpoch
+
+    private fun submit(key: String, onRejected: () -> Unit, block: () -> Unit) {
+        val epoch = QaLens.captureEpoch
         try {
-            executor.execute(Runnable { block() })
+            executor.execute(Runnable {
+                jobEpoch.set(epoch)
+                jobConnections.set(mutableListOf())
+                try { if (activeJob()) block() }
+                finally {
+                    jobConnections.get().orEmpty().forEach { conn ->
+                        runCatching { conn.disconnect() }
+                        synchronized(connectionLock) { connections.remove(conn) }
+                    }
+                    jobConnections.remove()
+                    jobEpoch.remove()
+                    inFlight.remove(key)
+                }
+            })
         } catch (e: RejectedExecutionException) {
+            inFlight.remove(key)
+            onRejected()
             QaLens.log("Webhook queue full")
         }
     }
@@ -107,13 +140,14 @@ internal object QaLensWebhook {
         val pending = readQueue(app)
         if (pending.isEmpty()) return
         QaLens.log("Webhook draining ${pending.size} queued upload(s)")
-        for (p in pending) {
+        for (p in pending.filter { it.destination == QaLensPrefs.webhookUrl(app) }) {
             uploadEntry(app, p.path, p.name, skipDrain = true)
         }
     }
 
     /** Upload one recording. [skipDrain] avoids infinite recursion when called from [drainQueue]. */
     private fun uploadEntry(context: Context, path: String, name: String, skipDrain: Boolean) {
+        if (!QaLens.config.value.enabled) return
         if (!skipDrain) drainQueue(context)
         val url = QaLensPrefs.webhookUrl(context)
         if (url.isBlank()) { QaLens.log("Webhook URL not configured"); return }
@@ -124,25 +158,34 @@ internal object QaLensWebhook {
             return
         }
 
+        val endpoint = buildUrl(context, url)
+        val settings = requestSettings(context)
+        if (!inFlight.add(path)) return
         setState(path, UploadState.Uploading)
-        submit {
+        submit(path, onRejected = {
+            setState(path, UploadState.Failed("Upload queue full; queued for retry"))
+            enqueuePending(context, path, name, url)
+        }) {
+            if (!QaLens.config.value.enabled) { setState(path, UploadState.Failed("SDK disabled")); return@submit }
             var failure: Throwable? = null
-            val result = runCatching { sendRecording(context, buildUrl(context, url), file, name) }
+            val result = runCatching { sendRecording(settings, endpoint, file, name) }
                 .onFailure { failure = it }
             val state = result.fold(
-                onSuccess = { (code, body) -> UploadState.Done(code, body) },
+                onSuccess = { (code, body) -> UploadState.Done(code, body.take(600)) },
                 onFailure = { UploadState.Failed(it.message ?: it.javaClass.simpleName) }
             )
+            if (!activeJob()) return@submit
             setState(path, state)
             when (state) {
                 is UploadState.Done -> {
                     // Permanent outcome: drop any queued copy. 5xx is transient → keep it queued.
-                    if (state.success || state.code in 400..499) removePending(context, path)
+                    if (QaLensUploadPolicy.retryable(state.code)) enqueuePending(context, path, name, url)
+                    else removePending(context, path)
                     QaLens.log("Webhook ${if (state.success) "OK" else "rejected"} (${state.code}) for ${name}" +
                         state.body.takeIf { it.isNotBlank() }?.let { ": ${it.take(120)}" }.orEmpty())
                 }
                 is UploadState.Failed -> {
-                    if (failure is IOException) enqueuePending(context, path, name)
+                    if (failure is IOException && (failure !is HttpFailure || QaLensUploadPolicy.retryable((failure as HttpFailure).code))) enqueuePending(context, path, name, url)
                     else removePending(context, path)
                     QaLens.log("Webhook upload failed for ${name}: ${state.error}")
                 }
@@ -156,18 +199,23 @@ internal object QaLensWebhook {
         val app = context.applicationContext
         val url = QaLensPrefs.webhookUrl(app)
         if (url.isBlank()) { QaLens.log("Webhook URL not configured"); return }
+        if (!QaLens.config.value.enabled) return
+        val endpoint = buildUrl(app, url)
+        val settings = requestSettings(app)
+        if (!inFlight.add(TEST_KEY)) return
         setState(TEST_KEY, UploadState.Uploading)
-        submit {
+        submit(TEST_KEY, onRejected = { setState(TEST_KEY, UploadState.Failed("Upload queue full")) }) {
             val result = runCatching {
-                val conn = open(app, buildUrl(app, url))
+                val conn = open(settings, endpoint)
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 conn.doOutput = true
                 conn.outputStream.use { it.write("""{"qalens":"webhook-test"}""".toByteArray()) }
                 readResponse(conn)
             }
+            if (!activeJob()) return@submit
             setState(TEST_KEY, result.fold(
-                onSuccess = { (code, body) -> UploadState.Done(code, body) },
+                onSuccess = { (code, body) -> UploadState.Done(code, body.take(600)) },
                 onFailure = { UploadState.Failed(it.message ?: it.javaClass.simpleName) }
             ))
         }
@@ -181,47 +229,57 @@ internal object QaLensWebhook {
     // ── HTTP plumbing ────────────────────────────────────────────────────────
 
     private fun buildUrl(context: Context, base: String): String {
-        val s = QaLens.state.value
+        val device = QaLensAndroidInfo.deviceSnapshot(context.applicationContext, QaLens.config.value)
         val parts = mutableListOf<String>()
         if (QaLensPrefs.webhookIncludeMeta(context)) {
             fun enc(v: String) = URLEncoder.encode(v, "UTF-8")
-            parts += "app=${enc(s.device.appName)}"
-            parts += "version=${enc(s.device.appVersion)}"
-            s.device.environment?.let { parts += "env=${enc(it)}" }
+            parts += "app=${enc(device.appName)}"
+            parts += "version=${enc(device.appVersion)}"
+            device.environment?.let { parts += "env=${enc(it)}" }
             parts += "platform=android"
-            parts += "device=${enc("${s.device.manufacturer} ${s.device.deviceModel}")}"
+            parts += "device=${enc("${device.manufacturer} ${device.deviceModel}")}"
             parts += "createdAt=${System.currentTimeMillis()}"
             // Active QA profile → the backend knows WHO uploaded (shared test phones).
             QaLensPrefs.userName(context).takeIf { it.isNotBlank() }?.let { parts += "user=${enc(it)}" }
         }
         QaLensPrefs.webhookParams(context).takeIf { it.isNotBlank() }?.let { parts += it }
-        if (parts.isEmpty()) return base
-        return base + (if (base.contains('?')) "&" else "?") + parts.joinToString("&")
+        val endpoint = base.substringBefore('#')
+        if (parts.isEmpty()) return endpoint
+        return endpoint + (if (endpoint.contains('?')) "&" else "?") + parts.joinToString("&")
     }
 
-    private fun open(context: Context, url: String): HttpURLConnection {
+    private data class RequestSettings(val headers: Map<String, String>)
+    private class HttpFailure(val code: Int) : IOException("Upload rejected (HTTP $code)")
+    private fun requestSettings(context: Context): RequestSettings {
+        val device = QaLensAndroidInfo.deviceSnapshot(context.applicationContext, QaLens.config.value)
+        val headers = linkedMapOf("User-Agent" to "QaLens-Android", "X-QaLens-App" to device.appName,
+            "X-QaLens-Version" to device.appVersion, "X-QaLens-Platform" to "android ${device.androidVersion}")
+        device.environment?.let { headers["X-QaLens-Env"] = it }
+        headers["X-QaLens-Device"] = "${device.manufacturer} ${device.deviceModel}"
+        QaLensPrefs.userName(context).takeIf { it.isNotBlank() }?.let { headers["X-QaLens-User"] = it }
+        val name = QaLensPrefs.webhookHeaderName(context)
+        val value = QaLensPrefs.webhookHeaderValue(context)
+        if (name.isNotBlank() && value.isNotBlank()) headers[name] = value
+        return RequestSettings(headers)
+    }
+    private fun open(context: RequestSettings, url: String): HttpURLConnection {
+        check(activeJob()) { "SDK disabled" }
+        require(QaLensUploadPolicy.origin(url) != null) { "Invalid webhook URL" }
         val conn = URL(url).openConnection() as HttpURLConnection
+        conn.instanceFollowRedirects = false // credentials never follow a destination redirect
         conn.connectTimeout = 15_000
         conn.readTimeout = 60_000
-        conn.setRequestProperty("User-Agent", "QaLens-Android")
-        val headerName = QaLensPrefs.webhookHeaderName(context)
-        val headerValue = QaLensPrefs.webhookHeaderValue(context)
-        if (headerName.isNotBlank() && headerValue.isNotBlank()) {
-            conn.setRequestProperty(headerName, headerValue)
+        context.headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
+        synchronized(connectionLock) {
+            check(activeJob()) { "SDK disabled" }
+            connections += conn
+            jobConnections.get()?.add(conn)
         }
-        val s = QaLens.state.value
-        conn.setRequestProperty("X-QaLens-App", s.device.appName)
-        conn.setRequestProperty("X-QaLens-Version", s.device.appVersion)
-        s.device.environment?.let { conn.setRequestProperty("X-QaLens-Env", it) }
-        conn.setRequestProperty("X-QaLens-Device", "${s.device.manufacturer} ${s.device.deviceModel}")
-        conn.setRequestProperty("X-QaLens-Platform", "android ${s.device.androidVersion}")
-        QaLensPrefs.userName(context).takeIf { it.isNotBlank() }
-            ?.let { conn.setRequestProperty("X-QaLens-User", it) }
         return conn
     }
 
     /** Dispatch: small files use the unchanged multipart path; large ones use chunked/resumable. */
-    private fun sendRecording(context: Context, url: String, file: File, name: String): Pair<Int, String> =
+    private fun sendRecording(context: RequestSettings, url: String, file: File, name: String): Pair<Int, String> =
         if (file.length() <= CHUNK_THRESHOLD) {
             postWithRetry(context, url, file, name)
         } else {
@@ -231,19 +289,19 @@ internal object QaLensWebhook {
     /** Upload path retry (R7-lite): retry exceptions + 5xx up to [MAX_ATTEMPTS] with backoff.
      *  4xx is a permanent rejection and returns immediately; a 5xx after the last try still surfaces
      *  as [UploadState.Done] with the code/body, so Control Room display is unchanged. */
-    private fun postWithRetry(context: Context, url: String, file: File, name: String): Pair<Int, String> {
+    private fun postWithRetry(context: RequestSettings, url: String, file: File, name: String): Pair<Int, String> {
         var attempt = 0
         while (attempt < MAX_ATTEMPTS) {
             attempt++
             val response = try {
                 post(context, url, file)
             } catch (e: Exception) {
-                if (attempt == MAX_ATTEMPTS) throw e
+                if (!activeJob() || attempt == MAX_ATTEMPTS) throw e
                 QaLens.log("Webhook attempt ${attempt + 1}/$MAX_ATTEMPTS for $name after ${e.message ?: e.javaClass.simpleName}")
                 Thread.sleep(RETRY_BACKOFF_MS[attempt - 1])
                 continue
             }
-            if (response.first >= 500 && attempt < MAX_ATTEMPTS) {
+            if (QaLensUploadPolicy.retryable(response.first) && attempt < MAX_ATTEMPTS) {
                 QaLens.log("Webhook attempt ${attempt + 1}/$MAX_ATTEMPTS for $name after HTTP ${response.first}")
                 Thread.sleep(RETRY_BACKOFF_MS[attempt - 1])
                 continue
@@ -253,7 +311,7 @@ internal object QaLensWebhook {
         throw IllegalStateException("webhook retry loop exhausted")
     }
 
-    private fun post(context: Context, url: String, file: File): Pair<Int, String> {
+    private fun post(context: RequestSettings, url: String, file: File): Pair<Int, String> {
         val boundary = "----qalens-${System.currentTimeMillis()}"
         val conn = open(context, url)
         conn.requestMethod = "POST"
@@ -280,7 +338,23 @@ internal object QaLensWebhook {
         runCatching {
             java.util.zip.ZipFile(file).use { zip ->
                 zip.getEntry("analysis.json")?.let { entry ->
-                    val text = zip.getInputStream(entry).bufferedReader().use { it.readText() }
+                    val text = zip.getInputStream(entry).buffered().use { source ->
+                        source.mark(2)
+                        val gzip = source.read() == 0x1f && source.read() == 0x8b
+                        source.reset()
+                        val decoded = if (gzip) java.util.zip.GZIPInputStream(source) else source
+                        decoded.bufferedReader().use { reader ->
+                            val chars = CharArray(4096)
+                            val text = StringBuilder()
+                            while (true) {
+                                val count = reader.read(chars)
+                                if (count < 0) break
+                                require(text.length + count <= 1_048_576) { "Digest exceeds limit" }
+                                text.append(chars, 0, count)
+                            }
+                            text.toString()
+                        }
+                    }
                     org.json.JSONObject(text).optJSONObject("stats")?.toString()
                 }
             }
@@ -306,12 +380,12 @@ internal object QaLensWebhook {
             val response = try {
                 block()
             } catch (e: Exception) {
-                if (attempt == MAX_ATTEMPTS) throw e
+                if (!activeJob() || attempt == MAX_ATTEMPTS) throw e
                 QaLens.log("Webhook $what attempt ${attempt + 1}/$MAX_ATTEMPTS for $name after ${e.message ?: e.javaClass.simpleName}")
                 Thread.sleep(RETRY_BACKOFF_MS[attempt - 1])
                 continue
             }
-            if ((response.first == 409 || response.first >= 500) && attempt < MAX_ATTEMPTS) {
+            if ((response.first == 409 || QaLensUploadPolicy.retryable(response.first)) && attempt < MAX_ATTEMPTS) {
                 QaLens.log("Webhook $what attempt ${attempt + 1}/$MAX_ATTEMPTS for $name after HTTP ${response.first}")
                 Thread.sleep(RETRY_BACKOFF_MS[attempt - 1])
                 continue
@@ -329,7 +403,7 @@ internal object QaLensWebhook {
         return path + suffix + query
     }
 
-    private fun chunkedUpload(context: Context, url: String, file: File, name: String): Pair<Int, String> {
+    private fun chunkedUpload(context: RequestSettings, url: String, file: File, name: String): Pair<Int, String> {
         val size = file.length()
         val chunkCount = ((size + CHUNK_SIZE - 1) / CHUNK_SIZE).toInt()
         val digest = triageDigest(file).orEmpty()
@@ -342,7 +416,7 @@ internal object QaLensWebhook {
         return finalizeChunkUpload(context, url, uploadId, file.name, size, digest)
     }
 
-    private fun startChunkUpload(context: Context, url: String, name: String, size: Long, chunkCount: Int, digest: String): String {
+    private fun startChunkUpload(context: RequestSettings, url: String, name: String, size: Long, chunkCount: Int, digest: String): String {
         val (code, body) = httpWithRetry(name, "chunk-start") {
             val conn = open(context, chunkUrl(url, "/chunk/start"))
             conn.requestMethod = "POST"
@@ -353,15 +427,15 @@ internal object QaLensWebhook {
             if (digest.isNotBlank()) conn.setRequestProperty("X-QaLens-Digest", digest)
             readResponse(conn)
         }
-        if (code !in 200..299) throw IOException("chunk start rejected (HTTP $code)")
+        if (code !in 200..299) throw HttpFailure(code)
         val uploadId = runCatching { org.json.JSONObject(body).optString("uploadId") }
             .getOrNull().orEmpty()
-        if (uploadId.isBlank()) throw IOException("chunk start response missing uploadId")
+        if (!uploadId.matches(Regex("[A-Za-z0-9_-]{1,200}"))) throw IOException("Invalid chunk uploadId")
         return uploadId
     }
 
     /** Best-effort: ask which chunks the backend already has so a resume can skip them. */
-    private fun chunkStatus(context: Context, url: String, uploadId: String): Set<Int> {
+    private fun chunkStatus(context: RequestSettings, url: String, uploadId: String): Set<Int> {
         val resp = runCatching {
             val conn = open(context, chunkUrl(url, "/chunk/$uploadId/status"))
             conn.requestMethod = "GET"
@@ -378,7 +452,7 @@ internal object QaLensWebhook {
         }.getOrDefault(emptySet())
     }
 
-    private fun uploadChunkWithRetry(context: Context, url: String, uploadId: String, index: Int, chunk: ByteArray, name: String) {
+    private fun uploadChunkWithRetry(context: RequestSettings, url: String, uploadId: String, index: Int, chunk: ByteArray, name: String) {
         val (code, body) = httpWithRetry(name, "chunk ${index + 1}") {
             val conn = open(context, chunkUrl(url, "/chunk/$uploadId/$index"))
             conn.requestMethod = "POST"
@@ -390,10 +464,10 @@ internal object QaLensWebhook {
             conn.outputStream.use { it.write(chunk) }
             readResponse(conn)
         }
-        if (code !in 200..299) throw IOException("chunk $index upload rejected (HTTP $code): ${body.take(120)}")
+        if (code !in 200..299) throw HttpFailure(code)
     }
 
-    private fun finalizeChunkUpload(context: Context, url: String, uploadId: String, name: String, size: Long, digest: String): Pair<Int, String> =
+    private fun finalizeChunkUpload(context: RequestSettings, url: String, uploadId: String, name: String, size: Long, digest: String): Pair<Int, String> =
         httpWithRetry(name, "finalize") {
             val conn = open(context, chunkUrl(url, "/chunk/$uploadId/finalize"))
             conn.requestMethod = "POST"
@@ -428,7 +502,7 @@ internal object QaLensWebhook {
 
     // ── Offline retry queue (persisted JSON under QaLensPrefs) ───────────────
 
-    private data class PendingUpload(val path: String, val name: String, val createdAt: Long)
+    private data class PendingUpload(val path: String, val name: String, val createdAt: Long, val destination: String)
 
     private fun readQueue(context: Context): List<PendingUpload> {
         val raw = QaLensPrefs.webhookQueue(context)
@@ -440,7 +514,7 @@ internal object QaLensWebhook {
                 val path = o.optString("path")
                 if (path.isBlank()) continue
                 val name = o.optString("name").ifBlank { path.substringAfterLast('/') }
-                out += PendingUpload(path, name, o.optLong("createdAt", 0L))
+                out += PendingUpload(path, name, o.optLong("createdAt", 0L), o.optString("destination"))
             }
         }
         return out
@@ -452,16 +526,16 @@ internal object QaLensWebhook {
             arr.put(org.json.JSONObject()
                 .put("path", p.path)
                 .put("name", p.name)
-                .put("createdAt", p.createdAt))
+                .put("createdAt", p.createdAt).put("destination", p.destination))
         }
         QaLensPrefs.setWebhookQueue(context, arr.toString())
     }
 
-    private fun enqueuePending(context: Context, path: String, name: String) {
+    private fun enqueuePending(context: Context, path: String, name: String, destination: String) {
         synchronized(queueLock) {
             val current = readQueue(context).toMutableList()
             if (current.any { it.path == path }) return
-            current += PendingUpload(path, name, System.currentTimeMillis())
+            current += PendingUpload(path, name, System.currentTimeMillis(), destination)
             while (current.size > MAX_QUEUE) current.removeAt(0)
             writeQueue(context, current)
         }
@@ -478,13 +552,23 @@ internal object QaLensWebhook {
 
     private val queueLock = Any()
 
-    private fun readResponse(conn: HttpURLConnection): Pair<Int, String> {
+    private fun readResponse(conn: HttpURLConnection): Pair<Int, String> = try {
         val code = conn.responseCode
         val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-        val body = runCatching {
-            stream?.bufferedReader()?.use { it.readText() }.orEmpty().take(600)
-        }.getOrDefault("")
+        val body = stream?.bufferedReader()?.use { reader ->
+            val text = StringBuilder()
+            val chars = CharArray(4096)
+            while (text.length < 65_536) {
+                val count = reader.read(chars, 0, minOf(chars.size, 65_536 - text.length))
+                if (count < 0) break
+                text.append(chars, 0, count)
+            }
+            text.toString()
+        }.orEmpty()
+        code to body
+    } finally {
         conn.disconnect()
-        return code to body
+        synchronized(connectionLock) { connections.remove(conn) }
+        jobConnections.get()?.remove(conn)
     }
 }

@@ -1,265 +1,90 @@
-# QaLens — Mobile Release Evidence SDK (debug-only set of libraries)
+# QaLens
 
-QaLens is a **debug-only release evidence SDK** for Android Jetpack Compose apps. It automatically
-captures *what happened, where, and why it may have happened*, then produces a clean, redacted,
-Jira-ready bug bundle — and it records entire QA sessions into single shareable **`.sal`** files
-that replay with the screen synced to state, network, and logs (on-device player, offline web
-player, or CI). Every `.sal` ships with a precomputed `analysis.json` digest and a self-describing
-`for_ai.md`, and the **Control Room** can POST it straight to your AI-analysis backend via webhook.
+QaLens is an MIT-licensed Android Jetpack Compose QA evidence SDK. Testers reproduce a bug in a
+QA/debug build, inspect screen/network/log context, then export a bug report or a portable `.sal`
+recording. Engineers can replay it on Android, in the browser, or inspect it with a Node CLI.
+Release builds use a separate no-op artifact.
 
-QA uses it without Android Studio. Developers integrate it once. Engineers stop asking "what build?",
-"what screen?", "what steps?", "what API failed?", "what flags were on?", and "can you reproduce it?"
+**New contributor: read [HANDOVER.md](HANDOVER.md).** It contains the project context, current
+verified baseline, code map, engineering contracts and next steps.
 
-> **⚡ 60-second demo:** `./demo.sh` starts the mock webhook backend + the web player and opens
-> both — then `./demo.sh curl` drives every hook, `./demo.sh android` scripts the full mobile
-> flow, and `./demo.sh test` runs every suite. The full tour is [`DEMO.md`](DEMO.md).
->
-> **New here?** Read [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — a comprehensive guide for QA testers,
-> app developers, and library contributors. Integrating into your own app? Follow
-> [`integration.md`](integration.md) — a copy-paste guide precise enough for an AI agent;
-> AI coding agents should read [`integration_skill.md`](integration_skill.md) instead.
-> History: [`CHANGELOG.md`](CHANGELOG.md).
+## What it does
 
-> Release builds are a **no-op** with the identical public API — zero overlay, zero sensors, zero
-> notification, zero capture, no PII, nothing uploaded.
+- Floating QA panel, separate Control Room, Compose inspect/tag modes and accessibility checks.
+- Route history, build checks, deterministic readiness scoring, likely-owner classification and
+  reproduction timelines. Empty or incomplete evidence does not establish a healthy app.
+- Optional OkHttp metadata, Timber logs, Room/DataStore changes, feature flags, application data,
+  crash reporter bridges and generic network sinks. Supported Chucker coexistence keeps both tools.
+- Text bug reports, screenshots, frame/video session recording, macros and background SQL tools.
+- Android replay, v2/classic web viewers, CLI comparisons and optional webhook upload. The included
+  Python backend is a local deterministic mock, not a hosted AI service.
 
----
+## Integrate
 
-## Modules
-
-```text
-qalens-core                 pure Kotlin: models, config, redaction, rules, scoring, classifier,
-                            timeline/repro, evidence bundle, reports, .sal format encoders
-qalens-android              Android device/build info, shake, notification, FileProvider
-qalens-compose              the debug overlay, panel, network interceptor, recorder, screenshot,
-                            Control Room (own launcher icon), control service, floating REC chip,
-                            tag mode, webhook uploader
-qalens-navigation-compose   automatic Navigation Compose route tracking
-qalens-replay               the .sal session player (own task; opened from the Control Room or a
-                            shared file — no launcher icon of its own)
-qalens-noop                 release-safe no-op with the same public API
-sample-app                  banking-style demo wired for the full flow
-```
-
-## Install (debug vs release)
+Inside this repository, the sample uses:
 
 ```kotlin
 dependencies {
     debugImplementation(project(":qalens-compose"))
-    debugImplementation(project(":qalens-navigation-compose"))
-    debugImplementation(project(":qalens-replay"))   // the .sal player (debug tool)
+    debugImplementation(project(":qalens-navigation-compose")) // optional route wrappers
+    debugImplementation(project(":qalens-replay"))             // optional Android player
     releaseImplementation(project(":qalens-noop"))
 }
 ```
 
-## Integration levels (minimal developer impact)
+For an external app, follow [integration.md](integration.md). Composite builds and local Maven
+repositories are supported. Default coordinates are `com.qalens:<module>:0.9.0`; availability on
+Maven Central is not claimed. The separate `integration-tests/consumer` builds both variants.
 
-- **L0 — dependency only:** AndroidX Startup installs the overlay; lifecycle, semantics scan,
-  device/build, shake-to-open, bubble, and the foreground notification all work with zero code.
-- **L1 — one root wrapper:** `QaLensRoot { App() }` for better semantics + `testTagsAsResourceId`.
-- **L2 — one nav wrapper:** `QaLensNavHost(navController, startDestination = "home") { … }` for
-  automatic route/back-stack/screen-map tracking.
-- **L3 — one OkHttp interceptor:** `OkHttpClient.Builder().addInterceptor(QaLensOkHttpInterceptor())`
-  for the network timeline + Backend/API classification.
-- **L4 — enrichment (all optional):** feature flags, screen contracts, deep-link scenarios, custom
-  redaction, `Modifier.qaName/qaTag`, `Modifier.qaLensRecompose`, Timber, DataStore/Room observers.
+AndroidX Startup installs the active overlay. Add `QaLensRoot`, navigation wrappers, an interceptor
+and enrichment only where useful. Open it through the bubble, shake, notification or **QaLens
+Control** launcher. Test on a QA/debug build with synthetic data.
 
-```kotlin
-QaLens.configure {
-    appName = "My App"
-    appVersion = BuildConfig.VERSION_NAME
-    buildVariant = BuildConfig.BUILD_TYPE
-    environment = "staging"
-    expectedEnvironment = "staging"   // flags wrong-build testing
-    gitSha = BuildConfig.GIT_SHA
-    featureFlags = mapOf("checkout_v2" to true)
-    addRedaction("internal-token-[a-z0-9]+")   // custom redaction on top of the defaults
-}
-QaLens.install(application)
+## Privacy and host behavior
+
+Screenshots default to private app cache. Known sensitive Compose regions are masked; secure
+windows are refused. Gallery copies and full-display video require separate host opt-ins. Video
+has no per-node masks. Text rules do not guarantee privacy for arbitrary pixels or custom data.
+Network bodies are off by default; opted-in response previews skip SSE and unknown/large bodies.
+QaLens does not control Chucker's independent storage. Coroutine helpers preserve the host's
+uncaught-exception behavior in both active and no-op artifacts.
+
+Read [client migration and limits](docs/CLIENT_SAFETY_FIXES.md) before enabling media or changing
+capture policy. Runtime disable stops collection; it does not delete previously shared artifacts.
+Configured uploads can retry later. Release isolation is checked by dependency gates as well as builds.
+
+## Try the demo or build
+
+```sh
+./demo.sh quick                       # local backend + v2 web viewer
+node web/test/read.test.js
+python3 backend/tests/test_backend.py
 ```
 
-## Open the panel · the Control Room
+QaLens is free and self-hostable under the MIT license; the included backend is a local test mock,
+not a hosted multi-company service. See [DEMO.md](DEMO.md) for the 60-second upload walkthrough and
+[backend setup](backend/README.md) for the mobile and web send paths. The backend binds to loopback
+by default and has no authentication or production storage guarantees. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the complete JDK 17 / Gradle 9.1.0 Android build, lint,
+consumer and device matrix. `./demo.sh test` is a convenience subset, not every CI/device check.
 
-Tap the floating bubble · **shake the device** · the **notification** ("Panel" action) ·
-or `QaLens.openPanel()`.
+To replay offline, open `web/index-v2.html` and drop a `.sal`. Loading the bundled sample through a
+button requires HTTP serving. `web/index.html` remains the classic fallback and `.appsal` editor.
 
-The **QaLens Control** launcher icon opens the **Control Room** — a command & control surface in
-its own task that works even if the in-app overlay is hidden or broken: start/stop recordings
-(it arms and jumps into the app so the Control Room isn't recorded), **PANIC RESTORE**, the
-"inject overlay" kill-switch, opacity/dock settings, permission grants, the recordings manager
-(play / share / **webhook** / two-tap delete), and the webhook configuration.
+## Documentation map
 
-## Panel tabs & modes
-
-`Overview` (build safety + issue counts + likely owner + actions) · `Bug Bundle` · `Repro` ·
-`Screen Health` (session map + live contracts) · `Network` (+ health summary) · `Navigation` ·
-`Accessibility` · `Automation Tags` · `Device & Build` (+ flags + recompose counts + data sources)
-· `Tools` · `Inspect` · `Logs` (filter + level chips + duplicate collapsing for log-heavy apps).
-
-Two on-screen modes from the header: **Ins** (inspect: bounds + warnings, tap to select) and
-**Tag** (automation mode: every visible test tag drawn on its component, untagged interactive
-components flagged red, tap a tag to copy it).
-
-## One-tap exports (all redacted)
-
-`Copy Jira Bug` · `Copy Slack Summary` · `Copy Repro Steps` · `Copy Full QA Report` ·
-`Share Annotated Screenshot` · `Copy Session Summary`.
-
----
-
-## 🎬 Session Replay — the `.sal` file
-
-Record a whole QA session and replay it with the screen synced to every track.
-
-1. **● Record Session** — from the panel, the notification action, or the Control Room
-   (frames by default, or **HD video** via MediaProjection).
-2. Use the app — a stop control is always one tap away: the **floating REC chip** (with
-   draw-over-apps), the in-app REC pill, the notification, or **shake to stop**.
-3. **■ Stop** → the `.sal` hits the share sheet and the Control Room's recordings list.
-4. **▶ Play** it on-device (player opens in its own task — Back always returns to your app),
-   drop it on the **web player**, run `sal_report.js` in CI, or **⇪ webhook** it to your
-   AI-analysis backend.
-5. While replaying: every timeline/network/log row is **clickable and seeks the video to that
-   exact moment** (forward too); rows ahead of the playhead are dimmed; fullscreen/theatre mode
-   on both players.
-
-A `.sal` is a ZIP: `manifest.json` (incl. `sessionId`, `videoStartMillis`, locale/timezone/screen
-metrics), `summary.json`, **`analysis.json`** (precomputed digest: coverage, stats, per-endpoint
-aggregates, screen spans, timestamped anomalies, likely owner), **`for_ai.md`** (the archive
-explains itself to any AI), `timeline/network/logs/state.json`, `report.txt`, and `frames/*.jpg`
-or `video.mp4`. Every text track is redacted before it touches disk. Full spec:
-[`docs/replay_backlog.md`](docs/replay_backlog.md).
-
-### Webhook → AI analysis
-
-Configure once in the Control Room (endpoint, auth header, extra params), then any recording can
-be POSTed as multipart `file` with `X-QaLens-*` metadata headers and `X-QaLens-Digest` (the file's
-own `analysis.json.stats` — triage without unzipping). The backend's HTTP status + response body
-are shown right under the recording. A **Test endpoint** button validates the URL with a
-metadata-only ping.
-
-### Mock backend & hooks (test the webhook without a server)
-
-`backend/server.py` is a **zero-dependency (stdlib-only) local mock** of your AI-analysis backend,
-so you can exercise both QaLens hooks end-to-end without standing up a real service. Run it:
-
-```bash
-python3 backend/server.py                  # http://0.0.0.0:8000  (dashboard: http://127.0.0.1:8000/)
-adb reverse tcp:8000 tcp:8000              # emulator → host port
-```
-
-Then point the **Control Room** webhook at `http://127.0.0.1:8000/webhook` and hit
-**Test endpoint**; uploads (multipart `.sal` + `X-QaLens-*` headers) land on the dashboard with a
-deterministic mock AI verdict. The **web player** hooks in via ⚙ Settings → **Backend URL** =
-`http://127.0.0.1:8000` → **⇪ Send to backend** (multipart `.sal` → `/webhook`, JSON summary →
-`/api/ingest`). Self-test:
-
-```bash
-python3 backend/tests/test_backend.py      # 11 end-to-end tests
-```
-
-Full endpoints, curl examples, data layout, and how to swap the mock verdict for a real AI call:
-[`backend/README.md`](backend/README.md).
-
-### Web player (no Android needed)
-
-`web/` is a **zero-dependency, offline** `.sal` viewer ("Mission Control") — open `web/index.html`
-(or `cd web && python3 -m http.server 8000`), then drop a `.sal` or click **Watch demo session**.
-Filmstrip, error-marked scrubber, playback speed, theatre/fullscreen, seven synced tracks (incl.
-**Screens**, auto-**Insights**, and the **AI Brief** — `for_ai.md`, key `7`), ⭐ **mark moments**
-(key `m`, scrubber stars + `marks.json`), IndexedDB instant-replay recents, markdown **Export**,
-an opt-in **Backend URL** + **⇪ Send to backend** hook, a responsive **mobile/touch layout**, and
-deep links (`?sample&t=24.6` opens the demo AT a moment). CLI:
-`node web/tools/sal_report.js session.sal [--json]` prints a Jira-ready report and exits 1 on
-failures — a ready-made CI gate. See [`web/README.md`](web/README.md).
-
-## Optional enrichment APIs
-
-```kotlin
-// Network (L3)
-OkHttpClient.Builder().addInterceptor(QaLensOkHttpInterceptor())
-
-// Logs
-Timber.plant(QaLensTimberTree())
-
-// Capture feature flags (optional) — decide what feeds the tracks:
-//   captureNetwork = false   → interceptor becomes a pure pass-through
-//   captureLogs = false      → the Timber tree drops every line
-//   networkFromChucker = true → Chucker is the network source (TransactionListener),
-//                              no QaLens interceptor needed, nothing double-counted
-// analysis.json.coverage records each mode so the .sal stays honest either way.
-
-// App-owned data → reports + .sal
-QaLens.registerDataSource("Preferences") { mapOf("theme" to prefs.theme) }
-QaLens.observeDataStore("Preferences", dataStore.data) { "${it[THEME_KEY]}" }   // change events
-QaLens.observeRoom(db, "accounts", "transactions")                              // table-change events
-
-// Feature flags
-QaLens.setFeatureFlagProvider { mapOf("checkout_v2" to flags.isOn("checkout_v2")) }
-
-// Live screen contracts (shown in Screen Health, no noise when absent)
-QaLens.contract("Checkout") {
-    requiresTag("checkout.submit.button")
-    requiresLabel("Submit payment")
-    requiresNoCriticalAccessibilityWarnings()
-    requiresNoFailedNetwork()
-}
-
-// Deep-link scenario runner (launch + expected-route validation, no Android Studio)
-QaLens.registerDeepLinkScenario("Open Recharge", "myapp://recharge", expectedRoute = "recharge")
-
-// Component metadata + recomposition counter
-Modifier.qaName("Recharge Button").qaLensRecompose("RechargeButton")
-```
-
-## "wow" demo (sample app)
-
-1. Launch the sample, open **Home** (a balance API fires; Timber logs it).
-2. Go to an account → **Transfer** → **Confirm Transfer** (a `POST /transfer` returns 500).
-3. Open QaLens → **Overview**: the score drops, **Likely Owner = Backend/API (HIGH)**.
-4. **Bug Bundle → Copy Jira Bug** → paste a complete, redacted report (build, device, repro,
-   network failure, accessibility, flags, data sources).
-5. Or **Record Session** across the flow, **Stop & Share**, and replay the `.sal` in the Player.
-
-The sample also registers deep-link scenarios (`Tools` tab), live contracts (Transfer/Home/Payment
-Failure), and a DataStore-style preferences flow (toggling dark mode emits a change event).
-
-## What's deliberately honest (Android limits)
-
-- Compose private state/function names aren't inspectable; QaLens reads semantics/test tags/
-  accessibility, plus explicit `qaName/qaTag`.
-- The timeline never fabricates taps it didn't observe — it's built from navigation, network,
-  explicit `QaLens.event()/log()`, and Timber; raw taps/keystrokes aren't globally observable.
-- Network needs the OkHttp interceptor; feature flags/contracts/scenarios/data sources need opt-in.
-- Room exposes table-level invalidation (not row diffs); DataStore needs its `data` flow passed in.
-- Default session recording is **frame-based (PixelCopy, ~2fps)** — no permission, no codec; fast
-  glitches can fall between frames. Opt-in **MediaProjection H.264 video** shows a consent dialog
-  and runs a foreground service; `videoStartMillis` keeps it aligned with the tracks.
-- "Draw over other apps" is optional — it only powers the floating REC/stop chip.
-- Screenshot/recording may fail on `FLAG_SECURE` windows. Nothing leaves the device unless QA
-  explicitly shares or configures the webhook; reports/`.sal` are redacted by default.
-
-## Build
-
-```bash
-./gradlew :sample-app:assembleDebug
-./gradlew :qalens-core:test            # 110 unit tests: redaction, scoring, classifier, repro,
-                                       # network health, contracts/scenarios, .sal encoders
-node web/test/read.test.js             # web .sal reader regression test (reads web/sample.sal)
-python3 backend/tests/test_backend.py  # mock backend end-to-end tests (11)
-```
-
-> Note: `assembleRelease` can fail in `lintVitalAnalyzeRelease` under **JDK 25** (an AGP-lint /
-> Kotlin version-parser incompatibility, not a code issue). Verify release parity with
-> `./gradlew :sample-app:compileReleaseKotlin`, or build under a JDK ≤ 21.
-
-
-n of what this project does.
+| Need | Document |
+|---|---|
+| Take over development | [Handover](HANDOVER.md), [current backlog](next.md) |
+| Understand modules and data flow | [Architecture](docs/ARCHITECTURE.md) |
+| Understand overlay behavior and token coverage | [Overlay design](docs/OVERLAY_DESIGN.md) |
+| Integrate into an app | [Integration](integration.md), [OSS contracts](docs/OSS_INTEGRATIONS.md) |
+| Understand client fixes and compatibility changes | [Client fixes](docs/CLIENT_SAFETY_FIXES.md) |
+| Implement or inspect recordings | [SAL format](docs/SAL_FORMAT.md), [retention](docs/RECORDING_RETENTION.md) |
+| Run replay/upload tools | [Web](web/README.md), [backend](backend/README.md), [demo](DEMO.md) |
+| Build, verify or distribute locally | [Contributing](CONTRIBUTING.md) |
+| Review history | [Changelog](CHANGELOG.md), Git history |
 
 ## License
 
-This project is licensed under the MIT License.
-
-Copyright (c) 2026 Saleh Alanazi
-
-See the [LICENSE](LICENSE) file for details.
+[MIT](LICENSE). Copyright © 2026 Saleh Alanazi.

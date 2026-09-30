@@ -2,6 +2,174 @@
 
 ## Unreleased — post-0.9.0
 
+### Overlay responsiveness under continuous logging — 2026-10-01
+- Batch log and network dashboard updates every 100 ms with bounded pending queues, instead of
+  posting a main-thread task and copying history for each observation. Keep recording admission
+  independent; clearing or evicting dashboard rows does not discard recording evidence.
+- Bound dashboard logs to the requested history (20–10,000 entries), 1,048,576 text characters
+  across messages/tags, and 16,384-character previews per field plus a truncation notice. Network
+  dashboard history remains capped at 250 requests. These are text/entry limits, not a heap guarantee.
+- Prepare Repro/Bug Bundle evidence, log filtering/grouping and global search on a background
+  worker. Conflate updates so a stream that never stops cannot starve computation. Render Repro,
+  Logs, Network and search results lazily; bound visible text layout for very long messages.
+- Move overlay report/clipboard formatting off main, cap clipboard output with an explicit notice,
+  remove the redundant semantics scan from the bubble tap, and index screen warnings by node.
+  Preserve synchronous report APIs and flush queued observations when building an export.
+- Add concurrency/queue/evidence regressions and a device load case covering a 12,000-line burst,
+  continuous background and main-thread logs, network events, tab switching and main-thread heartbeats.
+
+### Data hooks and recording insights — 2026-09-24
+- Refresh registered app-data snapshots when Room invalidates a table or an observed DataStore
+  Flow changes, so subsequent recording state samples do not retain stale values. Add explicit
+  stop hooks for host-owned databases and flows, mirrored by the release no-op SDK.
+- Tag Room and DataStore observations without reading rows or preference values. Count them in
+  integration diagnostics and `analysis.json`; identify a change within five seconds before a
+  failed request as a bounded temporal lead, explicitly not a causal conclusion.
+- Verify real Room and Preferences DataStore writes/unsubscribe on the device, and assert a
+  preference change reaches `state.json` and analysis. Keep sample event labels free of values.
+
+### Compose inspection and visual controls — 2026-09-24
+- Discover attached Compose roots in the host Activity plus optionally registered Dialog/Popup
+  roots. Scope node IDs by root, map separate-window coordinates, drop offscreen nodes, and match
+  repeated `qaTag` hints by bounds. Hidden subtrees no longer reappear through manual hints.
+- Refresh semantics-only changes while Inspect/Tag is open, with an explicit invalidation hook for
+  hosts. Add matching active/no-op APIs and a Compose root modifier for separate windows.
+- Default the visual inspector to Actions and add All/Tagged/Issues filters plus a selected-node
+  detail card with a copyable test tag. Use merged accessibility labels without duplicating child
+  image descriptions onto already text-labeled parents.
+- Expand Android device coverage for dialog roots, hidden content, label merging and state-only
+  changes; compile the new API in the independent debug/release consumer.
+
+### Tester accessibility and archive retention — 2026-09-24
+- Give the tester sheet a named Close button, button roles for actions, an expanded/collapsed
+  More tools state, and decorative symbols hidden from accessibility. Correct the English privacy
+  note's punctuation when the host app uses RTL layout. Review the sheet on a Pixel emulator in
+  RTL and both overlay color schemes; physical-device TalkBack remains to be checked.
+- Store completed `.sal` archives in app-private files instead of evictable cache. Rescan on SDK
+  startup, migrate older cache archives without deleting a failed move, and expose the new location
+  through the existing sharing provider. Temporary frames and screenshots still use cache.
+- Add device coverage for archive location, cache migration and share URI. Document that a host
+  must exclude the archive directory from its own backup rules when evidence must stay only on the
+  test device.
+
+### Archive reader limits — 2026-09-23
+- Bound ZIP entry counts, per-entry and total expansion, nested gzip text, and manifest size in the
+  shared web/CLI reader and Python mock backend. Reject invalid paths, duplicates, ZIP CRC errors,
+  missing listed entries and manifest CRC mismatches before replay or backend storage.
+- Add v1/v2, nested compression, tampered checksum and expansion regressions. The backend remains
+  a loopback-only development mock without authentication or tenant isolation.
+- Make the recording stop chip expose an accessibility click action and release its in-app window
+  when its Activity is destroyed. The projection notification opens recording controls on a body
+  tap while its explicit action stops capture. Move chip/notification text into resources and show
+  a short upload verdict in Control Room instead of truncating raw backend JSON.
+- Build webhook app/device metadata from application context so uploads started in the standalone
+  Control Room retain headers and query context even before a host Activity has resumed.
+- Align the Gradle wrapper with CI at 9.1.0 and make the internal Maven zip script accept a version,
+  clearing old generated publications before packaging.
+
+### Tester flow and local upload demo — 2026-09-23
+- Make the QA quick-actions sheet the default for new installs, with three primary actions: record a
+  session, capture a screenshot, and mark a bug. Move macros, device/report copying, tags, Control
+  Room, watch mode and developer diagnostics under **More tools**.
+- Apply the existing overlay tokens to that sheet. Add a deliberate **Send latest session** action
+  when a backend endpoint and saved recording are both available, with a short upload outcome.
+- Make the local backend and demo web server bind to loopback by default. Restrict browser CORS to
+  loopback or same-host pages; validate request sizes, JSON object bodies, chunk sizes/counts and
+  upload IDs before accepting or using them. Remove chunk staging before returning finalize success;
+  make the curl demo use the same 1 MB chunk contract as the Android client.
+- Make the sample's debug-only cleartext exception explicit for loopback domains and align imported
+  `.appsal` files that omit a panel preference with the tester-first default.
+- Replace the handoff prompt duplicate with the repository's single current handover. Refresh the
+  backend quick start and state clearly that the mock stores raw recordings and is not a shared
+  production service. QaLens itself remains free and self-hostable under MIT.
+- Validation: `./demo.sh test` passed (web reader, all 20 backend tests, Kotlin unit/release-parity
+  checks and expected failing-session CLI smoke); `:sample-app:assembleDebug` and debug lint for the
+  Compose, Android and sample modules passed. Lint warnings and the manual API 36 AVD and backend
+  smoke results are recorded in HANDOVER.
+
+### Host-adaptive overlay foundations — 2026-09-13
+- Add `QaLensTokens`: host-adaptive palettes for the bubble, inspect/tag canvases, scrim and tag
+  legend. A light host gets the dark overlay panel; a dark host gets an opaque light panel. The selector reads the
+  configuration night mask because the overlay attaches at decor level, outside the host
+  Material theme.
+- Fix a real contradiction: `#E53935` meant "accessibility warning" in the inspect canvas and
+  "untagged interactive component" in the tag canvas. Warning and untagged are now distinct.
+- Add `QaLensTokensTest`, which recomputes WCAG contrast and fails below AA 4.5:1. Measuring the
+  first draft showed its quoted 4.6–5.4:1 ratios were actually 2.2–3.8:1, because the signal
+  colours had been chosen against a light surface and drawn on a dark one; all values were
+  recomputed for the surface they are used on.
+- Migrate the QA bubble, inspect and tag canvases, panel scrim, tag chip and tag-mode legend to
+  tokens. The bubble keeps its original crisp white ring. Add `QaLensDimens` (4dp scale, one
+  radius family, 48dp touch minimum) and `QaLensType`.
+- Document the system, contrast tables and adoption order in docs/OVERLAY_DESIGN.md. The
+  inspector panel, Control Room and REC chip still use their own literals and remain to be migrated.
+
+### Handover consolidation — 2026-09-13
+- Replace conflicting onboarding snapshots with one self-contained HANDOVER and a short takeover
+  prompt; add root AGENTS navigation and a single current backlog.
+- Preserve archive details in docs/SAL_FORMAT.md; correct architecture, privacy, retry, integration
+  and verification guidance. Remove six superseded guides/snapshots; Git retains their history.
+- Refresh documentation links, including the landing-page footer. No runtime behavior changed.
+
+### Android client safety — 2026-09-13
+- Preserve coroutine crash delivery in active and no-op SDKs; redact complete authorization values.
+- Make runtime disable stop capture/collectors/uploads, finalize recording and detach overlays.
+- Move JPEG/PNG file work off main; atomically publish screenshots; add Compose privacy masks,
+  secure-window guards, private-cache defaults and explicit gallery/unmasked-video opt-ins.
+- Skip streaming response previews; isolate imported webhook credentials; handle queue pressure,
+  cancellation and persistent transient retries with settings captured per upload.
+- Bound Android replay extraction, text decoding and CRC work; clean session caches and decode
+  downsampled frames off main. Refresh route inspection, bound background SQL and report macro
+  failures accurately. Wire periodic memory sampling and preserve frame penalties in exports.
+- Export public coroutine types to consumers from both active and no-op artifacts.
+- Add fourteen JVM regressions and expand device coverage. See docs/CLIENT_SAFETY_FIXES.md for
+  migration behavior, executed checks and remaining validation limits.
+
+### OSS integration and Kotlin hardening — 2026-09-08
+- Replace invalid Chucker-as-source reflection with public launcher and interceptor coexistence;
+  legacy configuration no longer silently suppresses network capture. Sample uses Chucker 4.1.0
+  with matching release no-op, verified against the current Kotlin 2.0.21 toolchain.
+- Add dependency-free network sinks, shared redaction/capture limits, declared source coverage,
+  integration diagnostics and an Overview copy action. Deduplicate OkHttp observations per call.
+- Add bounded/redacted external crash input and prevent echoing vendor-reported crashes back.
+- Fix missing network-state permission, default-network transitions, notification permission
+  race handling and Compose settings collection.
+- Fix composite-build coordinates and add an independent consumer with debug/release checks,
+  contribution and migration docs, issue/PR templates and a GitHub verification workflow.
+- Add eleven core and eight real OkHttp tests; extend device regression coverage for Chucker,
+  adapters and crash reporters. See HANDOVER.md for validation and limits.
+
+### Recording retention — 2026-09-08
+- Preserve early logs, requests, crashes, timings, connectivity, memory, bookmarks and state
+  independently of dashboard history limits and log clearing.
+- Bound each recording track by entries and estimated size; disclose omissions and Android
+  dropped frame callbacks in analysis coverage, replay viewers and exported reports.
+- Block clean CLI/backend conclusions and unverified fixes when recordings report evidence loss.
+- Fix quadratic email redaction on long body tokens, discovered by the device overflow check.
+- Add twelve core tests, fourteen web/CLI assertions, two backend tests and a dependency-free
+  Android instrumentation runner for real archive retention and budget-overflow checks.
+
+### Reliability audit — 2026-09-08
+- Restore true debug/release SDK separation and enforce the release runtime dependency graph.
+- Fix actual Android v2 archive decoding in web/CLI/backend and the upload digest header.
+  Reject malformed archives and report insufficient evidence instead of a healthy verdict.
+- Guard recording callbacks and saves by lifecycle/session; preserve stalled recordings,
+  follow foreground activities, save off the UI thread, publish atomically, and stream CRCs.
+- Restrict recorded evidence to the session window and include the crash during finalization.
+- Correct Android frame timing units and batch UI updates to avoid a rendering feedback loop.
+- Prevent recursive crash-handler installation; preserve host crash delegation.
+- Bound body previews, skip one-shot/duplex requests, and preserve response streams.
+- Fix screenshot bitmap cleanup and overlay restoration; redact annotation text.
+- Add saving feedback, overview crash evidence/copy action, and jank sample counts.
+- Expand verification with lifecycle, window, crash, stream and actual-layout archive regressions.
+  See HANDOVER.md for results and remaining limitations.
+
+### Correctness
+- Use consistent nearest-rank p95/p99 calculations for network health, exported analysis,
+  and frame timing. Fix off-by-one ranks at exact percentile boundaries and underestimated
+  network p95 for small samples. Add seven core regression tests; preserve sample inclusion
+  rules, public APIs, and archive schemas.
+
 ### Backlog completion, hooks & mock backend
 - **Backlog completion.** Phases 2–5 shipped: B3 (pluggable tabs), B4 (GitHub/Linear/Markdown
   exports), B5 (connectivity + Chucker coexistence), B7 (coroutine exception handler), B8 (memory
@@ -15,7 +183,7 @@
 - **Mock backend.** Stdlib-only `backend/server.py` (webhook + ingest + dashboard + uploads store +
   deterministic mock AI verdict) + `backend/tests/test_backend.py` (11 e2e tests) +
   `backend/README.md`.
-- **Review.** `docs/CODE_REVIEW.md` added — a frank engineering review of core/compose/web/backend.
+- **Review.** An engineering review of core/compose/web/backend was added; current work is tracked in `next.md`.
 
 ## 0.9.0 — 2026-06
 
@@ -79,4 +247,4 @@
 
 ### Distribution
 - `maven-publish` on all library modules: `./gradlew publishToMavenLocal` →
-  `com.qalens:qalens-*:0.9.0`. See [`integration_skill.md`](integration_skill.md) (AI agents) and [`integration.md`](integration.md) (humans).
+  `com.qalens:qalens-*:0.9.0`. See [`integration.md`](integration.md) for developer and AI-agent integration instructions.

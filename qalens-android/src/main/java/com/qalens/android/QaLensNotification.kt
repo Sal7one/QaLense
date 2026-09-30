@@ -69,7 +69,11 @@ object QaLensNotification {
             .setSilent(true)
             .build()
 
-        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        } catch (_: SecurityException) {
+            // Permission may be revoked between the preflight check and notify. The host keeps running.
+        }
     }
 
     fun dismiss(context: Context) {

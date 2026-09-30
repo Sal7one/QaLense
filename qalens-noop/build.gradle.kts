@@ -19,7 +19,8 @@ android {
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    // StateFlow, Flow and CoroutineExceptionHandler are part of the public SDK surface.
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     api(project(":qalens-core"))
     // A7: the parity check is also EXECUTED (not only compiled) — exerciseAll() must run.
     testImplementation("junit:junit:4.13.2")
@@ -45,9 +46,9 @@ afterEvaluate {
     publishing {
         publications {
             register<MavenPublication>("release") {
-                groupId = "com.qalens"
+                groupId = project.group.toString()
                 artifactId = "qalens-noop"
-                version = "0.9.0"
+                version = project.version.toString()
                 from(components["release"])
             }
         }

@@ -3,47 +3,26 @@ package com.qalens
 import android.content.Context
 import android.content.Intent
 
-/**
- * Launches [Chucker](https://github.com/ChuckerTeam/chucker)'s network inspector activity if Chucker
- * is on the debug classpath. QaLens and Chucker are complementary:
- * - **Chucker** = full request/response body inspection on-device (its own UI).
- * - **QaLens** = redacted metadata + evidence bundle + `.sal` recording + AI digest.
- *
- * Both can intercept the same `OkHttpClient` — Chucker first (it needs the raw body), QaLens second
- * (it only reads metadata, never touches the body). Recommended setup:
- * ```kotlin
- * OkHttpClient.Builder()
- *     .addInterceptor(ChuckerInterceptor.Builder(context).build())  // first — full bodies
- *     .addInterceptor(QaLensOkHttpInterceptor())                    // second — metadata only
- *     .build()
- * ```
- *
- * This bridge uses reflection so the Chucker dependency stays optional — if Chucker is absent,
- * [isAvailable] returns false and the "Open Chucker" button is hidden.
+/** Optional launcher using Chucker's public API; never reads its internal database or bodies.
+ * Attach ChuckerInterceptor and QaLensOkHttpInterceptor to the same client for complementary views.
  */
 object QaLensChuckerBridge {
+    private fun api(): Class<*> = Class.forName("com.chuckerteam.chucker.api.Chucker")
 
-    /** True if Chucker's launcher activity is on the classpath. */
+    /** The no-op artifact has the same class name; check isOp rather than class presence alone. */
     fun isAvailable(context: Context): Boolean = runCatching {
-        context.packageManager.getLaunchIntentForPackage("com.github.chuckerte.chucker")
-            ?: run {
-                Class.forName("com.chuckerteam.chucker.api.Chucker")
-                true
-            }
-        true
+        val clazz = api()
+        val instance = clazz.getField("INSTANCE").get(null)
+        clazz.getMethod("isOp").invoke(instance) == true &&
+            clazz.getMethod("getLaunchIntent", Context::class.java) != null
     }.getOrDefault(false)
 
-    /**
-     * Launch Chucker's main activity. Returns true if launched, false if Chucker isn't available.
-     * Uses reflection so QaLens doesn't need Chucker as a hard dependency.
-     */
     fun launch(context: Context): Boolean = runCatching {
-        // Chucker 4.x: com.chuckerteam.chucker.api.Chucker.launch(context)
-        val clazz = Class.forName("com.chuckerteam.chucker.api.Chucker")
-        val method = clazz.getMethod("launch", Context::class.java)
-        method.invoke(null, context)
+        if (!isAvailable(context)) return false
+        val intent = api().getMethod("getLaunchIntent", Context::class.java).invoke(null, context) as Intent
+        context.startActivity(intent)
         true
     }.onFailure {
-        QaLens.pushError(ErrorKind.OTHER, "Failed to launch Chucker: ${it.message}")
+        QaLens.pushError(ErrorKind.OTHER, "Failed to open Chucker: ${it.javaClass.simpleName}")
     }.getOrDefault(false)
 }

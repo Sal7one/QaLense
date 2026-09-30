@@ -70,7 +70,8 @@ object EvidenceBuilder {
         slowThresholdMs: Long = 2000L,
         contractResult: ContractResult? = null,
         dataSources: Map<String, Map<String, String>> = emptyMap(),
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        frameMetrics: List<FrameMetricsSample> = emptyList()
     ): EvidenceBundle {
         val timeline = TimelineMerger.merge(snapshot.events, network, config)
         val repro = ReproStepGenerator.generate(timeline)
@@ -80,7 +81,8 @@ object EvidenceBuilder {
             screen = snapshot.screen,
             network = network,
             buildSafetyIssues = buildSafety.issues,
-            slowThresholdMs = slowThresholdMs
+            slowThresholdMs = slowThresholdMs,
+            frameMetrics = frameMetrics
         )
         val classification = BugClassifier.classify(
             network = network,

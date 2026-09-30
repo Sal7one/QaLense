@@ -2,10 +2,10 @@ package com.qalens
 
 object QaLensRules {
     fun evaluate(nodes: List<InspectNode>, config: QaLensConfig): List<InspectNode> {
-        val screenWarnings = evaluateScreen(nodes)
+        val screenWarnings = evaluateScreen(nodes).groupBy { it.nodeId }
         return nodes.map { node ->
             val nodeWarnings = evaluateNode(node, config)
-            node.copy(warnings = nodeWarnings + screenWarnings.filter { it.nodeId == node.id })
+            node.copy(warnings = nodeWarnings + screenWarnings[node.id].orEmpty())
         }
     }
 

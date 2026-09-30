@@ -136,7 +136,7 @@ footer a { color:var(--accent); text-decoration:none; }
     <h1>Mobile release evidence,<br/><em>end to end</em></h1>
     <p class="lede">QaLens observes a QA session, turns it into a redacted bug bundle and a replayable <code>.sal</code> recording, and ships it to your analysis backend — through a web player, an Android SDK, and a mock backend you can stand up in ten seconds.</p>
     <div class="cta-row">
-      <a class="btn btn-primary" href="index.html?sample&t=24.6">▶ Open the web player — right on the failing transfer</a>
+      <a class="btn btn-primary" href="index-v2.html?sample&t=24.6">▶ Open the new web player — right on the failing transfer</a>
       <a class="btn" href="http://127.0.0.1:8000/" target="_blank" rel="noopener">Open the mock backend dashboard</a>
       <a class="btn btn-code" href="../DEMO.md" target="_blank" rel="noopener">Read the demo tour</a>
       <a class="btn" href="integration.html">⚙ Integration guide</a>
@@ -145,7 +145,7 @@ footer a { color:var(--accent); text-decoration:none; }
       <div class="stat"><b>0 code</b><span>to get Level-0 evidence</span></div>
       <div class="stat"><b>7 tracks</b><span>synced to one playhead</span></div>
       <div class="stat"><b>3 hooks</b><span>mobile · web · backend</span></div>
-      <div class="stat"><b>158 tests</b><span>core · web · backend · parity</span></div>
+      <div class="stat"><b>Tested</b><span>unit · device · consumer · release isolation</span></div>
     </div>
   </div>
 </header>
@@ -154,6 +154,7 @@ footer a { color:var(--accent); text-decoration:none; }
   <div class="wrap">
     <h2>Frontend — Mission Control<span class="tag">web player</span></h2>
     <p class="sub">A zero-dependency, offline-first <code>.sal</code> viewer. Drop a recording, and the screen, timeline, network, logs, state and auto-insights all scrub on one playhead.</p>
+    <p class="sub"><a class="btn btn-primary" href="index-v2.html?sample&t=24.6">✨ Try the NEW v2 design</a> <a class="btn" href="index.html?sample&t=24.6">classic design</a></p>
     <div class="grid">
       <div class="card"><div class="icon frontend">▶</div><h3>Synced replay</h3><p>Frames or H.264 video locked to every track; every row seeks the video — forward too.</p><p class="kbd"><kbd>space</kbd> <kbd>←</kbd><kbd>→</kbd> <kbd>e</kbd> <kbd>s</kbd> <kbd>t</kbd> <kbd>x</kbd></p></div>
       <div class="card"><div class="icon frontend">✦</div><h3>AI Brief &amp; insights</h3><p>The recording explains itself: <code>for_ai.md</code> tab, on-device anomalies, score donut, likely owner with reasons.</p><p class="kbd"><kbd>7</kbd></p></div>
@@ -172,7 +173,7 @@ footer a { color:var(--accent); text-decoration:none; }
     <div class="grid">
       <div class="card"><div class="icon mobile">🫧</div><h3>Floating QA panel</h3><p>Overview, Bug Bundle, Repro, Screen Health, Network, Navigation, Accessibility, Tags, Device, Tools, Inspect, Logs — one tap from the bubble, a shake, or the notification.</p></div>
       <div class="card"><div class="icon mobile">📋</div><h3>One-tap exports</h3><p>Jira · Slack · Repro · Full report · GitHub · Linear · Markdown — all redacted, all clipboard-ready.</p></div>
-      <div class="card"><div class="icon mobile">🎬</div><h3>Session recording</h3><p>Frames (no permission) or HD video → <code>.sal</code> with precomputed <code>analysis.json</code> + <code>for_ai.md</code> — share, replay, or webhook it.</p></div>
+      <div class="card"><div class="icon mobile">🎬</div><h3>Session recording</h3><p>Frames (no permission) or host-enabled HD video → <code>.sal</code> with precomputed <code>analysis.json</code> + <code>for_ai.md</code> — share, replay, or webhook it.</p></div>
       <div class="card"><div class="icon mobile">💥</div><h3>Crash, ANR &amp; jank</h3><p>Crash handler with screen/route/network context, ANR watchdog, coroutine bridge, frame-timing jank — all feeding the score and the <code>.sal</code>.</p></div>
       <div class="card"><div class="icon mobile">🤖</div><h3>Macros &amp; assertions</h3><p>Drive the real UI: <code>tap</code>, <code>type</code>, <code>deeplink</code>, plus <code>assert exists / route / network</code> and <code>if … else</code> — a login completes itself.</p></div>
       <div class="card"><div class="icon mobile">🛰</div><h3>Control Room</h3><p>Own-task command center: recordings manager, panic restore, webhook config with Test endpoint, QA profiles, <code>.appsal</code> import.</p></div>
@@ -195,7 +196,7 @@ footer a { color:var(--accent); text-decoration:none; }
       <div class="p">$ python3 backend/server.py</div>
       <div class="o">dashboard:  http://127.0.0.1:8000/</div>
       <div class="o">webhook:    http://127.0.0.1:8000/webhook</div>
-      <div class="o">15 end-to-end tests: python3 backend/tests/test_backend.py</div>
+      <div class="o">Backend regression suite: python3 backend/tests/test_backend.py</div>
     </div>
   </div>
 </section>
@@ -231,15 +232,15 @@ footer a { color:var(--accent); text-decoration:none; }
       <div class="o">✓ this landing page ...... http://127.0.0.1:8100/landing.html</div>
       <div class="p">$ ./demo.sh curl      # drive every hook from the terminal</div>
       <div class="p">$ ./demo.sh android   # build + install the sample app, script the wow flow</div>
-      <div class="p">$ ./demo.sh test      # every test suite, as CI would run it</div>
+      <div class="p">$ ./demo.sh test      # convenience checks; full matrix in CONTRIBUTING.md</div>
     </div>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
-    <span>QaLens · debug-only release-evidence SDK · MIT · demo tour in <a href="../DEMO.md">DEMO.md</a> · review in <a href="../docs/CODE_REVIEW.md">docs/CODE_REVIEW.md</a></span>
-    <span><a href="index.html">Mission Control</a> · <a href="http://127.0.0.1:8000/" target="_blank" rel="noopener">Backend dashboard</a> · <a href="../README.md">README</a></span>
+    <span>QaLens · debug-only release-evidence SDK · MIT · demo tour in <a href="../DEMO.md">DEMO.md</a> · next work in <a href="../next.md">next.md</a></span>
+    <span><a href="index-v2.html">Mission Control v2</a> · <a href="index.html">classic</a> · <a href="http://127.0.0.1:8000/" target="_blank" rel="noopener">Backend dashboard</a> · <a href="../README.md">README</a></span>
   </div>
 </footer>
 

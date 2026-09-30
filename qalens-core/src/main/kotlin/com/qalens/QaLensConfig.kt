@@ -18,6 +18,7 @@ data class QaLensConfig(
     val featureFlags: Map<String, Boolean> = emptyMap(),
     val userType: String? = null,
     val redactionRules: List<RedactionRule> = RedactionRule.defaultRules(),
+    /** Newest dashboard events, up to 10,000 and ~1M text characters; recording has separate budgets. */
     val maxEventHistory: Int = 600,
     val touchTargetMinDp: Float = 48f,
     val slowNetworkThresholdMs: Long = 2000L,
@@ -28,8 +29,9 @@ data class QaLensConfig(
     /**
      * R8: opt-in network body capture. Off by default. When enabled, the OkHttp interceptor
      * captures request/response body *previews* (text-ish content types only — JSON/XML/forms),
-     * truncated to 64&nbsp;KB, then folded through [QaLensRedactor] before storage (and re-redacted
-     * again at `.sal` encode time). Binary bodies get a `<binary N bytes>` placeholder instead.
+     * bounded to 64&nbsp;KB, then folded through [QaLensRedactor] before storage (and re-redacted
+     * again at `.sal` encode time). SSE and unknown/large response bodies are not read.
+     * Binary bodies get a `<binary N bytes>` placeholder instead.
      */
     val captureNetworkBodies: Boolean = false,
     /**
@@ -46,14 +48,15 @@ data class QaLensConfig(
      */
     val captureLogs: Boolean = true,
     /**
-     * Use Chucker as the network source instead of QaLensOkHttpInterceptor. When true (and
-     * Chucker is on the debug classpath), QaLens registers a Chucker TransactionListener via
-     * reflection and converts every collected transaction into a NetworkEvent — no QaLens
-     * interceptor needed (it becomes a pass-through). If Chucker is missing, QaLens logs a
-     * warning and falls back to the QaLens interceptor. Teams already running Chucker get the
-     * full evidence pipeline (Network tab, classifier, .sal) from ONE inspector.
+     * Legacy setting retained for source compatibility. Chucker does not expose a public live
+     * transaction listener. This flag no longer disables QaLensOkHttpInterceptor: install it
+     * alongside ChuckerInterceptor, or report another transport through QaLens.networkSink.
      */
-    val networkFromChucker: Boolean = false
+    val networkFromChucker: Boolean = false,
+    /** MediaProjection cannot apply per-node masks. Explicit host opt-in to unmasked full-display video. */
+    val allowUnmaskedVideo: Boolean = false,
+    /** Screenshots stay in private app cache unless the host explicitly enables gallery copies. */
+    val saveScreenshotsToGallery: Boolean = false
 ) {
     class Builder(seed: QaLensConfig = QaLensConfig()) {
         var enabled: Boolean = seed.enabled
@@ -78,6 +81,8 @@ data class QaLensConfig(
         var captureNetwork: Boolean = seed.captureNetwork
         var captureLogs: Boolean = seed.captureLogs
         var networkFromChucker: Boolean = seed.networkFromChucker
+        var allowUnmaskedVideo: Boolean = seed.allowUnmaskedVideo
+        var saveScreenshotsToGallery: Boolean = seed.saveScreenshotsToGallery
 
         /** Add a custom redaction rule on top of the defaults. */
         fun addRedaction(pattern: String, replacement: String = "[REDACTED]") {
@@ -96,7 +101,7 @@ data class QaLensConfig(
             featureFlags = featureFlags,
             userType = userType,
             redactionRules = redactionRules,
-            maxEventHistory = maxEventHistory.coerceAtLeast(20),
+            maxEventHistory = maxEventHistory.coerceIn(20, 10_000),
             touchTargetMinDp = touchTargetMinDp.coerceAtLeast(24f),
             slowNetworkThresholdMs = slowNetworkThresholdMs.coerceAtLeast(250L),
             requireTestTagsForClickable = requireTestTagsForClickable,
@@ -106,7 +111,9 @@ data class QaLensConfig(
             captureNetworkBodies = captureNetworkBodies,
             captureNetwork = captureNetwork,
             captureLogs = captureLogs,
-            networkFromChucker = networkFromChucker
+            networkFromChucker = networkFromChucker,
+            allowUnmaskedVideo = allowUnmaskedVideo,
+            saveScreenshotsToGallery = saveScreenshotsToGallery
         )
     }
 
@@ -138,7 +145,7 @@ data class RedactionRule(
             ),
             // Authorization headers (any scheme)
             RedactionRule(
-                Regex("(?i)authorization\\s*[:=]\\s*\\S+"),
+                Regex("(?i)authorization\\s*[:=]\\s*[^\\r\\n]+"),
                 "Authorization: [REDACTED]"
             ),
             // Cookie / Set-Cookie headers (rest of line)
@@ -156,9 +163,10 @@ data class RedactionRule(
                 Regex("(?i)(access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|password|passwd|secret|token)(\"?\\s*[:=]\\s*\"?)([^\"\\s,&}]+)"),
                 "$1$2[REDACTED]"
             ),
-            // Email addresses
+            // Email addresses. Start only at a local-part boundary; otherwise a long token with
+            // no @ is retried at every character, making body redaction quadratic.
             RedactionRule(
-                Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"),
+                Regex("(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"),
                 "[EMAIL_REDACTED]"
             ),
             // Credit-card-like numbers (13–16 digits, optional spaces/dashes). Runs before

@@ -17,6 +17,9 @@ Run:  python3 backend/tests/test_backend.py
 """
 
 import http.client
+import gzip
+import io
+import zipfile
 import json
 import os
 import sys
@@ -25,9 +28,10 @@ import threading
 import unittest
 import zlib
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from server import make_server  # noqa: E402
+from server import make_server, parse_sal  # noqa: E402
 
 SAMPLE_SAL = Path(__file__).resolve().parent.parent.parent / "web" / "sample.sal"
 
@@ -212,9 +216,7 @@ class BackendTest(unittest.TestCase):
     def test_12_chunked_upload_roundtrip(self):
         raw = SAMPLE_SAL.read_bytes()
         chunk_size = 1_000_000
-        # sample.sal is smaller than one chunk, so this is [whole, empty remainder] —
-        # still exercises start → chunk ×2 → status → finalize → download.
-        chunks = [raw[:chunk_size], raw[chunk_size:]]
+        chunks = [raw[i:i + chunk_size] for i in range(0, len(raw), chunk_size)]
         start = start_chunk_upload("sample.sal", len(raw), len(chunks), "{\"failedRequests\":1}")
         self.assertTrue(start["ok"])
         uid = start["uploadId"]
@@ -222,7 +224,7 @@ class BackendTest(unittest.TestCase):
             got = put_chunk(uid, i, chunk)
             self.assertEqual(got["received"], i)
         resp, data = request("GET", "/webhook/chunk/%s/status" % uid, expect=200)
-        self.assertEqual(sorted(json.loads(data)["received"]), [0, 1])
+        self.assertEqual(sorted(json.loads(data)["received"]), [0])
         resp, data = request("POST", "/webhook/chunk/%s/finalize" % uid, body=b"",
                              headers={"X-QaLens-Sal-Name": "sample.sal",
                                       "X-QaLens-Sal-Size": str(len(raw)),
@@ -233,12 +235,14 @@ class BackendTest(unittest.TestCase):
         self.assertIn("likelyOwner", final)
         self.assertIn("summary", final)
         self.assertEqual(final["storedAs"], "sample.sal")
+        self.assertFalse((self.server.store.uploads_dir() / uid).exists(),
+                         "completed upload should remove its temporary chunk staging")
         resp, data = request("GET", "/uploads/%s/download" % final["id"], expect=200)
         self.assertEqual(data, raw)
 
     def test_13_chunk_status_reports_received(self):
         raw = SAMPLE_SAL.read_bytes()
-        chunks = [raw[:1_000_000], raw[1_000_000:]]
+        chunks = [raw[i:i + 1_000_000] for i in range(0, len(raw), 1_000_000)]
         start = start_chunk_upload("status.sal", len(raw), len(chunks), "{\"failedRequests\":2}")
         uid = start["uploadId"]
         resp, data = request("GET", "/webhook/chunk/%s/status" % uid, expect=200)
@@ -246,12 +250,10 @@ class BackendTest(unittest.TestCase):
         put_chunk(uid, 0, chunks[0])
         resp, data = request("GET", "/webhook/chunk/%s/status" % uid, expect=200)
         self.assertEqual(json.loads(data)["received"], [0])
-        put_chunk(uid, 1, chunks[1])
-        resp, data = request("GET", "/webhook/chunk/%s/status" % uid, expect=200)
-        self.assertEqual(json.loads(data)["received"], [0, 1])
 
     def test_14_finalize_missing_chunk_conflicts(self):
-        raw = SAMPLE_SAL.read_bytes()
+        sample = SAMPLE_SAL.read_bytes()
+        raw = sample + b"x" * (1_000_001 - len(sample))
         chunks = [raw[:1_000_000], raw[1_000_000:]]
         start = start_chunk_upload("missing.sal", len(raw), len(chunks), "{\"failedRequests\":3}")
         uid = start["uploadId"]
@@ -266,12 +268,136 @@ class BackendTest(unittest.TestCase):
 
     def test_15_chunk_start_is_idempotent_resume(self):
         raw = SAMPLE_SAL.read_bytes()
-        first = start_chunk_upload("resume.sal", len(raw), 2, "{\"failedRequests\":4}")
+        first = start_chunk_upload("resume.sal", len(raw), 1, "{\"failedRequests\":4}")
         self.assertFalse(first.get("resumed", False))
-        second = start_chunk_upload("resume.sal", len(raw), 2, "{\"failedRequests\":4}")
+        second = start_chunk_upload("resume.sal", len(raw), 1, "{\"failedRequests\":4}")
         self.assertTrue(second["ok"])
         self.assertTrue(second.get("resumed", False))
         self.assertEqual(second["uploadId"], first["uploadId"])
+
+    def test_16_android_v2_deflate_of_gzip_roundtrips(self):
+        out = io.BytesIO()
+        with zipfile.ZipFile(SAMPLE_SAL) as src, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+            for name in src.namelist():
+                data = src.read(name)
+                if name == "manifest.json":
+                    manifest = json.loads(data)
+                    manifest["formatVersion"] = 2
+                    data = json.dumps(manifest).encode()
+                dst.writestr(name, gzip.compress(data) if name.endswith(".json") else data)
+        body = multipart_body("v2-test", "android-v2.sal", out.getvalue())
+        _, data = request("POST", "/webhook", body=body,
+                          headers={"Content-Type": "multipart/form-data; boundary=v2-test"}, expect=200)
+        uid = json.loads(data)["id"]
+        _, data = request("GET", "/api/uploads/" + uid, expect=200)
+        detail = json.loads(data)
+        self.assertEqual(detail["manifest"]["formatVersion"], 2)
+        self.assertEqual(detail["verdict"]["severity"], "warning")
+        self.assertEqual(detail["summary"]["score"], 58)
+        self.assertTrue(detail["analysis"]["coverage"]["network"])
+        request("DELETE", "/api/uploads/" + uid, expect=200)
+
+    def test_17_invalid_archives_are_rejected_without_storing(self):
+        _, before = request("GET", "/api/uploads", expect=200)
+        for manifest in [None, b"not json", b"[]", b'{"formatVersion":3}', b'{"formatVersion":true}']:
+            with self.subTest(manifest=manifest):
+                out = io.BytesIO()
+                with zipfile.ZipFile(out, "w") as dst:
+                    if manifest is not None:
+                        dst.writestr("manifest.json", manifest)
+                body = multipart_body("bad-test", "invalid.sal", out.getvalue())
+                _, data = request("POST", "/webhook", body=body,
+                    headers={"Content-Type": "multipart/form-data; boundary=bad-test"}, expect=400)
+                self.assertIn("Invalid .sal", json.loads(data)["error"])
+        _, after = request("GET", "/api/uploads", expect=200)
+        self.assertEqual(json.loads(before), json.loads(after))
+
+    def test_18_missing_analysis_does_not_claim_healthy(self):
+        from server import mock_verdict
+        verdict = mock_verdict({}, {"manifest": {"formatVersion": 1}})
+        self.assertEqual(verdict["severity"], "unknown")
+        self.assertIn("Insufficient evidence", verdict["label"])
+
+    def test_19_partial_evidence_cannot_claim_healthy(self):
+        from server import mock_verdict
+        for recording in ({"truncated": True}, {"droppedFrameCallbacks": 4},
+                          {"truncated": False, "tracks": {"network": {"dropped": 3}}}):
+            with self.subTest(recording=recording):
+                verdict = mock_verdict({}, {"summary": {"score": 100},
+                    "analysis": {"coverage": {"recording": recording}}})
+                self.assertEqual(verdict["severity"], "unknown")
+                self.assertIn("omitted observations", verdict["summary"])
+
+    def test_20_known_failure_survives_partial_coverage(self):
+        from server import mock_verdict
+        for stats, expected in (({"crashes": 1}, "critical"), ({"failedRequests": 1}, "warning")):
+            with self.subTest(stats=stats):
+                verdict = mock_verdict({}, {"analysis": {"stats": stats,
+                    "coverage": {"recording": {"truncated": True}}}})
+                self.assertEqual(verdict["severity"], expected)
+                self.assertIn("omitted observations", verdict["summary"])
+
+    def test_21_archive_checksums_and_missing_references_reject_uploads(self):
+        manifest = {"formatVersion": 2, "files": [
+            {"name": "timeline.json", "crc32": "00000000", "compressed": True}]}
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+            dst.writestr("manifest.json", gzip.compress(json.dumps(manifest).encode()))
+            dst.writestr("timeline.json", gzip.compress(b"[]"))
+        invalid = out.getvalue()
+        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+            parse_sal(invalid)
+        _, before = request("GET", "/api/uploads", expect=200)
+        body = multipart_body("crc-test", "damaged.sal", invalid)
+        _, data = request("POST", "/webhook", body=body,
+                          headers={"Content-Type": "multipart/form-data; boundary=crc-test"}, expect=400)
+        self.assertIn("checksum mismatch", json.loads(data)["error"])
+        _, after = request("GET", "/api/uploads", expect=200)
+        self.assertEqual(json.loads(before), json.loads(after))
+
+        manifest["files"][0]["name"] = "missing.json"
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w") as dst:
+            dst.writestr("manifest.json", json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "Missing archive entry"):
+            parse_sal(out.getvalue())
+
+    def test_22_archive_expansion_and_entry_limits(self):
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+            dst.writestr("manifest.json", "{}")
+            dst.writestr("timeline.json", gzip.compress(b"[" + b" " * 4096 + b"]"))
+        with patch("server.MAX_ARCHIVE_TEXT_BYTES", 1024):
+            with self.assertRaisesRegex(ValueError, "Expanded text limit"):
+                parse_sal(out.getvalue())
+        with patch("server.MAX_ARCHIVE_ENTRIES", 1):
+            with self.assertRaisesRegex(ValueError, "Too many archive entries"):
+                parse_sal(out.getvalue())
+        with patch("server.MAX_ARCHIVE_ENTRY_BYTES", 32):
+            with self.assertRaisesRegex(ValueError, "entry size limit"):
+                parse_sal(out.getvalue())
+
+    def test_23_archive_duplicate_path_and_zip_crc_rejected(self):
+        for entries, error in (
+            ([("manifest.json", "{}"), ("manifest.json", "{}")], "duplicate"),
+            ([("manifest.json", "{}"), ("../outside.json", "{}")], "Invalid"),
+        ):
+            with self.subTest(error=error):
+                out = io.BytesIO()
+                with zipfile.ZipFile(out, "w") as dst:
+                    for name, data in entries:
+                        dst.writestr(name, data)
+                with self.assertRaisesRegex(ValueError, error):
+                    parse_sal(out.getvalue())
+
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w") as dst:
+            dst.writestr("manifest.json", "{}")
+        raw = bytearray(out.getvalue())
+        header = raw.find(b"PK\x01\x02")
+        raw[header + 16:header + 20] = b"\x00\x00\x00\x00"
+        with self.assertRaisesRegex(ValueError, "CRC"):
+            parse_sal(bytes(raw))
 
 
 if __name__ == "__main__":

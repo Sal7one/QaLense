@@ -41,9 +41,15 @@ internal object QaLensMemoryMonitor {
     }
 
     fun start(application: Application) {
-        if (registered) return
+        if (registered || !QaLens.config.value.enabled) return
         registered = true
         application.registerComponentCallbacks(callbacks)
+    }
+
+    fun stop(application: Application) {
+        if (registered) application.unregisterComponentCallbacks(callbacks)
+        registered = false
+        lastSampleMs = 0L
     }
 
     /** Called by the recorder tick to sample heap stats during recordings (every ~2s). */
@@ -55,6 +61,7 @@ internal object QaLensMemoryMonitor {
     }
 
     private fun sample(trimLevel: String?) {
+        if (!QaLens.config.value.enabled) return
         val total = runtime.totalMemory() / 1024
         val free = runtime.freeMemory() / 1024
         val native = runCatching { Debug.getNativeHeapAllocatedSize() / 1024 }.getOrDefault(0L)

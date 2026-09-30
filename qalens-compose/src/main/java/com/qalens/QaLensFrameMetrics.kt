@@ -7,6 +7,7 @@ import android.os.Looper
 import android.view.FrameMetrics
 import android.view.Window
 import androidx.annotation.RequiresApi
+import java.lang.ref.WeakReference
 
 /**
  * Captures per-frame render timings via [Window.OnFrameMetricsAvailableListener] (API 24+).
@@ -19,26 +20,40 @@ import androidx.annotation.RequiresApi
 internal object QaLensFrameMetrics {
 
     @Volatile private var attached: Boolean = false
-    private var currentActivity: android.app.Activity? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private val pending = mutableListOf<FrameMetricsSample>()
+    private val flush = Runnable { flushPending() }
+
+    fun flushPending() {
+        handler.removeCallbacks(flush)
+        if (pending.isEmpty()) return
+        val samples = pending.toList()
+        pending.clear()
+        QaLens.appendFrameMetrics(samples)
+    }
+
+    private var currentActivity: WeakReference<Activity>? = null
 
     fun attach(activity: Activity) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+        if (!QaLens.config.value.enabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
         // If the activity changed (rotation, recreation), detach from the old one first.
-        if (attached && currentActivity !== activity) {
-            detach(currentActivity ?: return)
+        if (attached && currentActivity?.get() !== activity) {
+            currentActivity?.get()?.let(::detach)
+            if (currentActivity?.get() == null) attached = false
         }
         if (attached) return
         attached = true
-        currentActivity = activity
+        currentActivity = WeakReference(activity)
         activity.window.addOnFrameMetricsAvailableListener(
             listener,
-            Handler(Looper.getMainLooper())
+            handler
         )
     }
 
     fun detach(activity: Activity) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
-        if (!attached) return
+        if (!attached || currentActivity?.get() !== activity) return
+        flushPending()
         attached = false
         currentActivity = null
         runCatching { activity.window.removeOnFrameMetricsAvailableListener(listener) }
@@ -46,23 +61,23 @@ internal object QaLensFrameMetrics {
 
     private val listener = @RequiresApi(Build.VERSION_CODES.N) object : Window.OnFrameMetricsAvailableListener {
         override fun onFrameMetricsAvailable(window: Window?, frameMetrics: FrameMetrics?, additionalData: Int) {
+            if (!QaLens.config.value.enabled || !attached) return
+            QaLensSessionRecorder.evidence?.droppedFrames(additionalData)
             val m = frameMetrics ?: return
             val total = m.getMetric(FrameMetrics.TOTAL_DURATION).toLong()
             if (total <= 0) return
             val layout = runCatching { m.getMetric(FrameMetrics.LAYOUT_MEASURE_DURATION).toLong() }.getOrDefault(0L)
             val draw = runCatching { m.getMetric(FrameMetrics.DRAW_DURATION).toLong() }.getOrDefault(0L)
-            val gpu = runCatching { m.getMetric(FrameMetrics.GPU_DURATION).toLong() }.getOrDefault(0L)
-            val jank = total > FrameMetricsSample.JANK_THRESHOLD_MS
-            val frozen = total > FrameMetricsSample.FROZEN_THRESHOLD_MS
-            // Only record frames worth recording: jank, frozen, or sampled (1-in-10) to bound volume.
-            if (jank || frozen || total % 10 == 0L) {
-                QaLens.appendFrameMetrics(
-                    FrameMetricsSample(
-                        totalMs = total, layoutMs = layout, drawMs = draw, gpuMs = gpu,
-                        jank = jank, frozen = frozen
-                    )
-                )
-            }
+            val gpu = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                runCatching { m.getMetric(FrameMetrics.GPU_DURATION) }.getOrDefault(0L) else 0L
+            // Android reports nanoseconds. Batch all observed frames once per second;
+            // publishing each frame into Compose state creates a render/measurement feedback loop.
+            if (pending.isEmpty()) handler.postDelayed(flush, 1_000L)
+            val sample = FrameMetricsSample.fromNanoseconds(total, layout, draw, gpu)
+            QaLensSessionRecorder.evidence?.frame(sample)
+            pending += sample
+            if (pending.size >= 1000) flushPending()
+
         }
     }
 }

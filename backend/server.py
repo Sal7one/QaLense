@@ -26,7 +26,7 @@ evidence). The verdict is returned in the webhook response body, which the app's
 shows right under the recording.
 
 Run:
-    python3 backend/server.py                # http://0.0.0.0:8000
+    python3 backend/server.py                # local only: http://127.0.0.1:8000
     python3 backend/server.py --port 9000
     python3 backend/tests/test_backend.py    # end-to-end self-test
 
@@ -39,13 +39,16 @@ Works on Python 3.9+ (including 3.13/3.14 — no cgi module used).
 
 import argparse
 import hashlib
+import ipaddress
 import io
 import json
 import re
+import shutil
 import sys
 import threading
 import time
 import zipfile
+import gzip
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -53,6 +56,15 @@ from urllib.parse import parse_qs, urlparse
 
 VERSION = "0.1.0"
 DEFAULT_PORT = 8000
+DEFAULT_HOST = "127.0.0.1"
+MAX_REQUEST_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = 4096
+MAX_ARCHIVE_ENTRY_BYTES = 256 * 1024 * 1024
+MAX_ARCHIVE_EXPANDED_BYTES = 512 * 1024 * 1024
+MAX_ARCHIVE_TEXT_BYTES = 16 * 1024 * 1024
+MAX_ARCHIVE_MANIFEST_BYTES = 1 * 1024 * 1024
+UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,200}$")
+CHUNK_SIZE_BYTES = 1_000_000
 LOCK = threading.Lock()
 
 # Avoid escape sequences entirely (CRLF is framing-sensitive in multipart parsing).
@@ -89,6 +101,8 @@ class Store:
         return out
 
     def get(self, uid: str):
+        if not UPLOAD_ID_RE.fullmatch(uid):
+            return None
         meta = self._read_json(uid, "meta.json")
         if meta is None:
             return None
@@ -103,6 +117,8 @@ class Store:
         return detail
 
     def path(self, uid: str, name: str) -> Path:
+        if not UPLOAD_ID_RE.fullmatch(uid) or name != "recording.sal":
+            return self.root / "__invalid_upload_id__" / "recording.sal"
         return self.root / uid / name
 
     def save(self, uid: str, meta: dict, payload: bytes, verdict: dict, parsed: dict):
@@ -122,16 +138,26 @@ class Store:
                         json.dumps(value, indent=2, ensure_ascii=False), "utf-8")
 
     def delete(self, uid: str) -> bool:
+        if not UPLOAD_ID_RE.fullmatch(uid):
+            return False
         with LOCK:
             d = self.root / uid
             if not d.is_dir():
                 return False
-            for f in d.iterdir():
-                f.unlink()
-            d.rmdir()
+            shutil.rmtree(d)
             return True
 
+    def delete_chunk_upload(self, uid: str):
+        if not UPLOAD_ID_RE.fullmatch(uid):
+            return
+        with LOCK:
+            shutil.rmtree(self.uploads_dir() / uid, ignore_errors=True)
+
     def _read_json(self, uid: str, name: str):
+        if not UPLOAD_ID_RE.fullmatch(uid) or name not in {
+            "meta.json", "verdict.json", "manifest.json", "summary.json", "analysis.json"
+        }:
+            return None
         p = self.root / uid / name
         if not p.is_file():
             return None
@@ -145,6 +171,8 @@ class Store:
         return self.root / "uploads"
 
     def chunk_meta(self, uid: str):
+        if not UPLOAD_ID_RE.fullmatch(uid):
+            return None
         p = self.uploads_dir() / uid / "chunks" / "meta.json"
         if not p.is_file():
             return None
@@ -154,6 +182,8 @@ class Store:
             return None
 
     def save_chunk_meta(self, uid: str, meta: dict):
+        if not UPLOAD_ID_RE.fullmatch(uid):
+            return
         p = self.uploads_dir() / uid / "chunks" / "meta.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         with LOCK:
@@ -172,18 +202,25 @@ class Store:
         return None
 
     def write_chunk(self, uid: str, index: int, data: bytes):
+        if not UPLOAD_ID_RE.fullmatch(uid) or index < 0:
+            return False
         p = self.uploads_dir() / uid / "chunks" / (str(index) + ".bin")
         p.parent.mkdir(parents=True, exist_ok=True)
         with LOCK:
             p.write_bytes(data)
+        return True
 
     def read_chunk(self, uid: str, index: int):
+        if not UPLOAD_ID_RE.fullmatch(uid) or index < 0:
+            return None
         p = self.uploads_dir() / uid / "chunks" / (str(index) + ".bin")
         if not p.is_file():
             return None
         return p.read_bytes()
 
     def received_chunks(self, uid: str) -> list:
+        if not UPLOAD_ID_RE.fullmatch(uid):
+            return []
         d = self.uploads_dir() / uid / "chunks"
         if not d.is_dir():
             return []
@@ -201,30 +238,130 @@ class Store:
 # .sal parsing (zipfile + json only — same contract as QaLensSalReader)
 # ---------------------------------------------------------------------------
 
+def _valid_archive_name(name: str) -> bool:
+    if not name or "\\" in name or "\x00" in name or name.startswith("/"):
+        return False
+    parts = name.rstrip("/").split("/")
+    return all(part not in ("", ".", "..") for part in parts) and ":" not in parts[0]
+
+
+def _bounded_gzip(data: bytes, limit: int, name: str) -> bytes:
+    result = bytearray()
+    with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
+        while True:
+            block = stream.read(min(65536, limit - len(result) + 1))
+            if not block:
+                return bytes(result)
+            if len(block) > limit - len(result):
+                raise ValueError("Expanded text limit exceeded: " + name)
+            result.extend(block)
+
+
 def parse_sal(payload: bytes) -> dict:
+    """Check every ZIP member, then decode bounded v1/v2 evidence for the mock verdict."""
     out = {"manifest": None, "summary": None, "analysis": None, "forAi": None}
+    selected = {"manifest.json", "summary.json", "analysis.json", "for_ai.md"}
+    extracted = {}
+    checksums = {}
     try:
         with zipfile.ZipFile(io.BytesIO(payload)) as zf:
-            def read_text(name):
-                try:
-                    return zf.read(name).decode("utf-8", errors="replace")
-                except KeyError:
-                    return None
+            infos = zf.infolist()
+            if len(infos) > MAX_ARCHIVE_ENTRIES:
+                raise ValueError("Too many archive entries")
+            seen = set()
+            outer_total = 0
+            for info in infos:
+                name = info.filename
+                if not _valid_archive_name(name) or name in seen:
+                    raise ValueError("Invalid or duplicate archive entry: " + name)
+                seen.add(name)
+                if info.flag_bits & 1 or info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    raise ValueError("Unsupported archive entry: " + name)
+                if info.file_size > MAX_ARCHIVE_ENTRY_BYTES:
+                    raise ValueError("Archive entry size limit exceeded: " + name)
+                outer_total += info.file_size
+                if outer_total > MAX_ARCHIVE_EXPANDED_BYTES:
+                    raise ValueError("Archive expanded size limit exceeded")
+
+            decoded_total = 0
+            for info in infos:
+                name = info.filename
+                if info.is_dir():
+                    if info.file_size:
+                        raise ValueError("Invalid archive directory: " + name)
+                    continue
+                is_text = name.endswith((".json", ".txt", ".md"))
+                text_limit = MAX_ARCHIVE_MANIFEST_BYTES if name == "manifest.json" else MAX_ARCHIVE_TEXT_BYTES
+                # Gzip framing can add a little to an otherwise valid text entry.
+                outer_limit = min(MAX_ARCHIVE_ENTRY_BYTES, text_limit + 65536) if is_text else MAX_ARCHIVE_ENTRY_BYTES
+                raw = bytearray() if is_text else None
+                raw_size = 0
+                checksum = 0
+                with zf.open(info) as stream:
+                    while True:
+                        block = stream.read(65536)
+                        if not block:
+                            break  # ZipExtFile verifies its ZIP CRC when fully read.
+                        raw_size += len(block)
+                        if raw_size > outer_limit:
+                            raise ValueError("Archive entry size limit exceeded: " + name)
+                        if raw is not None:
+                            raw.extend(block)
+                        else:
+                            checksum = zlib.crc32(block, checksum)
+                if raw_size != info.file_size:
+                    raise ValueError("Archive entry size mismatch: " + name)
+                if raw is not None:
+                    data = bytes(raw)
+                    if name.endswith(".json") and data.startswith(b"\x1f\x8b"):
+                        data = _bounded_gzip(data, text_limit, name)
+                    if len(data) > text_limit:
+                        raise ValueError("Expanded text limit exceeded: " + name)
+                    checksum = zlib.crc32(data)
+                    if name in selected:
+                        extracted[name] = data.decode("utf-8")
+                    decoded_total += len(data)
+                else:
+                    decoded_total += raw_size
+                if decoded_total > MAX_ARCHIVE_EXPANDED_BYTES:
+                    raise ValueError("Archive decoded size limit exceeded")
+                checksums[name] = "%08x" % (checksum & 0xffffffff)
 
             def read_json(name):
-                text = read_text(name)
+                text = extracted.get(name)
                 if text is None:
                     return None
-                try:
-                    return json.loads(text)
-                except json.JSONDecodeError:
-                    return {"_parseError": True, "_raw": text[:400]}
+                value = json.loads(text)
+                if not isinstance(value, dict):
+                    raise ValueError("Invalid object in " + name)
+                return value
+
             out["manifest"] = read_json("manifest.json")
+            if out["manifest"] is None:
+                raise ValueError("Missing manifest.json")
+            version = out["manifest"].get("formatVersion", 1)
+            if type(version) is not int or version not in (1, 2):
+                raise ValueError("Unsupported .sal formatVersion: " + str(version))
+            files = out["manifest"].get("files")
+            if files is not None:
+                if not isinstance(files, list) or len(files) > MAX_ARCHIVE_ENTRIES:
+                    raise ValueError("Invalid manifest files list")
+                for item in files:
+                    name = item.get("name") if isinstance(item, dict) else item
+                    if not isinstance(name, str) or name not in checksums:
+                        raise ValueError("Missing archive entry in manifest: " + str(name))
+                    if isinstance(item, dict) and "crc32" in item:
+                        expected = item["crc32"]
+                        if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-fA-F]{8}", expected):
+                            raise ValueError("Invalid archive checksum: " + name)
+                        if checksums[name] != expected.lower():
+                            raise ValueError("Archive checksum mismatch: " + name)
             out["summary"] = read_json("summary.json")
             out["analysis"] = read_json("analysis.json")
-            out["forAi"] = read_text("for_ai.md")
-    except (zipfile.BadZipFile, OSError):
-        out["manifest"] = {"_parseError": True}
+            out["forAi"] = extracted.get("for_ai.md")
+    except (zipfile.BadZipFile, OSError, ValueError, UnicodeDecodeError, EOFError,
+            RuntimeError, zlib.error) as exc:
+        raise ValueError("Invalid .sal recording: " + str(exc)) from exc
     return out
 
 
@@ -242,6 +379,9 @@ def mock_verdict(meta: dict, parsed: dict) -> dict:
     summary = parsed.get("summary") or {}
     analysis = parsed.get("analysis") or {}
     stats = analysis.get("stats") or {}
+    recording = (analysis.get("coverage") or {}).get("recording") or {}
+    partial = bool(recording.get("truncated") or recording.get("droppedFrameCallbacks") or
+                   any(track.get("dropped", 0) for track in (recording.get("tracks") or {}).values()))
     anomalies = analysis.get("anomalies") or []
 
     score = summary.get("score") if isinstance(summary.get("score"), int) else None
@@ -256,16 +396,22 @@ def mock_verdict(meta: dict, parsed: dict) -> dict:
             top_endpoint = ep.get("endpoint")
             break
 
-    if crashes:
+    if not summary and not stats:
+        severity, label = "unknown", "Insufficient evidence"
+    elif crashes:
         severity, label = "critical", "CRASH — likely release blocker"
     elif failed >= 3 or (score is not None and score < 50):
         severity, label = "critical", "HIGH RISK — multiple failures"
     elif failed >= 1 or (score is not None and score < 70):
         severity, label = "warning", "Needs attention"
+    elif partial:
+        severity, label = "unknown", "Partial recording — evidence was omitted"
     else:
-        severity, label = "ok", "Looks healthy"
+        severity, label = "ok", "No failures in captured evidence"
 
     evidence = []
+    if partial:
+        evidence.append("recording reports omitted observations; conclusions cover retained evidence only")
     if failed:
         evidence.append(str(failed) + " failed request(s)")
     if top_endpoint:
@@ -273,7 +419,7 @@ def mock_verdict(meta: dict, parsed: dict) -> dict:
     if crashes:
         evidence.append(str(crashes) + " crash(es)")
     if not evidence:
-        evidence.append("no failure signal in this session")
+        evidence.append("no analysis or summary available" if severity == "unknown" else "no failure signal in captured evidence")
 
     verdict = {
         "generatedAt": int(time.time() * 1000),
@@ -334,11 +480,10 @@ def parse_multipart(body: bytes, boundary: str) -> list:
 # HTTP handler
 # ---------------------------------------------------------------------------
 
-# Enumerate the exact headers instead of a wildcard: Safari does not accept partial
-# wildcards (X-QaLens-*) in Access-Control-Allow-Headers and would reject the web player's
-# preflight, breaking the frontend hook.
+# Enumerate exact request headers instead of a wildcard: Safari rejects partial wildcards.
+# CORS is granted only to loopback pages or a page served from this backend's hostname.
+# Native clients do not use CORS. This remains a development server, not an auth boundary.
 CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": ("Content-Type, X-QaLens-App, X-QaLens-Version, "
                                      "X-QaLens-Env, X-QaLens-Device, X-QaLens-Platform, "
@@ -359,8 +504,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        for k, v in CORS_HEADERS.items():
-            self.send_header(k, v)
+        origin = self._allowed_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            for k, v in CORS_HEADERS.items():
+                self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -370,9 +519,57 @@ class Handler(BaseHTTPRequestHandler):
     def _html(self, code: int, text: str):
         self._send(code, text.encode("utf-8"), "text/html; charset=utf-8")
 
-    def _read_body(self) -> bytes:
-        length = int(self.headers.get("Content-Length") or 0)
-        return self.rfile.read(length) if length else b""
+    def _allowed_origin(self):
+        origin = self.headers.get("Origin")
+        if not origin:
+            return None
+        try:
+            parsed_origin = urlparse(origin)
+            if parsed_origin.scheme not in ("http", "https") or not parsed_origin.hostname:
+                return None
+            origin_host = parsed_origin.hostname.lower().rstrip(".")
+            if origin_host == "localhost":
+                return origin
+            try:
+                if ipaddress.ip_address(origin_host).is_loopback:
+                    return origin
+            except ValueError:
+                pass
+            request_host = urlparse("//" + (self.headers.get("Host") or "")).hostname
+            if request_host and origin_host == request_host.lower().rstrip("."):
+                return origin
+        except ValueError:
+            return None
+        return None
+
+    def _read_body(self):
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            self._json(501, {"ok": False, "error": "chunked HTTP request bodies are not supported"})
+            return None
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            return b""
+        try:
+            length = int(raw_length)
+        except (TypeError, ValueError):
+            self.close_connection = True
+            self._json(400, {"ok": False, "error": "invalid Content-Length"})
+            return None
+        if length < 0:
+            self.close_connection = True
+            self._json(400, {"ok": False, "error": "invalid Content-Length"})
+            return None
+        if length > MAX_REQUEST_BYTES:
+            self.close_connection = True
+            self._json(413, {"ok": False, "error": "request body exceeds 64 MiB development-server limit"})
+            return None
+        body = self.rfile.read(length) if length else b""
+        if len(body) != length:
+            self.close_connection = True
+            self._json(400, {"ok": False, "error": "request body ended before Content-Length"})
+            return None
+        return body
 
     def _qalens_headers(self) -> dict:
         out = {}
@@ -425,6 +622,8 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/") or "/"
         ctype = (self.headers.get("Content-Type") or "").lower()
         body = self._read_body()
+        if body is None:
+            return
 
         if path == "/ping":
             return self._json(200, {"ok": True, "service": "qalens-mock-backend"})
@@ -438,6 +637,8 @@ class Handler(BaseHTTPRequestHandler):
                     payload = json.loads(body.decode("utf-8"))
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     return self._json(400, {"ok": False, "error": "invalid JSON"})
+                if not isinstance(payload, dict):
+                    return self._json(400, {"ok": False, "error": "JSON body must be an object"})
                 if payload.get("qalens") == "webhook-test":
                     return self._json(200, {
                         "ok": True,
@@ -464,6 +665,8 @@ class Handler(BaseHTTPRequestHandler):
                     payload = json.loads(body.decode("utf-8"))
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     return self._json(400, {"ok": False, "error": "invalid JSON"})
+                if not isinstance(payload, dict):
+                    return self._json(400, {"ok": False, "error": "JSON body must be an object"})
                 return self._ingest_json(payload, parsed.query, source="web")
             if ctype.startswith("multipart/form-data"):
                 m = re.search(r"boundary=(\S+)", self.headers.get("Content-Type") or "")
@@ -479,6 +682,8 @@ class Handler(BaseHTTPRequestHandler):
                         payload = json.loads(json_part["content"].decode("utf-8"))
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         return self._json(400, {"ok": False, "error": "invalid summary JSON"})
+                    if not isinstance(payload, dict):
+                        return self._json(400, {"ok": False, "error": "summary JSON must be an object"})
                     return self._ingest_json(payload, parsed.query, source="web")
             return self._json(415, {"ok": False, "error": "expected JSON or multipart"})
 
@@ -499,15 +704,20 @@ class Handler(BaseHTTPRequestHandler):
                                       file_part["filename"] or "session.sal",
                                       query, source)
 
-    def _ingest_sal_bytes(self, payload: bytes, name: str, query: str, source: str):
-        parsed = parse_sal(payload)
+    def _ingest_sal_bytes(self, payload: bytes, name: str, query: str, source: str, parsed=None,
+                          cleanup_chunk_id: str = None):
+        if parsed is None:
+            try:
+                parsed = parse_sal(payload)
+            except ValueError as exc:
+                return self._json(400, {"ok": False, "error": str(exc)})
         manifest = parsed.get("manifest") or {}
         summary = parsed.get("summary") or {}
         analysis = parsed.get("analysis") or {}
 
         received_at = int(time.time() * 1000)
         digest = hashlib.sha256(payload).hexdigest()
-        uid = "%d-%s" % (int(time.time()), digest[:12])
+        uid = "%d-%s" % (time.time_ns(), digest[:12])
 
         meta = {
             "id": uid,
@@ -534,6 +744,10 @@ class Handler(BaseHTTPRequestHandler):
         self._store().save(uid, meta, payload, verdict,
                            {"manifest": manifest, "summary": summary,
                             "analysis": analysis, "forAi": parsed.get("forAi")})
+        # A chunk finalize response is sent below. Remove temporary staging before exposing
+        # success, so clients observing a completed response can rely on cleanup having finished.
+        if cleanup_chunk_id is not None:
+            self._store().delete_chunk_upload(cleanup_chunk_id)
         print("webhook: %s upload '%s' (%d bytes) score=%s owner=%s severity=%s id=%s" % (
             source, name, len(payload), meta["score"], meta["likelyOwner"],
             verdict["severity"], uid), file=sys.stderr)
@@ -546,7 +760,7 @@ class Handler(BaseHTTPRequestHandler):
         """Frontend hook: the web player posts a JSON session summary (no .sal)."""
         received_at = int(time.time() * 1000)
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
-        uid = "%d-%s" % (int(time.time()), digest[:12])
+        uid = "%d-%s" % (time.time_ns(), digest[:12])
         meta = {
             "id": uid,
             "source": source,
@@ -592,12 +806,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._chunk_start()
         if rest.endswith("/finalize"):
             uid = rest[:-len("/finalize")]
-            if not uid:
+            if not UPLOAD_ID_RE.fullmatch(uid):
                 return self._json(404, {"ok": False, "error": "not found"})
             return self._chunk_finalize(uid, query)
         if "/" in rest:
             uid, idx = rest.rsplit("/", 1)
-            if uid and idx.isdigit():
+            if UPLOAD_ID_RE.fullmatch(uid) and idx.isdigit():
                 return self._chunk_put(uid, int(idx), body)
         return self._json(404, {"error": "not found"})
 
@@ -611,13 +825,16 @@ class Handler(BaseHTTPRequestHandler):
             count = int(count_hdr)
         except ValueError:
             return self._json(400, {"ok": False, "error": "invalid Sal-Size or Chunk-Count"})
-        if size <= 0 or count <= 0:
-            return self._json(400, {"ok": False, "error": "Sal-Size and Chunk-Count must be positive"})
+        expected_count = (size + CHUNK_SIZE_BYTES - 1) // CHUNK_SIZE_BYTES if size > 0 else 0
+        if size <= 0 or size > MAX_REQUEST_BYTES or count != expected_count:
+            return self._json(400, {"ok": False, "error": "Sal-Size or Chunk-Count is outside supported limits"})
+        if len(name) > 255 or len(digest) > 4096:
+            return self._json(400, {"ok": False, "error": "upload name or digest is too long"})
         # Idempotent by name+size+digest: re-starting the same upload resumes it.
         existing = self._store().find_chunk_upload(name, size, digest)
         if existing:
             return self._json(200, {"ok": True, "resumed": True, "uploadId": existing})
-        uid = "%d-%s" % (int(time.time()), chunk_upload_key(name, size, digest))
+        uid = "%d-%s" % (time.time_ns(), chunk_upload_key(name, size, digest))
         self._store().save_chunk_meta(uid, {
             "uploadId": uid,
             "name": name,
@@ -640,18 +857,30 @@ class Handler(BaseHTTPRequestHandler):
             expected_size = int(size_hdr)
         except ValueError:
             return self._json(409, {"ok": False, "error": "bad chunk crc/size headers"})
-        if len(body) != expected_size:
+        count = int(meta.get("chunkCount") or 0)
+        total_size = int(meta.get("size") or 0)
+        if index < 0 or index >= count:
+            return self._json(404, {"ok": False, "error": "chunk index outside upload"})
+        required_size = min(CHUNK_SIZE_BYTES, total_size - index * CHUNK_SIZE_BYTES)
+        if expected_size != required_size or len(body) != required_size:
             return self._json(409, {"ok": False, "error": "chunk size mismatch"})
         if zlib.crc32(body) != expected_crc:
             return self._json(409, {"ok": False, "error": "chunk crc mismatch"})
-        self._store().write_chunk(uid, index, body)
+        if not self._store().write_chunk(uid, index, body):
+            return self._json(400, {"ok": False, "error": "invalid upload id or chunk index"})
         return self._json(200, {"ok": True, "received": index})
 
     def _chunk_finalize(self, uid: str, query: str):
         meta = self._store().chunk_meta(uid)
         if meta is None:
             return self._json(404, {"ok": False, "error": "unknown upload id"})
-        count = int(meta.get("chunkCount") or 0)
+        try:
+            count = int(meta.get("chunkCount") or 0)
+            expected_size = int(meta.get("size") or 0)
+        except (TypeError, ValueError):
+            return self._json(400, {"ok": False, "error": "invalid stored upload metadata"})
+        if not 1 <= count <= (MAX_REQUEST_BYTES + CHUNK_SIZE_BYTES - 1) // CHUNK_SIZE_BYTES:
+            return self._json(400, {"ok": False, "error": "invalid stored chunk count"})
         received = self._store().received_chunks(uid)
         missing = [i for i in range(count) if i not in received]
         if missing:
@@ -663,9 +892,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(409, {"ok": False, "error": "missing chunk %d" % i})
             parts.append(data)
         payload = b"".join(parts)
+        if len(payload) != expected_size or expected_size > MAX_REQUEST_BYTES:
+            return self._json(409, {"ok": False, "error": "assembled upload size mismatch"})
         name = meta.get("name") or self.headers.get("X-QaLens-Sal-Name") or "session.sal"
-        # Same parse + verdict + store path as the multipart /webhook upload.
-        return self._ingest_sal_bytes(payload, name, query, source="mobile")
+        # Same parse + verdict + store path as the multipart /webhook upload. Completed or
+        # permanently malformed uploads no longer leave staging chunks behind.
+        try:
+            parsed = parse_sal(payload)
+        except ValueError as exc:
+            self._store().delete_chunk_upload(uid)
+            return self._json(400, {"ok": False, "error": str(exc)})
+        return self._ingest_sal_bytes(payload, name, query, source="mobile", parsed=parsed,
+                                      cleanup_chunk_id=uid)
 
 
 # ---------------------------------------------------------------------------
@@ -820,7 +1058,7 @@ def fmt_time(ms):
     return time.strftime("%H:%M:%S", time.localtime(ms / 1000))
 
 
-def make_server(host="0.0.0.0", port=DEFAULT_PORT, data_dir="backend/data"):
+def make_server(host=DEFAULT_HOST, port=DEFAULT_PORT, data_dir="backend/data"):
     server = ThreadingHTTPServer((host, port), Handler)
     server.store = Store(Path(data_dir))
     return server
@@ -828,7 +1066,11 @@ def make_server(host="0.0.0.0", port=DEFAULT_PORT, data_dir="backend/data"):
 
 def main():
     parser = argparse.ArgumentParser(description="QaLens mock webhook backend")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument(
+        "--host",
+        default=DEFAULT_HOST,
+        help="interface to bind (default: 127.0.0.1; use 0.0.0.0 only on a trusted dev network)",
+    )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--data-dir", default=str(Path(__file__).resolve().parent / "data"))
     args = parser.parse_args()

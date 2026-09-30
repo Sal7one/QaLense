@@ -51,6 +51,8 @@ object NoopParityCheck {
         q.selectNode(null)
 
         // Network
+        q.networkSink("Custom").record(NetworkEvent(method = "GET", url = "http://test"))
+        check(q.integrationReport().contains("no-op"))
         q.markNetworkAvailable()
         q.logNetwork(NetworkEvent(method = "GET", url = "http://test"))
         q.clearNetworkLog()
@@ -99,6 +101,7 @@ object NoopParityCheck {
             override fun enrich(crash: QaLensCrash, evidence: String) {}
             override fun onCrash(callback: (QaLensCrash) -> Unit) {}
         })
+        q.reportCrash(QaLensCrash(type = CrashType.CRASH, thread = "test", throwable = null, stackTrace = ""))
         q.lastCrash()
 
         // B5: connectivity
@@ -135,6 +138,7 @@ object NoopParityCheck {
 
         // Existing
         q.observeDataStore("name", kotlinx.coroutines.flow.flowOf("v"))
+        q.stopObservingDataStore("name")
         q.registerDeepLinkScenario("name", "uri")
     }
 }
@@ -144,6 +148,22 @@ object NoopParityCheck {
  * JUnit4 needs a plain class — the object above is the compile-time reference surface.
  */
 class NoopParityCheckTest {
+    @org.junit.Test
+    fun coroutineFailureReachesHostUnchanged() {
+        val thread = Thread.currentThread()
+        val previous = thread.uncaughtExceptionHandler
+        val failure = IllegalStateException("fixture")
+        var received: Throwable? = null
+        thread.uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { origin, error ->
+            org.junit.Assert.assertSame(thread, origin)
+            received = error
+        }
+        try {
+            QaLens.coroutineExceptionHandler().handleException(kotlin.coroutines.EmptyCoroutineContext, failure)
+            org.junit.Assert.assertSame(failure, received)
+        } finally { thread.uncaughtExceptionHandler = previous }
+    }
+
     @org.junit.Test
     fun parityHoldsAtRuntime() {
         NoopParityCheck.exerciseAll()

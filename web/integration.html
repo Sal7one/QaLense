@@ -100,9 +100,10 @@ footer a { color:var(--accent); text-decoration:none; }
   <h1>Integrate QaLens <em>in minutes</em></h1>
   <p class="lede">Debug-only release evidence for Jetpack Compose apps. Four dependency lines, four
   optional integration levels (L0–L4), and every snippet below is copy-paste ready — the release
-  build stays a guaranteed no-op.</p>
+  build uses a separate no-op artifact, verified through dependency checks.</p>
   <a class="btn btn-primary" href="index.html?sample&t=24.6">▶ See the result in Mission Control</a>
-  <a class="btn" href="../integration.md" target="_blank" rel="noopener">Plain-text guide</a>
+  <a class="btn" href="../integration.md" target="_blank" rel="noopener">Current integration guide</a>
+  <a class="btn" href="../docs/CLIENT_SAFETY_FIXES.md">Privacy defaults and migration</a>
 </div></header>
 
 <div class="wrap">
@@ -124,18 +125,18 @@ footer a { color:var(--accent); text-decoration:none; }
   release links the no-op artifact with the identical public API.</p>
   <script type="text/plain" class="src" data-lang="kotlin">
 // settings.gradle.kts — modules in this repo (or publishToMavenLocal / an internal Maven repo)
-includeBuild("../qalens-compose-overlay")   // or copy the qalens-* modules in
+includeBuild("../QaLense")   // adjust to the SDK checkout path
 
 // app/build.gradle.kts
 dependencies {
-    debugImplementation(project(":qalens-compose"))           // overlay, panel, recorder, Control Room
-    debugImplementation(project(":qalens-navigation-compose")) // auto route tracking (optional)
-    debugImplementation(project(":qalens-replay"))             // the .sal player (optional)
-    releaseImplementation(project(":qalens-noop"))             // identical API, does NOTHING
+    debugImplementation("com.qalens:qalens-compose:0.9.0")           // overlay, panel, recorder, Control Room
+    debugImplementation("com.qalens:qalens-navigation-compose:0.9.0") // auto route tracking (optional)
+    debugImplementation("com.qalens:qalens-replay:0.9.0")             // the .sal player (optional)
+    releaseImplementation("com.qalens:qalens-noop:0.9.0")             // identical API, does NOTHING
 }
 </script>
   <div class="note"><b>Never</b> wrap QaLens calls in <code>if (DEBUG)</code> — the no-op artifact
-  mirrors every public symbol, so release builds compile unchanged and execute nothing.</div>
+  mirrors the capture API. Build release and inspect its dependencies; coroutine helpers still preserve host exception delivery.</div>
 </div></section>
 
 <section id="step2"><div class="wrap">
@@ -173,9 +174,11 @@ QaLens.configure {
     addRedaction("internal-token-[a-z0-9]+")  // extra masking on top of the defaults
 
     // Capture feature flags — decide what feeds the tracks (all default true/false as shown):
+    saveScreenshotsToGallery = false // private app cache by default
+    allowUnmaskedVideo = false       // video has no per-node privacy masks
     captureNetwork = true         // false → QaLensOkHttpInterceptor is a pure pass-through
     captureLogs = true            // false → QaLensTimberTree drops every line
-    networkFromChucker = false    // true  → Chucker becomes the network source (no QaLens interceptor)
+    networkFromChucker = false    // legacy flag; leave false
 }
 QaLens.install(this)   // no-op if Startup already installed; safe to call
 </script>
@@ -190,7 +193,7 @@ setContent {
 
 <section id="step4"><div class="wrap">
   <h2><span class="num">4</span>L2 — screens &amp; navigation</h2>
-  <p class="sub">Replace NavHost with QaLensNavHost (same parameters) and every route change lands in
+  <p class="sub">Use QaLensNavHost with its supported parameters (check the wrapper signature first); route changes land in
   the timeline, the screen-visit map, and your recordings.</p>
   <script type="text/plain" class="src" data-lang="kotlin">
 QaLensNavHost(
@@ -219,24 +222,29 @@ OkHttpClient.Builder()
 
 Timber.plant(QaLensTimberTree())                 // log track: level, tag, message, exception
 </script>
-  <p class="sub">Already running <b>Chucker</b>? Make Chucker the single source of truth — QaLens
-  registers a TransactionListener and its interceptor becomes a pass-through (nothing double-counted):</p>
+  <p class="sub">Already running <b>Chucker</b>? Keep its inspector and attach QaLens metadata capture
+  to the same client. Chucker has no public live transaction listener; the old networkFromChucker
+  flag no longer disables QaLens capture.</p>
   <script type="text/plain" class="src" data-lang="kotlin">
-// Option A — both inspectors, one client (Chucker first: it needs the raw bodies)
 OkHttpClient.Builder()
-    .addInterceptor(ChuckerInterceptor.Builder(context).build())
-    .addInterceptor(QaLensOkHttpInterceptor())   // metadata only; pass-through when flag is on
+    .addInterceptor(ChuckerInterceptor.Builder(context)
+        .redactHeaders("Authorization", "Cookie", "Set-Cookie").build())
+    .addInterceptor(QaLensOkHttpInterceptor())
     .build()
 
-// Option B — Chucker IS the source, no QaLens interceptor at all
-QaLens.configure { networkFromChucker = true }
-OkHttpClient.Builder()
-    .addInterceptor(ChuckerInterceptor.Builder(context).build())
-    .build()   // QaLens converts every Chucker transaction into a NetworkEvent via reflection
+// Other transports: create once, report each completed request once.
+val sink = QaLens.networkSink("Custom transport")
+sink.record(NetworkEvent(method = "GET", url = url, status = status, latencyMs = elapsedMs))
+
+// Overview also has a Copy integration check button.
+val setup = QaLens.integrationReport()
 </script>
+  <p class="sub">The sample tests Chucker 4.1.0 with Kotlin 2.0.21. Use a Chucker version compatible
+  with your app's Kotlin/AGP toolchain and matching debug/release no-op artifacts.
+  <a href="../docs/OSS_INTEGRATIONS.md">Full OSS integration contract</a>.</p>
   <div class="note"><b>Gate the automatic captures</b> without touching your client code:
   <code>captureNetwork = false</code> (pass-through interceptor) and <code>captureLogs = false</code>
-  (silent Timber tree). Explicit <code>QaLens.event()/log()/breadcrumb()</code> calls keep working —
+  (silent Timber tree). Explicit <code>QaLens.event()/log()/breadcrumb()</code> calls keep working while the master enabled flag is true —
   and <code>analysis.json.coverage</code> records the mode so the .sal never lies about it.</div>
 </div></section>
 
@@ -280,18 +288,11 @@ QaLens.markMoment("checkout hangs here")
 QaLens.addBookmark("suspect transition", BookmarkSeverity.BUG)
 </script>
   <script type="text/plain" class="src" data-lang="kotlin">
-// Macros with assertions — one step per line, drives the real semantics actions
-// deeplink <uri> · wait <ms> · tap <tag|text> · type <tag> <text> · record [video] · stop
-// screenshot · mark <text> · assert exists|label|route|network … · if <cond> … else …
-val steps = listOf(
-    "deeplink myapp://login",
-    "type login.email.field qa+payments@example.com",
-    "type login.password.field Secret123!",
-    "tap login.submit",
-    "assert route home",
-    "assert network no-errors",
-)
-QaLens.runMacro(steps)   // failures stop the run and land as ASSERTION timeline events
+// Snapshot assertions only; real tap/type macros belong in .appsal / Control Room.
+val result = QaLens.runMacro(listOf(
+    MacroStep.AssertRoute("home"),
+    MacroStep.AssertNoNetworkErrors,
+))
 </script>
 </div></section>
 
@@ -301,7 +302,7 @@ QaLens.runMacro(steps)   // failures stop the run and land as ASSERTION timeline
   X-QaLens-* headers; the backend's response body appears right under the recording. Try it against
   the bundled mock backend with zero setup.</p>
   <script type="text/plain" class="src" data-lang="bash">
-python3 backend/server.py          # dashboard: http://127.0.0.1:8000/
+python3 backend/server.py --host 127.0.0.1 # dashboard: http://127.0.0.1:8000/
 adb reverse tcp:8000 tcp:8000      # emulator → host
 
 # Control Room → Webhook →
@@ -314,13 +315,12 @@ adb reverse tcp:8000 tcp:8000      # emulator → host
 
 <section id="step8"><div class="wrap">
   <h2><span class="num">8</span>Verify</h2>
-  <p class="sub">Run these after integrating — the release compile is the check that the no-op parity
-  holds (a missing twin fails the build, never silently at runtime).</p>
+  <p class="sub">Build both variants and inspect releaseRuntimeClasspath for no-op artifacts and absence of active
+  capture/replay. The SDK repository and independent consumer also provide release-isolation tasks.</p>
   <script type="text/plain" class="src" data-lang="bash">
 ./gradlew :app:assembleDebug        # bubble visible + "QaLens Control" icon
-./gradlew :app:compileReleaseKotlin # no-op parity — THE release guarantee
-./gradlew :qalens-core:test         # 115 pure-engine unit tests
-./demo.sh test                      # every suite: kotlin + web reader + mock backend + CLI
+./gradlew :app:assembleRelease     # also inspect releaseRuntimeClasspath and merged manifest
+# In the QaLens repository: follow CONTRIBUTING.md for the full verification matrix.
 </script>
   <div class="note"><b>Build note:</b> use JDK 17 — Kotlin 2.0.21 cannot parse newer JDKs
   (gradle.properties already sets <code>kotlin.daemon.jvmargs</code>). Any cached Gradle 9.x binary

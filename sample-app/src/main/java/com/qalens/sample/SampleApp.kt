@@ -77,7 +77,7 @@ class SampleApp : Application() {
 
         // Change events: a DataStore-style flow → timeline. (Room: QaLens.observeRoom(db, "table…").)
         QaLens.observeDataStore("Preferences", SamplePreferences.flow) { values ->
-            values.entries.joinToString { "${it.key}=${it.value}" }
+            "preference keys: ${values.keys.sorted().joinToString()}" // never send values to the event log
         }
 
         QaLens.install(this)

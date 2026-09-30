@@ -3,9 +3,13 @@
 This file is written to be followed mechanically — every step is copy-pasteable and verifiable.
 QaLens is a **debug-only** QA evidence SDK for Android Jetpack Compose apps: floating QA panel,
 session recording to a portable `.sal` file, raw-SQL/data tooling, macros, webhook upload for AI
-analysis, and a release build that is a guaranteed no-op.
+analysis, and a separate no-op artifact for release. Verify the release dependency graph as well
+as compilation; merely compiling release does not prove active capture was excluded.
 
-Requirements: Android app with Jetpack Compose, `minSdk >= 23`, Kotlin, AGP 8+.
+Requirements: Android app with Jetpack Compose and `minSdk >= 23`. The tested build baseline is
+Kotlin 2.0.21, AGP 8.7.3, JDK 17, SDK 35 and Gradle 9.1.0. Check host toolchain compatibility
+before choosing newer optional-library versions. Composite consumers also need
+`android.useAndroidX=true` in their own `gradle.properties`.
 
 ---
 
@@ -15,8 +19,11 @@ Option A (this repo as included builds / module projects):
 
 ```kotlin
 // settings.gradle.kts of your app — adjust the path
-includeBuild("../qalens-compose-overlay")   // or copy the qalens-* modules in
+includeBuild("../QaLense")   // or copy the qalens-* modules in
 ```
+
+The repository sets `com.qalens` coordinates on its projects so composite substitution works.
+The separate `integration-tests/consumer` app verifies this path in debug and release.
 
 Option B (mavenLocal — run once in this repo: `./gradlew publishToMavenLocal`):
 
@@ -30,6 +37,11 @@ Option C (company-internal distribution — recommended for teams): run
 self-contained Maven repository with a `SHA-256SUMS` manifest (verify after transfer with
 `shasum -a 256 -c SHA-256SUMS`). Host the unzipped folder anywhere (artifact server, internal
 static host, even a shared drive) and consume it:
+
+For an internal preview version, run `scripts/release_internal.sh --version 0.9.0-preview1 --verify`
+and use that exact version in every debug and release dependency. The script clears its generated
+repository before publishing so a zip never mixes versions. The wrapper and CI use Gradle 9.1.0;
+set `QALENS_GRADLE` to another executable only when testing a deliberate toolchain change.
 
 ```kotlin
 // settings.gradle.kts
@@ -59,13 +71,13 @@ dependencies {
 
 Nothing. AndroidX Startup auto-installs the overlay in debug builds. Build, run the debug variant:
 you get the floating QA bubble, shake-to-open, the persistent notification, and a second launcher
-icon **"QaLens Control"** (the Control Room). Verify: `adb shell ams package …` not needed — just
-look for the bubble.
+icon **"QaLens Control"** (the Control Room). Verify the bubble on a running debug build.
 
 Manifest merging adds (debug only): `POST_NOTIFICATIONS` (requested at runtime),
 `SYSTEM_ALERT_WINDOW` (optional floating stop chip), `INTERNET` (webhook), a FileProvider under
 `${applicationId}.qalens.fileprovider`, the Control Room + player activities (own task affinities)
-and two services. No action needed unless you have manifest conflicts.
+and two services. Check the merged manifest for your variant; optional modules contribute only their own entries.
+`ACCESS_NETWORK_STATE` supports connectivity observation.
 
 ## Step 3 — Identify the build (L1, strongly recommended)
 
@@ -93,8 +105,8 @@ setContent { QaLensRoot { App() } }
 
 ## Step 4 — Screens & navigation (L2)
 
-Navigation Compose: replace `NavHost` with `QaLensNavHost` (same parameters, plus an optional
-`routeNameMapper: (String?) -> String`). Every route change lands in the timeline, screen-visit
+Navigation Compose: use `QaLensNavHost` with its supported parameters and optional
+`routeNameMapper: (String?) -> String?`; compare its signature with your existing NavHost first. Every route change lands in the timeline, screen-visit
 map, and recordings. Not using Navigation Compose? Call `QaLens.setScreen("Checkout", route)`
 yourself on screen changes.
 
@@ -107,41 +119,71 @@ Timber.plant(QaLensTimberTree())                                          // log
 
 Both are `compileOnly` deps of QaLens — it never forces OkHttp/Timber on you. Without the
 interceptor the network tab and `.sal` network track stay empty, and `analysis.json.coverage`
-explicitly says so (so AI analysis won't infer "no traffic").
+describes the declared sources. A generic sink can also supply observations; absence of events
+does not establish absence of traffic.
 
 ### Capture feature flags (what feeds the tracks — and what doesn't)
 
 Three `QaLensConfig` flags decide which automatic captures run (explicit
-`QaLens.event()/log()/breadcrumb()` calls always work — only automatic capture is gated):
+`QaLens.event()/log()/breadcrumb()` calls remain available while the master `enabled` flag is true):
 
 ```kotlin
 QaLens.configure {
     captureNetwork = true        // default: QaLensOkHttpInterceptor logs metadata
     captureLogs = true           // default: QaLensTimberTree mirrors Timber lines
-    networkFromChucker = false   // opt-in: Chucker becomes the network source instead
+    networkFromChucker = false   // legacy flag; leave false (see Chucker below)
 }
 ```
 
 - **`captureNetwork = false`** — the interceptor becomes a pure pass-through (zero reads).
 - **`captureLogs = false`** — the Timber tree drops every line.
-- **`networkFromChucker = true`** — if your app already runs Chucker, QaLens registers a
-  Chucker `TransactionListener` (reflection, optional dependency) and converts every transaction
-  into a NetworkEvent. No `QaLensOkHttpInterceptor` needed — it auto-passes-through so nothing
-  is double-counted. If Chucker is missing, QaLens logs a warning and falls back to the
-  interceptor. Recommended Chucker setup (both inspectors, one client):
+- **Chucker coexistence:** attach both interceptors to the client that makes the request. Chucker
+  owns its full-body inspector; QaLens captures its own metadata. Chucker has no public live
+  transaction listener. The old `networkFromChucker` setting is retained for compatibility and
+  no longer disables QaLens capture.
 
 ```kotlin
 OkHttpClient.Builder()
-    .addInterceptor(ChuckerInterceptor.Builder(context).build())  // first — full bodies
-    .addInterceptor(QaLensOkHttpInterceptor())                    // second — metadata (or omitted
-                                                                  //           when networkFromChucker)
+    .addInterceptor(ChuckerInterceptor.Builder(context)
+        .redactHeaders("Authorization", "Cookie", "Set-Cookie")
+        .build())
+    .addInterceptor(QaLensOkHttpInterceptor())
     .build()
 ```
 
-Either way the `.sal` stays honest: `analysis.json.coverage` records
-`networkCaptureEnabled` / `logCaptureEnabled` / `networkFromChucker` and its notes say
-"DISABLED via QaLensConfig…" instead of "not installed" — so AI analysis can tell a gated track
-from a missing one.
+Use matching Chucker debug/release artifacts. The sample pins **4.1.0** for this repository's
+Kotlin 2.0.21 toolchain; 4.2.0 ships Kotlin 2.2 metadata and fails with this compiler. Existing host
+apps should keep a Chucker version compatible with their own Kotlin/AGP toolchain. QaLens does not
+add Chucker transitively. [Compatibility details and other OSS adapters](docs/OSS_INTEGRATIONS.md).
+
+For another transport, create `val sink = QaLens.networkSink("Ktor")` once and call
+`sink.record(NetworkEvent(...))` from the completed-request/error callback. No extra dependency is
+needed. Capture switches, redaction and body opt-in apply to all adapter events. Do not mirror
+traffic already observed by QaLensOkHttpInterceptor.
+
+Open Overview → **Copy integration check**, or call `QaLens.integrationReport()`, to inspect declared
+sources and settings without exposing request contents. `analysis.json.coverage.networkSources`
+records declared adapter names; declaration alone does not prove complete capture.
+
+### Continuous logs and network traffic
+
+The live dashboard publishes pending logs and requests in batches about every 100 ms. It keeps the
+newest events: `maxEventHistory` defaults to 600 and is bounded to 20–10,000 entries, with a shared
+1,048,576-character message/tag budget. Individual dashboard fields have 16,384-character previews
+plus a truncation notice; network history keeps 250 requests. These limits bound text and entries,
+not total heap use. Repro/Logs/Network use lazy rows, and evidence/filter/search processing runs on
+background workers that keep progressing during a continuous stream.
+
+Recording journals have [separate retention budgets](docs/RECORDING_RETENTION.md). Dashboard
+eviction and preview truncation do not edit that journal. Chucker's own capture, storage and UI
+remain governed by Chucker's settings. Keep network bodies off unless a bounded preview is needed.
+
+Overlay report copies are prepared in the background. Clipboard output above 200,000 characters
+is explicitly truncated; use a recording for full retained evidence. Public `build*Report()` and
+`evidenceBundle()` calls remain synchronous for compatibility: call them from a worker, for example
+`withContext(Dispatchers.Default) { QaLens.buildFullReport() }`. Initial input redaction still runs
+on the logging caller's thread, and host snapshot providers still run on main; keep messages and
+providers small and avoid expensive custom regular expressions.
 
 ## Step 6 — Enrichment (L4, all optional)
 
@@ -150,10 +192,10 @@ from a missing one.
 Modifier.qaTag("login.email.field")
 Modifier.qaName("Submit payment")             // human label for reports
 
-// App-owned data → panel, reports, .sal
-QaLens.registerDataSource("Prefs") { mapOf("theme" to prefs.theme) }
-QaLens.observeDataStore("Prefs", dataStore.data) { it.toString() }
-QaLens.observeRoom(db, "accounts", "orders")  // table-change timeline events
+// App-owned, allowlisted snapshots → panel, reports, .sal
+QaLens.registerDataSource("Prefs") { mapOf("theme" to cachedTheme.value) }
+QaLens.observeDataStore("Prefs", dataStore.data) { "settings updated" }
+QaLens.observeRoom(db, "accounts", "orders")  // table names only; no row contents
 
 // Feature flags (live provider, evaluated safely)
 QaLens.setFeatureFlagProvider { flags.snapshot() }
@@ -163,13 +205,62 @@ QaLens.registerDeepLinkScenario("Open cart", "myapp://cart", expectedRoute = "ca
 QaLens.contract("Checkout") { requiresTag("checkout.submit"); requiresNoFailedNetwork() }
 ```
 
+`observeRoom` uses Room's invalidation tracker; it records changed table names, not queries or
+rows. `observeDataStore` accepts the real DataStore `data` Flow or any `Flow<T>`, skips the initial
+value, and records the host's short `describe` label for later changes. Do not stringify the whole
+preferences object or include secrets in that label. Snapshot providers run during analysis on the
+main thread: return a cached, allowlisted map, and use `redactKeys`/`redactAll` for sensitive
+values. When the host closes a database or disposes a Flow owner, call
+`QaLens.stopObservingRoom(db)` or `QaLens.stopObservingDataStore("Prefs")`.
+
+Room/DataStore changes now refresh those snapshots for recording state samples. A `.sal` archive's
+`analysis.json` reports observed Room and preference change counts and flags a data change within
+five seconds before a failed request as a temporal lead. The lead is a question to investigate,
+not a claim that the data change caused the failure. Empty counts can mean unchanged data or
+missing hooks; check `analysis.json.coverage` and exercise a real write during integration.
+
+### Compose inspection across host windows
+
+QaLens reads the public Compose semantics tree from the active Activity's attached Compose roots.
+Ordinary `setContent` and embedded `ComposeView`s in that window need no extra hook. Keep normal
+`Modifier.testTag` and accessibility semantics; use `qaTag` only when you also want its optional
+layout hint. Repeated tags are matched to semantics by bounds, but unique test tags remain best for
+reliable macros and reports.
+
+A Compose `Dialog`, `Popup`, or other window has a separate root. Register it at the content root:
+
+```kotlin
+Dialog(onDismissRequest = onDismiss) {
+    Box(Modifier.qaInspectionRoot()) {
+        // dialog content
+    }
+}
+```
+
+The modifier unregisters the window when its composition ends and is inert in release builds. For
+a host-managed window, pair `QaLens.registerComposeRoot(view)` after attaching its Compose view with
+`QaLens.unregisterComposeRoot(view)` when removing it. The view's context must belong to the active
+Activity. `QaLens.invalidateInspection()` requests a debounced scan after a semantics-only update;
+visual Inspect/Tag modes also refresh every 500 ms while open. Outside those modes there is no
+continuous polling. The no-op artifact exposes the same calls.
+
+In Inspect mode, **Actions** shows interactive nodes by default. Switch to All, Tagged, or Issues
+when investigating, then tap an outline to see its redacted label, tag, size, and warnings or copy
+the test tag. Node IDs are scoped to their Compose root. Detached and fully off-viewport nodes are omitted;
+`qaHiddenFromReports()` excludes its subtree from reports. Semantics do not reveal arbitrary private
+Compose state or custom Canvas content. Activity-window screenshots do not establish capture of
+separate dialog windows, so review sensitive windows and `FLAG_SECURE` separately.
+
 ## Step 7 — Team setup via `.appsal` (recommended)
 
-One JSON config per app package: panel style (QA-minimal vs full), webhook endpoint, saved SQL
-queries, macros, watched prefs files. Build it in the web editor (`web/index.html` → **⚙ .appsal
-editor**), commit it next to your app, and every tester imports it on-device:
-**Control Room → App Config → ⤓ Import .appsal**. Personal identities (per-tester webhook
-bearer/Jira user) are **QA Profiles** on the device, deliberately not part of `.appsal`.
+One JSON config per app package: panel style (tester quick actions vs full developer diagnostics),
+webhook endpoint, saved SQL queries, macros and watched prefs files. Start from
+`web/sample.appsal`, edit it in `web/index.html` → **⚙ .appsal editor**, set the app package and
+team defaults, then export and review the JSON. Keep the webhook blank until the company owns an
+authenticated service; the bundled Python mock is only for loopback testing. Commit a secret-free
+config next to the host app, and have each tester import it on-device via **Control Room → App
+Config → ⤓ Import .appsal**. Personal identities (per-tester webhook bearer/Jira user) are **QA
+Profiles** on the device, deliberately not part of `.appsal`.
 
 ### Macros (inside `.appsal` or created on-device)
 
@@ -186,7 +277,8 @@ mark logged in by macro
 ```
 
 Targets: exact test tag first, then visible text, then content description (smallest match wins).
-The minimal QA panel surfaces the **5 most recently used macros** at the top. Verbs:
+The tester quick-actions sheet keeps macros under **More tools**; it shows the **5 most recently
+used** first. Verbs:
 `deeplink <uri>` · `wait <ms>` · `tap <tag|text>` · `type <tag> <text>` · `record [video]` ·
 `stop` · `screenshot` · `mark <text>`.
 
@@ -194,9 +286,9 @@ The minimal QA panel surfaces the **5 most recently used macros** at the top. Ve
 
 | Artifact | What / where |
 |---|---|
-| `.sal` recording | ZIP of frames-or-video + synced timeline/network/logs/state + `analysis.json` (precomputed digest) + `for_ai.md` (self-describing for AI). Record from the panel/notification/Control Room. Replay on-device, in `web/index.html`, or `node web/tools/sal_report.js file.sal` (exit 1 on failures — CI gate). |
-| Webhook upload | Control Room → per recording **⇪ Webhook**: multipart `file` + `X-QaLens-App/-Version/-Env/-Device/-Platform/-User/-Sal-Name/-Sal-Size/-Digest` headers + query params. Your backend's response body is shown to the tester. |
-| Screenshots | Annotated, auto-saved to **Photos → Pictures/QaLens** (Android 10+), share optional. |
+| `.sal` recording | ZIP of frames-or-video + synced timeline/network/logs/state + `analysis.json` (precomputed digest) + `for_ai.md` (self-describing for AI). Completed archives live in app-private `files/qalens/recordings/`. Record from the panel/notification/Control Room. Replay on-device, in the primary `web/index-v2.html` viewer (or classic `web/index.html`), or with `node web/tools/sal_report.js file.sal` (exit 1 for observed failures, 2 for invalid or disclosed partial evidence without a failure). |
+| Webhook upload | Tester sheet → **Send latest session**, or Control Room → per recording **⇪ Webhook**: multipart `file` + `X-QaLens-App/-Version/-Env/-Device/-Platform/-User/-Sal-Name/-Sal-Size/-Digest` headers + query params. The tester sees a short upload verdict; inspect the backend dashboard for full details. |
+| Screenshots | Annotated, saved to private app cache; sharing and Photos copies are opt-in. |
 | Bug reports | Redacted Jira/Slack/repro text via one-tap copy (`QaLens.buildJiraReport()` etc.). |
 
 > **Testing against the mock backend** — no real server needed. Run `python3 backend/server.py`,
@@ -207,24 +299,63 @@ The minimal QA panel surfaces the **5 most recently used macros** at the top. Ve
 ## Verification checklist (run these)
 
 1. `./gradlew :app:assembleDebug` → install → QA bubble visible, "QaLens Control" icon exists.
-2. `./gradlew :app:compileReleaseKotlin` → compiles against the no-op (API parity proof).
+2. `./gradlew :app:assembleRelease` → builds; inspect `releaseRuntimeClasspath` and the merged
+   manifest to confirm `qalens-noop` is present and active capture/replay modules are absent.
+   In this repository run `:sample-app:verifyReleaseIsolation` and the separate consumer gate.
 3. Record 10s, stop via the REC chip → `.sal` appears in Control Room → ▶ Play works.
 4. If you set a webhook: **Test endpoint** returns your backend's response in the card.
 
 ## Hard rules (do not violate)
 
 - Never ship `qalens-compose` in a release build — the `releaseImplementation(qalens-noop)` line
-  is mandatory, and release behavior must be verified with `compileReleaseKotlin`.
+  is mandatory. Build both variants and verify their resolved dependencies and merged manifests.
 - Don't put real bearer tokens in `.appsal` files you commit — export with secrets masked
   (default) and let each tester store their token in their on-device QA Profile.
-- All exports are redacted by QaLens defaults (JWTs, auth headers, cookies, emails, cards,
-  phones, long IDs) — add `addRedaction(...)` rules for your domain-specific secrets.
+- Structured exports use configured redaction rules; custom data, macro/SQL literals and pixels
+  need explicit privacy review. Add domain-specific rules and use secure windows/hidden regions.
 
 ## Known limits (set expectations)
 
 - Compose-first: semantics inspection covers Compose UI; classic Views appear only as frames.
 - The timeline never fabricates events: no interceptor → no network rows; no Timber → no logs.
-- Frame recording is ~2fps (permission-free); choose HD video (MediaProjection consent) for
-  animation-level detail. `FLAG_SECURE` windows black out captures.
+- Frame recording is ~2fps (permission-free). HD video requires `allowUnmaskedVideo=true` plus
+  Android consent and has no per-node masks. Secure windows are refused by screenshot/frame capture.
 - `tap`/`type` need semantics: tag your interactive elements (`Modifier.qaTag`) or they fall back
   to text matching.
+
+## Privacy defaults and AI integration procedure
+
+Read [Android client fixes](docs/CLIENT_SAFETY_FIXES.md) for migration details. Keep these defaults
+unless the host explicitly chooses otherwise:
+
+```kotlin
+QaLens.configure {
+    enabled = BuildConfig.DEBUG
+    captureNetworkBodies = false
+    saveScreenshotsToGallery = false
+    allowUnmaskedVideo = false
+}
+```
+
+`takeScreenshot(share=false)` uses private cache. Compose password/hidden/redaction-matched regions
+are masked; arbitrary pixels are not. Coroutine helpers delegate uncaught failures in debug and
+release; they do not suppress exceptions. Imported webhook origin changes clear the local credential.
+A secret-free `.appsal` may still contain literal passwords in macro steps or SQL: review before sharing.
+
+Finished `.sal` archives live in the host app's private `files/qalens/recordings/` directory so
+cache eviction or an app update does not silently remove them. QaLens moves older archives from
+`cache/qalens/` when it next starts and keeps a legacy archive visible if a move fails. Uninstalling
+the host app still deletes them. Host app backup settings also apply to this directory: exclude
+`qalens/recordings/` from cloud backup and device transfer, or disable backup for the QA variant,
+if recordings must remain only on the test device. The sample app disables backup.
+
+An AI integrating another app should inspect its module names, Kotlin/AGP/Compose versions,
+Application, navigation, actual HTTP client, logging, crash vendor and existing build variants first.
+Use existing project identity/configuration when available; ask only for missing decisions that
+matter, such as an endpoint or additional sensitive capture. Do not invent BuildConfig fields,
+force optional tools, replace existing Chucker/Timber handlers, or assume all NavHost overloads match.
+
+Apply the smallest useful integration, keep privacy defaults, run both builds and dependency checks,
+then verify one synthetic request/report/frame recording on a disposable device if available.
+State exactly what was wired and tested. For SDK development, start at [HANDOVER.md](HANDOVER.md)
+instead. The independent consumer fixture is the executable example for external dependency setup.

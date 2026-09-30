@@ -1,8 +1,8 @@
 # QaLens — the mobile release-evidence SDK (showcase + demo guide)
 
-> **One line:** QaLens turns a manual QA session into a redacted, AI-ready bug bundle — and a
-> replayable `.sal` recording — with zero Android Studio, then ships it to your analysis backend
-> through hooks you can stand up in ten seconds.
+> **One line:** QaLens turns a manual QA session into a redacted, AI-ready bug bundle and replayable
+> `.sal` recording. The repository includes a local mock backend so teams can try the full send flow
+> without subscribing to a hosted service.
 
 This article is the fastest possible tour: what QaLens is, the one-command demo, the hooks, and a
 scripted walkthrough that exercises **every feature** — on the web in 60 seconds, or on a device in
@@ -59,13 +59,15 @@ The scripted **wow flow**:
    the fake backend returns `POST /transfer → 500` twice.
 2. Open the **Control Room** (the second launcher icon) → **Webhook** →
    `http://127.0.0.1:8000/webhook` → **Test endpoint** → the mock backend answers instantly.
-3. Tap the **QA bubble** → **Overview**: the release score has dropped and *Likely Owner =
-   Backend/API (HIGH)* — with reasons.
-4. **Bug Bundle → Copy Jira Bug** → paste. Build, device, repro steps, network failure,
+3. Tap the **QA bubble** → **Record a session**, reproduce the issue, then stop from the recording
+   chip. Sessions save locally first.
+4. Tap the bubble again → **Mark a bug** to add a timestamp and private screenshot. If a webhook is
+   configured and the session is saved, **Send latest session** sends it explicitly.
+5. Open **More tools → Developer diagnostics** for the score and *Likely Owner = Backend/API
+   (HIGH)*, with reasons.
+6. **Bug Bundle → Copy Jira Bug** → paste. Build, device, repro steps, network failure,
    accessibility, flags, app data — all redacted.
-5. **Record Session** → reproduce → **Stop** → the `.sal` lands in the recordings list →
-   **⇪ webhook** → the dashboard shows the upload and the mock AI verdict.
-6. In the **Settings** screen of the sample app, the new *QaLens Demos* section lets you feed the
+7. In the **Settings** screen of the sample app, the new *QaLens Demos* section lets you feed the
    pipeline on demand: failing transfer, ⭐ mark moment, BUG bookmark, 10-second recording,
    business event, **coroutine crash**, **ANR**, and a real **crash** — then watch each one appear
    in the panel's Overview/Logs and in the next `.sal`.
@@ -84,16 +86,16 @@ The scripted **wow flow**:
   │ data sources    │     └──────────────────────┘    └────────────────────────┘
   └─────────────────┘              │                              │
                                    ▼                              ▼
-                    everything redacted at every export boundary — plus hooks:
+                    structured text redacted at export boundaries — plus hooks:
                     mobile → POST /webhook      web player → POST /api/ingest
                     (multipart .sal)            (JSON session summary)
 ```
 
 QaLens is a **debug-only** Android SDK for Jetpack Compose apps. Release builds link a no-op with
-the identical API, so it costs nothing in production. It never invents data it did not observe —
-the timeline is built only from navigation, network, Timber logs, and explicit events — and every
-byte that leaves the device passes one redaction choke-point (JWTs, bearer tokens, cookies, emails,
-cards, phone numbers, long IDs).
+the corresponding API, with no capture in production. It never invents data it did not observe —
+the timeline is built only from navigation, network, Timber logs, and explicit events — and structured reports pass configured text redaction. Screenshots default to private cache and
+mask known sensitive Compose regions; unmasked full-display video and gallery copies require host
+opt-in. See [client privacy](docs/CLIENT_SAFETY_FIXES.md).
 
 **Integration is four lines and stops where you want:**
 
@@ -140,7 +142,7 @@ failures, so a pipeline can gate on uploaded artifacts).
 The mobile hook retries flaky Wi-Fi (3 attempts, backoff, no retry on 4xx), queues uploads while
 offline, and switches to **chunked/resumable** transfer for large recordings. The mock backend is
 stdlib-only Python (`backend/server.py`) — run it anywhere, then swap its deterministic verdict for
-your real AI call. It ships with 11+ end-to-end tests (`python3 backend/tests/test_backend.py`).
+your real AI call. It ships with end-to-end tests (`python3 backend/tests/test_backend.py`).
 
 ---
 
@@ -155,25 +157,23 @@ your real AI call. It ships with 11+ end-to-end tests (`python3 backend/tests/te
 | **Tools** | deep-link scenarios, macros (with assertions), saved SQL |
 | **Inspect / Tag** | semantics bounds + warnings; every test tag drawn on its component |
 | **Logs** | filterable, level chips, duplicate collapsing |
-| **Record** | frames or HD video → `.sal` → share / replay / webhook |
+| **Record** | frames or explicitly enabled HD video → `.sal` → share / replay / webhook |
 | **Web player** | synced tracks, filmstrip, marks, AI Brief, compare two sessions, theatre mode |
 | **CLI** | `sal_report.js` markdown / `--json` / `--for-ai` / `--compare baseline.sal` |
 
 ---
 
-## 7. Prove it: every test suite
+## 7. Verify the demo
 
-```bash
-./demo.sh test       # or, individually:
-node web/test/read.test.js                       # web .sal reader regression (32 assertions)
-python3 backend/tests/test_backend.py            # mock backend end-to-end (15)
-./gradlew :qalens-core:test                      # 69+ pure-engine unit tests
-./gradlew :sample-app:compileReleaseKotlin       # THE no-op parity proof
-node web/tools/sal_report.js web/sample.sal      # CI gate — exits 1 on the demo failure
+```sh
+./demo.sh test                           # convenience Kotlin/web/backend/CLI checks
+node web/tools/sal_report.js web/sample.sal # expected exit 1: demo contains known failures
 ```
 
-(Build note: use JDK 17 — the repo pins Kotlin 2.0.21, which cannot parse newer JDKs. If the
-Gradle wrapper is downloading slowly, any cached Gradle 9.x binary works.)
+Use [CONTRIBUTING.md](CONTRIBUTING.md) for the complete Android test/lint/APK/consumer matrix and
+instrumented device runner. [HANDOVER.md](HANDOVER.md) records the dated baseline. Release safety
+requires a no-op dependency graph, not just a successful release compile. Use JDK 17 and the tested
+Gradle 9.1.0 binary; other 9.x versions are not automatically verified.
 
 ---
 
@@ -188,16 +188,22 @@ sample-app/             the banking demo — Settings → QaLens Demos drives ev
 web/                    Mission Control: zero-dependency player + sal_report CLI
 backend/                the mock webhook backend + dashboard + e2e tests
 demo.sh                 this tour, one command
-docs/CODE_REVIEW.md     the frank engineering review (findings + next steps)
-next.md                 the living backlog (most items now shipped)
+HANDOVER.md             current project state and incoming-agent instructions
+next.md                 the single prioritized backlog
 ```
 
 ---
 
 ## FAQ
 
-**Does it upload anything by itself?** No. Nothing leaves the device unless QA shares, copies, or
-configures a webhook URL. Reports and `.sal` tracks are redacted by default.
+**Does it upload anything by itself?** There is no configured destination by default. QA can
+explicitly share or upload; failed uploads may retry later against their recorded destination.
+Configured text redaction and limited pixel masks do not make arbitrary evidence safe to share.
+
+**Can multiple companies use QaLens for free?** Yes. The SDK is MIT-licensed and teams can self-host
+their own integrations. The included Python backend is for local testing; it has no login, tenant
+separation or production retention controls. Do not point company recordings at a publicly reachable
+instance of that mock.
 
 **What if my screen has no test tags?** QaLens scores *missing* tags as a testability finding —
 that is signal, not noise. `Modifier.qaTag/qaName` fixes it in one line.

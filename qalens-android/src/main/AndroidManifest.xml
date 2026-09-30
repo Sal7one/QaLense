@@ -2,7 +2,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application>
-        <!-- FileProvider used exclusively by QaLens screenshot sharing.
+        <!-- FileProvider used by QaLens screenshot and recording sharing.
              Subclassed to avoid authority conflicts with the host app's own FileProvider. -->
         <provider
             android:name="com.qalens.android.QaLensFileProvider"

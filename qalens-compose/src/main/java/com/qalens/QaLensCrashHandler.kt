@@ -25,17 +25,18 @@ internal object QaLensCrashHandler {
     @Volatile private var mainAlive = false
     @Volatile private var anrMonitoring = false
     @Volatile private var lastCrash: QaLensCrash? = null
-    private var previousHandler: Thread.UncaughtExceptionHandler? = null
+    private val registration = CrashHandlerRegistration(
+        getHandler = Thread::getDefaultUncaughtExceptionHandler,
+        setHandler = Thread::setDefaultUncaughtExceptionHandler
+    ) { thread, throwable ->
+        runCatching { recordCrash(thread, throwable, CrashType.CRASH) }
+        autoFinalizeRecordingIfActive()
+    }
 
-    /** Install the crash + ANR capture. Safe to call once (from QaLens.install). */
+    /** Startup auto-install and explicit install may both run; never chain the handler to itself. */
     fun install() {
-        previousHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            recordCrash(thread, throwable, CrashType.CRASH)
-            autoFinalizeRecordingIfActive()
-            previousHandler?.uncaughtException(thread, throwable)
-        }
-        startAnrWatchdog()
+        registration.install()
+        if (QaLens.config.value.enabled) startAnrWatchdog()
     }
 
     /**
@@ -46,7 +47,7 @@ internal object QaLensCrashHandler {
      */
     private fun autoFinalizeRecordingIfActive() {
         if (!QaLens.state.value.isRecording) return
-        runCatching { QaLensSessionRecorder.autoFinalize() }
+        runCatching { QaLensSessionRecorder.autoFinalize(lastCrash) }
             .onFailure { android.util.Log.w("QaLensCrashHandler", "Recording auto-finalize failed: ${it.message}") }
     }
 
@@ -56,6 +57,7 @@ internal object QaLensCrashHandler {
     }
 
     private fun recordCrash(thread: Thread, throwable: Throwable, type: CrashType) {
+        if (!QaLens.config.value.enabled) return
         val state = QaLens.state.value
         val lastNet = state.networkEvents.lastOrNull()
         val crash = QaLensCrash(
@@ -67,7 +69,8 @@ internal object QaLensCrashHandler {
             route = state.screen.route,
             lastNetworkSummary = lastNet?.let { "${it.method} ${it.shortUrl} → ${it.statusLabel}" }
         )
-        lastCrash = crash
+        lastCrash = QaLensCrashEvidence.sanitize(crash, QaLens.config.value)
+        QaLensSessionRecorder.evidence?.crash(crash)
         // Emit into the timeline + the crashes list (confined to main).
         mainHandler.post {
             QaLens.appendCrash(crash)
@@ -75,35 +78,48 @@ internal object QaLensCrashHandler {
         }
     }
 
+    private var watchdogThread: Thread? = null
+    private var watchdogTick: Runnable? = null
+    @Volatile private var lastTickMs = 0L
+    @Volatile private var watchGeneration = 0L
+
+    fun stop() {
+        anrMonitoring = false
+        watchGeneration++
+        watchdogTick?.let(mainHandler::removeCallbacks)
+        watchdogTick = null
+        watchdogThread?.interrupt()
+        watchdogThread = null
+    }
+
     private fun startAnrWatchdog() {
         if (anrMonitoring) return
         anrMonitoring = true
-        var lastTickMs = System.currentTimeMillis()
-        val anrTick = object : Runnable {
+        val generation = ++watchGeneration
+        lastTickMs = SystemClock.uptimeMillis()
+        val tick = object : Runnable {
             override fun run() {
-                mainAlive = true
-                lastTickMs = System.currentTimeMillis()
+                if (generation != watchGeneration || !anrMonitoring) return
+                lastTickMs = SystemClock.uptimeMillis()
                 mainHandler.postDelayed(this, CHECK_INTERVAL_MS)
             }
         }
-        mainHandler.post(anrTick)
-
-        Thread({
-            while (anrMonitoring) {
-                mainAlive = false
-                SystemClock.sleep(CHECK_INTERVAL_MS + 500)
-                if (!mainAlive && anrMonitoring) {
-                    val blockedFor = System.currentTimeMillis() - lastTickMs
-                    if (blockedFor >= ANR_THRESHOLD_MS) {
+        watchdogTick = tick
+        mainHandler.post(tick)
+        watchdogThread = Thread({
+            try {
+                while (anrMonitoring && generation == watchGeneration) {
+                    Thread.sleep(CHECK_INTERVAL_MS)
+                    if (generation == watchGeneration && SystemClock.uptimeMillis() - lastTickMs >= ANR_THRESHOLD_MS)
                         checkAnr()
-                    }
                 }
-            }
-        }, "qalens-anr-watchdog").also { it.isDaemon = true }.start()
+            } catch (_: InterruptedException) { /* disabled */ }
+        }, "qalens-anr-watchdog").also { it.isDaemon = true; it.start() }
     }
 
     @Volatile private var lastAnrMs = 0L
     private fun checkAnr() {
+        if (!QaLens.config.value.enabled || !anrMonitoring) return
         val now = System.currentTimeMillis()
         // Throttle: at most one ANR event per 5s so a long freeze doesn't spam.
         if (now - lastAnrMs < ANR_THRESHOLD_MS) return
@@ -118,7 +134,8 @@ internal object QaLensCrashHandler {
             route = state.screen.route,
             lastNetworkSummary = state.networkEvents.lastOrNull()?.let { "${it.method} ${it.shortUrl} → ${it.statusLabel}" }
         )
-        lastCrash = crash
+        lastCrash = QaLensCrashEvidence.sanitize(crash, QaLens.config.value)
+        QaLensSessionRecorder.evidence?.crash(crash)
         mainHandler.post {
             QaLens.appendCrash(crash)
             QaLens.event("anr", "ANR: main thread blocked >${ANR_THRESHOLD_MS}ms on ${state.screen.displayName}")

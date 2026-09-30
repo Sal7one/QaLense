@@ -21,7 +21,7 @@ data class AppSalConfig(
     val name: String = "",
     val exportedAt: Long = 0L,
     // ui
-    val panelMode: String = "full",          // "minimal" | "full"
+    val panelMode: String = "minimal",       // "minimal" | "full"
     val overlayAlpha: Float = 1f,
     val dockBottom: Boolean = false,
     // webhook
@@ -48,7 +48,7 @@ object QaLensAppSal {
         context.applicationContext.getSharedPreferences("qalens_prefs", Context.MODE_PRIVATE)
 
     // ── Panel mode (minimal vs full) ─────────────────────────────────────────
-    fun panelMode(context: Context): String = prefs(context).getString(KEY_PANEL_MODE, "full") ?: "full"
+    fun panelMode(context: Context): String = prefs(context).getString(KEY_PANEL_MODE, "minimal") ?: "minimal"
     fun setPanelMode(context: Context, mode: String) =
         prefs(context).edit().putString(KEY_PANEL_MODE, if (mode == "minimal") "minimal" else "full").apply()
 
@@ -90,7 +90,7 @@ object QaLensAppSal {
         prefs(context).edit().putString(KEY_MACROS, arr.toString()).apply()
     }
 
-    // ── Macro usage (device-local, NOT exported — recency feeds the minimal panel) ──
+    // ── Macro usage (device-local, NOT exported — recency feeds More tools) ──
     private const val KEY_MACRO_USAGE = "appsal_macro_usage"
 
     fun recordMacroUse(context: Context, name: String) {
@@ -146,11 +146,14 @@ object QaLensAppSal {
             .put("overlayAlpha", c.overlayAlpha.toDouble())
             .put("dockBottom", c.dockBottom))
         o.put("webhook", JSONObject()
-            .put("url", c.webhookUrl)
+            .put("url", if (includeSecrets) c.webhookUrl else runCatching {
+                val uri = java.net.URI(c.webhookUrl)
+                java.net.URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toString()
+            }.getOrDefault(""))
             .put("headerName", c.webhookHeaderName)
             .put("headerValue", if (includeSecrets) c.webhookHeaderValue
                                 else if (c.webhookHeaderValue.isBlank()) "" else "•••")
-            .put("params", c.webhookParams)
+            .put("params", if (includeSecrets) c.webhookParams else "")
             .put("includeMeta", c.webhookIncludeMeta))
         o.put("queries", JSONArray().also { arr ->
             c.queries.forEach { arr.put(JSONObject().put("name", it.name).put("db", it.db).put("sql", it.sql)) }
@@ -188,7 +191,7 @@ object QaLensAppSal {
             packageName = o.optString("package"),
             name = o.optString("name"),
             exportedAt = o.optLong("exportedAt"),
-            panelMode = ui.optString("panelMode", "full"),
+            panelMode = ui.optString("panelMode", "minimal"),
             overlayAlpha = ui.optDouble("overlayAlpha", 1.0).toFloat(),
             dockBottom = ui.optBoolean("dockBottom", false),
             webhookUrl = wh.optString("url"),
@@ -203,14 +206,16 @@ object QaLensAppSal {
     }.getOrNull()
 
     /**
-     * Apply an imported config to this device. Skips a masked/empty webhook secret so importing a
-     * shared config never wipes a locally configured token. Returns a short human summary.
+     * Apply an imported config. A masked/empty secret preserves the local credential only when
+     * the destination origin and header name are unchanged. Returns a short human summary.
      */
     fun apply(context: Context, c: AppSalConfig): String {
         setPanelMode(context, c.panelMode)
         QaLensPrefs.setOverlayAlpha(context, c.overlayAlpha)
         QaLensPrefs.setDockBottom(context, c.dockBottom)
         if (c.webhookUrl.isNotBlank()) QaLensPrefs.setWebhookUrl(context, c.webhookUrl)
+        if (!c.webhookHeaderName.equals(QaLensPrefs.webhookHeaderName(context), ignoreCase = true))
+            QaLensPrefs.setWebhookHeaderValue(context, "")
         QaLensPrefs.setWebhookHeaderName(context, c.webhookHeaderName)
         if (c.webhookHeaderValue.isNotBlank()) QaLensPrefs.setWebhookHeaderValue(context, c.webhookHeaderValue)
         QaLensPrefs.setWebhookParams(context, c.webhookParams)

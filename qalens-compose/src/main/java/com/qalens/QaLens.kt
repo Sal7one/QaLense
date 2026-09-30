@@ -30,7 +30,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 object QaLens {
     private val configState = MutableStateFlow(QaLensConfig())
     private val uiStateMutable = MutableStateFlow(QaLensUiState())
-    private val manualNodes = linkedMapOf<String, InspectNode>()
+    private data class ManualNode(val node: InspectNode, val view: WeakReference<View>)
+    private val manualNodes = linkedMapOf<String, ManualNode>()
     private val recomposeBuffer = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private var lastRecomposeFlushMs = 0L
 
@@ -41,12 +42,18 @@ object QaLens {
     private val mainHandler = Handler(Looper.getMainLooper())
     /** True when a recompute is pending (set on any thread, consumed on main). */
     private val analysisDirty = AtomicBoolean(false)
+    private val dashboardEvents = DashboardEventBuffer()
+    private val dashboardNetwork = DashboardQueue<NetworkEvent>(250)
+    private val eventPublishScheduled = AtomicBoolean(false)
+    private val publishEvents = Runnable {
+        publishDashboard()
+    }
     /** A pending recompute runnable, deduped so bursts coalesce into one pass. */
     private var analysisPending: Runnable? = null
     /** Debounce window for [markAnalysisDirty]. Tuned so a burst of 10 network calls → 1 recompute. */
     private const val ANALYSIS_DEBOUNCE_MS = 250L
     private var lastScreenKey: String? = null
-    private var lastScreenshot: EvidenceAttachment? = null
+    @Volatile private var lastScreenshot: EvidenceAttachment? = null
     private val contracts = linkedMapOf<String, ScreenContract>()
     private val dataSourceProviders = linkedMapOf<String, DataSourceEntry>()
     /** B3: registered custom tab providers — appended after the built-in tabs in the panel. */
@@ -78,20 +85,54 @@ object QaLens {
     val state: StateFlow<QaLensUiState> = uiStateMutable.asStateFlow()
     val config: StateFlow<QaLensConfig> = configState.asStateFlow()
 
+    @Volatile internal var captureEpoch: Long = 0
+        private set
+
+    internal fun onMain(action: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) action() else mainHandler.post(action)
+    }
+
     fun configure(block: QaLensConfig.Builder.() -> Unit) {
+        val wasEnabled = configState.value.enabled
+        val allowedVideo = configState.value.allowUnmaskedVideo
         configState.update { current -> QaLensConfig.Builder(current).apply(block).build() }
-        if (!configState.value.enabled) {
-            // Run-condition says off — tear down anything the startup initializer already attached.
-            currentActivityRef?.get()?.let { QaLensActivityInstaller.detachOverlay(it) }
-            appContext?.let { com.qalens.android.QaLensNotification.dismiss(it) }
-            return
+        val nowEnabled = configState.value.enabled
+        if (!nowEnabled) captureEpoch++
+        onMain {
+            if (allowedVideo && !configState.value.allowUnmaskedVideo) {
+                pendingRecordingVideo = null
+                QaLensSessionRecorder.stop(share = false)
+            }
+            if (!nowEnabled) {
+                clearPendingEvents()
+                pendingRecordingVideo = null
+                QaLensMacros.cancel()
+                QaLensWebhook.stop()
+                QaLensSessionRecorder.stop(share = false)
+                QaLensActivityInstaller.suspendCapture()
+                QaLensCrashHandler.stop()
+                appRef?.get()?.let { app ->
+                    QaLensConnectivity.stop(app)
+                    QaLensMemoryMonitor.stop(app)
+                    com.qalens.android.QaLensNotification.dismiss(app)
+                }
+                suspendDataObservers()
+                analysisPending?.let(mainHandler::removeCallbacks)
+                analysisPending = null
+                analysisDirty.set(false)
+            } else {
+                appRef?.get()?.let { app ->
+                    QaLensCrashHandler.install()
+                    QaLensConnectivity.start(app)
+                    QaLensMemoryMonitor.start(app)
+                }
+                resumeDataObservers()
+                if (!wasEnabled) QaLensActivityInstaller.resumeCapture()
+                currentActivity?.let { updateDeviceAndScreen(it) }
+                warnLegacyChuckerMode()
+                markAnalysisDirty()
+            }
         }
-        currentActivityRef?.get()?.let { updateDeviceAndScreen(it) }
-        // Network source may have been flipped in configure() after install — apply it lazily.
-        if (configState.value.networkFromChucker) {
-            appContext?.let { QaLensChuckerSource.ensureRegistered(it) }
-        }
-        markAnalysisDirty()
     }
 
     /**
@@ -212,15 +253,55 @@ object QaLens {
      * Emit a timeline event whenever any of [tables] change in [db], via Room's InvalidationTracker.
      * Captures *that* a table changed (not row contents). Debug/QA only — call from a debug build.
      */
-    fun observeRoom(db: RoomDatabase, vararg tables: String) {
-        if (tables.isEmpty()) return
-        val observer = object : InvalidationTracker.Observer(tables.toList().toTypedArray()) {
-            override fun onInvalidated(changed: Set<String>) {
-                event("DB changed", "Room tables changed: ${changed.joinToString()}")
+    private data class RoomBinding(val db: RoomDatabase, val tables: List<String>, val observer: InvalidationTracker.Observer, var active: Boolean = false)
+    private data class FlowBinding(val start: () -> kotlinx.coroutines.Job, var job: kotlinx.coroutines.Job? = null)
+    private val roomBindings = mutableListOf<RoomBinding>()
+    private val flowBindings = linkedMapOf<String, FlowBinding>()
+
+    private fun suspendDataObservers() {
+        roomBindings.filter { it.active }.forEach { binding ->
+            runCatching { binding.db.invalidationTracker.removeObserver(binding.observer) }
+            binding.active = false
+        }
+        flowBindings.values.forEach { it.job?.cancel(); it.job = null }
+    }
+
+    private fun resumeDataObservers() {
+        if (!config.value.enabled) return
+        roomBindings.filterNot { it.active }.forEach { binding ->
+            val result = runCatching { binding.db.invalidationTracker.addObserver(binding.observer) }
+            binding.active = result.isSuccess
+            result.onFailure {
+                pushError(ErrorKind.DATA_SOURCE, "Room observer registration failed: ${it.javaClass.simpleName}")
             }
         }
-        runCatching { db.invalidationTracker.addObserver(observer) }
-            .onFailure { pushError(ErrorKind.DATA_SOURCE, "observeRoom failed: ${it.message}") }
+        flowBindings.values.forEach { if (it.job?.isActive != true) it.job = it.start() }
+    }
+
+    fun observeRoom(db: RoomDatabase, vararg tables: String) {
+        val selected = tables.map(String::trim).filter(String::isNotBlank).distinct().sorted()
+        if (selected.isEmpty()) return
+        val observer = object : InvalidationTracker.Observer(selected.toTypedArray()) {
+            override fun onInvalidated(changed: Set<String>) {
+                event(QaLensDataEvents.ROOM, "Room tables changed: ${changed.sorted().joinToString()}")
+                markAnalysisDirty()
+            }
+        }
+        onMain {
+            if (roomBindings.none { it.db === db && it.tables == selected })
+                roomBindings += RoomBinding(db, selected, observer)
+            resumeDataObservers()
+        }
+    }
+
+    /** Release a host-owned Room observer before closing its database; no rows are read. */
+    fun stopObservingRoom(db: RoomDatabase, vararg tables: String) = onMain {
+        val selected = tables.map(String::trim).filter(String::isNotBlank).distinct().sorted()
+        val matches = roomBindings.filter { it.db === db && (selected.isEmpty() || it.tables == selected) }
+        matches.forEach { binding ->
+            if (binding.active) runCatching { binding.db.invalidationTracker.removeObserver(binding.observer) }
+            roomBindings.remove(binding)
+        }
     }
 
     /**
@@ -229,14 +310,31 @@ object QaLens {
      * short, redaction-aware label.
      */
     fun <T> observeDataStore(name: String, flow: Flow<T>, describe: (T) -> String = { "updated" }) {
-        bgScope.launch {
-            runCatching {
-                flow.drop(1).collect { value ->
-                    val desc = runCatching { describe(value) }.getOrDefault("updated")
-                    event("$name changed", desc)
+        onMain {
+            flowBindings.remove(name)?.job?.cancel()
+            flowBindings[name] = FlowBinding(start = {
+                bgScope.launch {
+                    try {
+                        flow.drop(1).collect { value ->
+                            if (configState.value.enabled) {
+                                val desc = runCatching { describe(value) }.getOrDefault("updated")
+                                event(QaLensDataEvents.DATASTORE, "$name changed: $desc")
+                                markAnalysisDirty()
+                            }
+                        }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        pushError(ErrorKind.DATA_SOURCE, "DataStore source '$name' stopped: ${failure.javaClass.simpleName}")
+                    }
                 }
-            }.onFailure { log("observeDataStore($name) failed: ${it.message}") }
+            })
+            resumeDataObservers()
         }
+    }
+
+    /** Cancel a host-owned preference Flow when its owner is disposed. */
+    fun stopObservingDataStore(name: String) = onMain {
+        flowBindings.remove(name)?.job?.cancel()
     }
 
     // ── A6: Generic data-source observer (Room/DataStore agnostic) ───────────
@@ -260,15 +358,18 @@ object QaLens {
 
     /** Notify all registered observers of a data-layer change. Called by the host app. */
     fun notifyDataChange(source: String, tableName: String, changeType: ChangeType) {
+        if (!configState.value.enabled) return
         val snapshot = dataObservers.toList()
         snapshot.forEach { obs ->
             runCatching { obs.onChanged(source, tableName, changeType) }
                 .onFailure { log("DataSourceObserver.onChanged failed: ${it.message}") }
         }
+        markAnalysisDirty()
     }
 
     /** Notify all registered observers of a data-layer error. */
     fun notifyDataError(source: String, error: String) {
+        if (!configState.value.enabled) return
         val snapshot = dataObservers.toList()
         snapshot.forEach { obs ->
             runCatching { obs.onError(source, error) }
@@ -287,16 +388,18 @@ object QaLens {
                 minimalPanel = com.qalens.android.QaLensAppSal.panelMode(application) == "minimal"
             )
         }
+        bgScope.launch(Dispatchers.IO) { refreshRecordings() }
         QaLensActivityInstaller.install(application)
-        QaLensCrashHandler.install()
-        QaLensConnectivity.start(application)
-        QaLensMemoryMonitor.start(application)
-        // Feature flag: networkFromChucker → Chucker's TransactionListener becomes the network
-        // source (QaLensOkHttpInterceptor turns pass-through). Idempotent + logs a fallback note.
-        if (configState.value.networkFromChucker) QaLensChuckerSource.ensureRegistered(application)
+        if (config.value.enabled) {
+            QaLensCrashHandler.install()
+            QaLensConnectivity.start(application)
+            QaLensMemoryMonitor.start(application)
+        }
+        warnLegacyChuckerMode()
     }
 
     fun setScreen(name: String, route: String? = null) {
+        if (!configState.value.enabled) return
         val cfg = configState.value
         // Redact the history entry for display/export safety (deep-link args can carry PII/tokens),
         // but keep the raw route on the screen so scenario/contract matching still works.
@@ -324,6 +427,8 @@ object QaLens {
         lastNavMs = now
 
         resolvePendingScenario(name, route)
+        if (!isDuplicate) uiStateMutable.update { it.copy(nodes = emptyList(), warnings = emptyList(), selectedNode = null) }
+        scheduleInspection()
         markAnalysisDirty()
     }
 
@@ -337,6 +442,7 @@ object QaLens {
 
     /** Receives forwarded Timber logs (via QaLensTimberTree). Level is an android.util.Log priority. */
     fun timberLog(priority: Int, tag: String?, message: String) {
+        if (!configState.value.enabled || !configState.value.captureLogs) return
         val level = when (priority) {
             2 -> "VERBOSE"; 3 -> "DEBUG"; 4 -> "INFO"; 5 -> "WARN"; 6 -> "ERROR"; 7 -> "ASSERT"
             else -> "LOG"
@@ -354,7 +460,7 @@ object QaLens {
         it.copy(isInspectMode = enabled, isTagMode = if (enabled) false else it.isTagMode)
     }
 
-    /** QA-minimal panel (big colorful controls) vs the full developer panel. Persisted. */
+    /** Tester quick-actions sheet vs the full developer panel. Persisted per app install. */
     fun setPanelMinimal(minimal: Boolean) {
         uiStateMutable.update { it.copy(minimalPanel = minimal) }
         appContext?.let { com.qalens.android.QaLensAppSal.setPanelMode(it, if (minimal) "minimal" else "full") }
@@ -363,7 +469,7 @@ object QaLens {
     /** QA's "I saw it RIGHT THERE" button: starred breadcrumb + annotated screenshot in one tap. */
     fun markMoment(note: String = "Marked by QA") {
         breadcrumb("⭐ $note")
-        takeScreenshot(share = false)   // straight to the gallery; no share sheet mid-flow
+        takeScreenshot(share = false)   // private cache; no share sheet mid-flow
     }
 
     /** Tag mode — inspect's sibling: shows every visible automation tag drawn on its component. */
@@ -397,7 +503,7 @@ object QaLens {
         uiStateMutable.update { it.copy(overlayEnabled = enabled, isPanelOpen = false, isInspectMode = false) }
         appContext?.let { QaLensPrefs.setOverlayEnabled(it, enabled) }
         currentActivityRef?.get()?.let { activity ->
-            if (enabled) QaLensActivityInstaller.attachOverlay(activity)
+            if (enabled && configState.value.enabled) QaLensActivityInstaller.attachOverlay(activity)
             else QaLensActivityInstaller.detachOverlay(activity)
         }
         breadcrumb(if (enabled) "Overlay injection enabled" else "Overlay injection disabled")
@@ -466,22 +572,82 @@ object QaLens {
     fun toggleWatchMode() = setWatchMode(!uiStateMutable.value.isWatchMode)
 
     /** Called by QaLensOkHttpInterceptor's constructor so the Network tab knows capture is live. */
-    fun markNetworkAvailable() = uiStateMutable.update { it.copy(networkAvailable = true) }
+    private val warnedLegacyChucker = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun warnLegacyChuckerMode() {
+        if (configState.value.networkFromChucker && warnedLegacyChucker.compareAndSet(false, true))
+            log("networkFromChucker is unsupported: attach QaLensOkHttpInterceptor alongside ChuckerInterceptor. Network capture remains enabled.")
+    }
+
+    fun markNetworkAvailable() = markNetworkSource("Manual")
+
+    internal fun markNetworkSource(name: String) {
+        uiStateMutable.update { old -> old.copy(networkAvailable = true,
+            networkSources = (old.networkSources + name).take(16).toSet()) }
+    }
+
+    /** Create once per transport/client, then report each completed request once. No body reads. */
+    fun networkSink(source: String): QaLensNetworkSink {
+        val name = QaLensNetworkCapture.sourceName(source)
+        markNetworkSource(name)
+        return QaLensNetworkSink { event -> logNetwork(event) }
+    }
+
+    /** Shareable setup diagnostics without request contents or credentials. */
+    fun integrationReport(): String = QaLensIntegrationDiagnostics.report(configState.value, state.value)
 
     fun logNetwork(event: NetworkEvent) {
-        // OkHttp interceptors run on OkHttp's dispatcher thread; confine the state mutation to main
-        // so the read-compute-write in recomputeAnalysis can't race with another concurrent call.
-        mainHandler.post {
-            uiStateMutable.update { old ->
-                // 250: heavy apps fire 8+ calls per screen; 50 rolled over within a couple of screens.
-                old.copy(networkEvents = (old.networkEvents + event).takeLast(250), networkAvailable = true)
-            }
-            markAnalysisDirty()
+        val epoch = captureEpoch
+        val recording = QaLensSessionRecorder.evidence
+        val safe = runCatching { QaLensNetworkCapture.sanitize(event, configState.value) }.getOrNull() ?: return
+        if (!configState.value.enabled || epoch != captureEpoch) return
+        recording?.network(safe)
+        synchronized(dashboardEvents) {
+            if (!configState.value.enabled || epoch != captureEpoch) return
+            dashboardNetwork.add(safe)
+            scheduleDashboardPublication()
         }
     }
 
-    fun clearNetworkLog() = uiStateMutable.update { it.copy(networkEvents = emptyList()) }
-    fun clearLogs() = uiStateMutable.update { it.copy(events = emptyList()) }
+    fun clearNetworkLog() = onMain {
+        synchronized(dashboardEvents) { dashboardNetwork.clear() }
+        uiStateMutable.update { it.copy(networkEvents = emptyList()) }
+        markAnalysisDirty()
+    }
+    fun clearLogs() = onMain {
+        synchronized(dashboardEvents) { dashboardEvents.clear() }
+        uiStateMutable.update { it.copy(events = emptyList()) }
+    }
+
+    private fun clearPendingEvents() = synchronized(dashboardEvents) {
+        mainHandler.removeCallbacks(publishEvents)
+        eventPublishScheduled.set(false)
+        dashboardEvents.clear()
+        dashboardNetwork.clear()
+    }
+
+    /** Called under the shared queue lock; at most one delayed publication exists. */
+    private fun scheduleDashboardPublication() {
+        if (eventPublishScheduled.compareAndSet(false, true)) mainHandler.postDelayed(publishEvents, 100)
+    }
+
+    private fun publishDashboard() {
+        val (events, network) = synchronized(dashboardEvents) {
+            mainHandler.removeCallbacks(publishEvents)
+            eventPublishScheduled.set(false)
+            dashboardEvents.drain() to dashboardNetwork.drain()
+        }
+        if (!configState.value.enabled || (events.isEmpty() && network.isEmpty())) return
+        uiStateMutable.update { old -> old.copy(
+            events = if (events.isEmpty()) old.events else
+                DashboardEventBuffer.append(old.events, events, configState.value.maxEventHistory),
+            networkEvents = if (network.isEmpty()) old.networkEvents else (old.networkEvents + network).takeLast(250),
+            networkAvailable = old.networkAvailable || network.isNotEmpty(),
+            networkSources = if (network.isNotEmpty()) old.networkSources.ifEmpty { setOf("Manual") }
+                else old.networkSources
+        ) }
+        if (network.isNotEmpty()) markAnalysisDirty()
+    }
     fun resetRecomposeCounters() {
         recomposeBuffer.clear()
         uiStateMutable.update { it.copy(recomposeCounts = emptyMap()) }
@@ -490,6 +656,7 @@ object QaLens {
     // Debounced — SideEffect fires on every recompose; flush to StateFlow max every 500 ms
     // so the overlay panel doesn't cascade into a recomposition storm.
     internal fun trackRecompose(name: String) {
+        if (!configState.value.enabled) return
         recomposeBuffer[name] = (recomposeBuffer[name] ?: 0) + 1
         val now = System.currentTimeMillis()
         if (now - lastRecomposeFlushMs > 500L) {
@@ -499,22 +666,28 @@ object QaLens {
         }
     }
 
-    fun navigate(deepLink: String) {
-        val activity = currentActivityRef?.get() ?: return
-        try {
+    fun navigate(deepLink: String) { navigateObserved(deepLink) }
+
+    internal fun navigateObserved(deepLink: String): Boolean {
+        if (!configState.value.enabled) return false
+        val activity = currentActivityRef?.get() ?: return false
+        return try {
             activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(deepLink)))
             breadcrumb("Deep link → $deepLink")
+            true
         } catch (e: Exception) {
             pushError(ErrorKind.NAVIGATION, "Deep link failed: ${e.message}")
+            false
         }
     }
 
     /**
-     * Annotated screenshot. ALWAYS saved to the system gallery (Pictures/QaLens, Android 10+);
-     * [share] additionally opens the share sheet. The minimal panel and markMoment save silently.
+     * Annotated screenshot saved to private app cache. [share] opens the share sheet.
+     * Gallery export requires saveScreenshotsToGallery = true.
      */
-    fun takeScreenshot(share: Boolean = true) {
-        val activity = currentActivityRef?.get() ?: run { pushError(ErrorKind.SCREENSHOT, "No active activity for screenshot"); return }
+    fun takeScreenshot(share: Boolean = true) = onMain {
+        if (!configState.value.enabled) return@onMain
+        val activity = currentActivityRef?.get() ?: run { pushError(ErrorKind.SCREENSHOT, "No active activity for screenshot"); return@onMain }
         val s = uiStateMutable.value
         QaLensScreenCapture.captureAndShare(activity, s.nodes, s.selectedNode, share = share)
     }
@@ -532,17 +705,22 @@ object QaLens {
      * Start a session recording. [video] = false (default) is the permission-free PixelCopy frame
      * recorder; [video] = true uses MediaProjection H.264 (shows a system consent dialog).
      */
-    fun startRecording(video: Boolean = false) {
-        val activity = currentActivityRef?.get() ?: run { pushError(ErrorKind.RECORDING, "No active activity to record"); return }
+    fun startRecording(video: Boolean = false) = onMain {
+        if (!configState.value.enabled) return@onMain
+        val activity = currentActivityRef?.get() ?: run { pushError(ErrorKind.RECORDING, "No active activity to record"); return@onMain }
         closePanel() // get the panel out of the recording; stop via the notification
         QaLensSessionRecorder.start(activity, video)
     }
 
     /** Stop recording, package the `.sal`, and open the share sheet. */
-    fun stopRecording() = QaLensSessionRecorder.stop()
+    fun stopRecording() = onMain { QaLensSessionRecorder.stop() }
 
     fun toggleRecording() {
         if (uiStateMutable.value.isRecording) stopRecording() else startRecording()
+    }
+
+    internal fun setSavingRecording(active: Boolean) {
+        uiStateMutable.update { it.copy(isSavingRecording = active) }
     }
 
     internal fun setRecording(active: Boolean) {
@@ -555,11 +733,10 @@ object QaLens {
     }
 
     // ── Saved recordings (history / storage management) ─────────────────────────
-    /** Re-scan the cache for saved `.sal` files and publish them to state (size + date). */
+    /** Re-scan durable and legacy saved `.sal` files and publish them to state (size + date). */
     fun refreshRecordings() {
         val context: Context = currentActivityRef?.get() ?: appContext ?: return
-        val dir = QaLensSessionRecorder.recordingsDir(context)
-        val list = (dir.listFiles { f -> f.isFile && f.name.endsWith(".sal") } ?: emptyArray())
+        val list = QaLensSessionRecorder.savedRecordings(context)
             .sortedByDescending { it.lastModified() }
             .map { RecordingInfo(it.name, it.absolutePath, it.length(), it.lastModified()) }
         uiStateMutable.update { it.copy(recordings = list) }
@@ -579,9 +756,7 @@ object QaLens {
 
     fun deleteAllRecordings() {
         val context: Context = currentActivityRef?.get() ?: appContext ?: return
-        QaLensSessionRecorder.recordingsDir(context)
-            .listFiles { f -> f.name.endsWith(".sal") }
-            ?.forEach { it.delete() }
+        QaLensSessionRecorder.savedRecordings(context).forEach { it.delete() }
         refreshRecordings()
         log("Cleared all recordings")
     }
@@ -590,9 +765,16 @@ object QaLens {
         uiStateMutable.update { it.copy(selectedNode = node, isPanelOpen = node != null || it.isPanelOpen) }
     }
 
+    internal fun previewNode(node: InspectNode?) {
+        uiStateMutable.update { it.copy(selectedNode = node) }
+    }
+
     fun snapshot(): InspectionSnapshot {
         val state = uiStateMutable.value
-        return InspectionSnapshot(
+        return snapshotOf(state)
+    }
+
+    private fun snapshotOf(state: QaLensUiState): InspectionSnapshot = InspectionSnapshot(
             screen = state.screen,
             device = state.device,
             nodes = state.nodes,
@@ -601,12 +783,13 @@ object QaLens {
             events = state.events,
             selectedNode = state.selectedNode
         )
-    }
 
     /** Records the outcome of the most recent screenshot capture for evidence completeness. */
     internal fun recordScreenshot(path: String?, available: Boolean, note: String? = null) {
         lastScreenshot = EvidenceAttachment("annotated_screenshot", path, available, note)
     }
+
+    internal fun evidenceAttachments(): List<EvidenceAttachment> = listOfNotNull(lastScreenshot)
 
     /** Assemble the full in-memory evidence bundle from everything observed so far. */
     fun evidenceBundle(attachments: List<EvidenceAttachment> = emptyList()): EvidenceBundle {
@@ -615,7 +798,7 @@ object QaLens {
         val cfg = configState.value
         val allAttachments = if (attachments.isNotEmpty()) attachments else listOfNotNull(lastScreenshot)
         return EvidenceBuilder.build(
-            snapshot = snapshot(),
+            snapshot = snapshotOf(s),
             network = s.networkEvents,
             config = cfg,
             featureFlags = s.featureFlags,
@@ -625,7 +808,8 @@ object QaLens {
             observedHost = s.networkEvents.lastOrNull()?.let { hostOf(it.url) },
             slowThresholdMs = cfg.slowNetworkThresholdMs,
             contractResult = s.contractResult,
-            dataSources = s.dataSources
+            dataSources = s.dataSources,
+            frameMetrics = s.frameMetrics
         )
     }
 
@@ -655,11 +839,14 @@ object QaLens {
         return MacroEngine.execute(steps, state, configState.value)
     }
 
+    internal fun trackActivity(activity: Activity) { currentActivityRef = WeakReference(activity) }
+
     internal fun onActivityResumed(activity: Activity) {
         currentActivityRef = WeakReference(activity)
         updateDeviceAndScreen(activity)
         refreshInspection(activity.window.decorView)
         uiStateMutable.update { it.copy(isInstalled = true) }
+        markAnalysisDirty()
     }
 
     internal fun onActivityPaused(activity: Activity) {
@@ -668,21 +855,50 @@ object QaLens {
     }
 
     internal fun attachOverlay(activity: Activity) {
+        if (!configState.value.enabled) return
         currentActivityRef = WeakReference(activity)
         updateDeviceAndScreen(activity)
         QaLensActivityInstaller.attachOverlay(activity)
     }
 
+    private var inspectionScheduled = false
+    internal fun scheduleInspection() = onMain {
+        if (!configState.value.enabled || inspectionScheduled) return@onMain
+        val view = currentActivity?.window?.decorView ?: return@onMain
+        inspectionScheduled = true
+        view.postOnAnimation {
+            inspectionScheduled = false
+            if (configState.value.enabled && currentActivity?.window?.decorView === view) refreshInspection(view)
+        }
+    }
+
     internal fun refreshInspection(rootView: View? = currentActivityRef?.get()?.window?.decorView) {
         val config = configState.value
+        if (!config.enabled) return
         val autoNodes = rootView
             ?.takeIf { config.enableSemanticsReflection }
             ?.let { QaLensActivityInstaller.readVisibleNodes(it) }
             .orEmpty()
 
-        val merged = mergeNodes(autoNodes, manualNodes.values.toList())
+        val activity = currentActivity
+        val viewportWidth = rootView?.width ?: 0
+        val viewportHeight = rootView?.height ?: 0
+        val manual = manualNodes.values.mapNotNull { entry ->
+            val view = entry.view.get()
+            val bounds = entry.node.bounds
+            entry.node.takeIf {
+                view != null && view.isAttachedToWindow &&
+                    QaLensActivityInstaller.belongsToActivity(view, activity) &&
+                    bounds.right > 0 && bounds.bottom > 0 &&
+                    bounds.left < viewportWidth && bounds.top < viewportHeight
+            }
+        }
+        val merged = InspectionNodeMerger.merge(autoNodes, manual)
         val evaluated = QaLensRules.evaluate(merged, config)
         val warnings = QaLensRules.flattenWarnings(evaluated)
+
+        val previous = uiStateMutable.value
+        if (previous.nodes == evaluated && previous.warnings == warnings) return
 
         uiStateMutable.update { old ->
             val selected = old.selectedNode?.let { selected -> evaluated.firstOrNull { it.id == selected.id } }
@@ -691,6 +907,15 @@ object QaLens {
         markAnalysisDirty()
     }
 
+    /** Request a fresh semantics scan after a host-owned state change that did not cause layout. */
+    fun invalidateInspection() = scheduleInspection()
+
+    /** Include a separate host Compose window (Dialog, Popup, or custom ComposeView) in scans. */
+    fun registerComposeRoot(view: View) = QaLensActivityInstaller.registerInspectionRoot(view)
+
+    /** Remove a previously registered host Compose window. */
+    fun unregisterComposeRoot(view: View) = QaLensActivityInstaller.unregisterInspectionRoot(view)
+
     /**
      * Mark derived analysis as stale and schedule a debounced recompute on the main thread. Bursts
      * (e.g. 10 OkHttp calls in a screen) coalesce into a single pass [ANALYSIS_DEBOUNCE_MS] after
@@ -698,13 +923,17 @@ object QaLens {
      * read-compute-write in [runAnalysis] can't race with a concurrent mutation.
      */
     private fun markAnalysisDirty() {
+        if (!configState.value.enabled) return
         if (!analysisDirty.compareAndSet(false, true)) return  // a recompute is already pending
-        val r = Runnable {
-            analysisPending = null
-            if (analysisDirty.compareAndSet(true, false)) runAnalysis()
+        onMain {
+            if (!configState.value.enabled || !analysisDirty.get()) return@onMain
+            val r = Runnable {
+                analysisPending = null
+                if (analysisDirty.compareAndSet(true, false)) runAnalysis()
+            }
+            analysisPending = r
+            mainHandler.postDelayed(r, ANALYSIS_DEBOUNCE_MS)
         }
-        analysisPending = r
-        mainHandler.postDelayed(r, ANALYSIS_DEBOUNCE_MS)
     }
 
     /**
@@ -713,8 +942,9 @@ object QaLens {
      * on a background thread, blocks until the main-thread recompute completes (bounded).
      */
     private fun flushAnalysis() {
-        if (!analysisDirty.get() && analysisPending == null) return
+        if (!analysisDirty.get() && analysisPending == null && !eventPublishScheduled.get()) return
         if (Looper.myLooper() == Looper.getMainLooper()) {
+            publishDashboard()
             analysisPending?.let { mainHandler.removeCallbacks(it) }
             analysisPending = null
             if (analysisDirty.compareAndSet(true, false)) runAnalysis()
@@ -722,6 +952,7 @@ object QaLens {
             // Post and await so a report built on a background thread sees the fresh state.
             val latch = CountDownLatch(1)
             mainHandler.post {
+                publishDashboard()
                 analysisPending?.let { mainHandler.removeCallbacks(it) }
                 analysisPending = null
                 if (analysisDirty.compareAndSet(true, false)) runAnalysis()
@@ -738,6 +969,7 @@ object QaLens {
      * MUST be called on the main thread — [markAnalysisDirty] enforces that.
      */
     private fun runAnalysis() {
+        if (!configState.value.enabled) return
         val cfg = configState.value
         val old = uiStateMutable.value
         val result = analysisEngine.analyze(old, cfg, old.screenQuality)
@@ -761,30 +993,30 @@ object QaLens {
 
     private fun hostOf(url: String): String? = runCatching { java.net.URL(url).host }.getOrNull()
 
-    internal fun registerManualNode(node: InspectNode) {
-        manualNodes[node.id] = node
-        refreshInspection()
+    internal fun registerManualNode(node: InspectNode, view: View) {
+        if (!configState.value.enabled) return
+        if (manualNodes[node.id]?.let { it.node == node && it.view.get() === view } == true) return
+        manualNodes[node.id] = ManualNode(node, WeakReference(view))
+        scheduleInspection()
     }
 
     internal fun unregisterManualNode(id: String) {
         manualNodes.remove(id)
-        refreshInspection()
+        scheduleInspection()
     }
 
     private fun pushEvent(event: QaEvent) {
+        val epoch = captureEpoch
+        val recording = QaLensSessionRecorder.evidence
         val config = configState.value
+        if (!config.enabled) return
         val safe = event.copy(message = config.redact(event.message), tag = event.tag?.let(config::redact))
-        // Confine to main so events appended from coroutines/IO threads can't race the analysis read.
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            uiStateMutable.update { old ->
-                old.copy(events = (old.events + safe).takeLast(config.maxEventHistory))
-            }
-        } else {
-            mainHandler.post {
-                uiStateMutable.update { old ->
-                    old.copy(events = (old.events + safe).takeLast(config.maxEventHistory))
-                }
-            }
+        if (!configState.value.enabled || epoch != captureEpoch) return
+        recording?.event(safe)
+        synchronized(dashboardEvents) {
+            if (!configState.value.enabled || epoch != captureEpoch) return
+            dashboardEvents.add(safe, config.maxEventHistory)
+            scheduleDashboardPublication()
         }
     }
 
@@ -794,6 +1026,7 @@ object QaLens {
      * lambda, if provided, powers a ↻ button on the banner.
      */
     fun pushError(kind: ErrorKind, message: String, retry: (() -> Unit)? = null) {
+        if (!configState.value.enabled) return
         log("⚠ ${kind.name}: $message")
         val error = QaLensError(id = "${System.currentTimeMillis()}-${kind.ordinal}", kind = kind, message = message, retry = retry)
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -823,18 +1056,22 @@ object QaLens {
 
     /** Drop a bookmark at the current timestamp. Visible in the panel and .sal marks.json track. */
     fun addBookmark(label: String, severity: BookmarkSeverity = BookmarkSeverity.INFO) {
-        val bookmark = Bookmark(label = label, severity = severity)
+        if (!configState.value.enabled) return
+        val bookmark = Bookmark(label = configState.value.redact(label), severity = severity)
+        QaLensSessionRecorder.evidence?.bookmark(bookmark)
         uiStateMutable.update { it.copy(bookmarks = (it.bookmarks + bookmark).takeLast(100)) }
         event("bookmark", "★ ${severity.name}: $label")
     }
 
     /** Remove a bookmark by its id. */
     fun removeBookmark(id: String) {
+        QaLensSessionRecorder.evidence?.removeBookmark(id)
         uiStateMutable.update { it.copy(bookmarks = it.bookmarks.filter { b -> b.id != id }) }
     }
 
     /** Clear all bookmarks. */
     fun clearBookmarks() {
+        QaLensSessionRecorder.evidence?.clearBookmarks()
         uiStateMutable.update { it.copy(bookmarks = emptyList()) }
     }
 
@@ -842,18 +1079,20 @@ object QaLens {
     private var crashBridge: QaLensCrashBridge = QaLensNoopCrashBridge
 
     /** Called by [QaLensCrashHandler] to append a captured crash to state + fire the bridge. */
-    internal fun appendCrash(crash: QaLensCrash) {
+    internal fun appendCrash(crash: QaLensCrash, enrich: Boolean = true) {
+        if (!configState.value.enabled) return
+        val safe = runCatching { QaLensCrashEvidence.sanitize(crash, configState.value) }.getOrNull() ?: return
         val s = uiStateMutable.value
-        uiStateMutable.update { old -> old.copy(crashes = (old.crashes + crash).takeLast(10)) }
+        uiStateMutable.update { old -> old.copy(crashes = (old.crashes + safe).takeLast(10)) }
         // Enrich the host crash reporter with QaLens evidence (score, classification, repro).
-        runCatching {
+        if (enrich) runCatching {
             val evidence = buildString {
                 s.classification?.let { append("Likely owner: ${it.category.display} (${it.confidence}). ") }
                 s.score?.let { append("Score: ${it.score}/100. ") }
                 crash.screen?.let { append("Screen: $it. ") }
                 crash.lastNetworkSummary?.let { append("Last network: $it.") }
             }
-            crashBridge.enrich(crash, evidence)
+            crashBridge.enrich(safe, configState.value.redact(evidence))
         }
     }
 
@@ -864,26 +1103,38 @@ object QaLens {
      */
     fun bridgeCrashes(bridge: QaLensCrashBridge) {
         crashBridge = bridge
-        bridge.onCrash { crash ->
-            // Host-reported crashes come from a vendor thread; hop to main.
-            if (Looper.myLooper() == Looper.getMainLooper()) appendCrash(crash)
-            else mainHandler.post { appendCrash(crash) }
+        runCatching { bridge.onCrash(::reportCrash) }.onFailure {
+            pushError(ErrorKind.OTHER, "Crash bridge registration failed: ${it.javaClass.simpleName}")
         }
+    }
+
+    /** Mirror a crash caught by another reporter without sending it back to that reporter. */
+    fun reportCrash(crash: QaLensCrash) {
+        if (!configState.value.enabled) return
+        val safe = runCatching { QaLensCrashEvidence.sanitize(crash, configState.value) }.getOrNull() ?: return
+        QaLensSessionRecorder.evidence?.crash(safe)
+        if (Looper.myLooper() == Looper.getMainLooper()) appendCrash(safe, enrich = false)
+        else mainHandler.post { appendCrash(safe, enrich = false) }
     }
 
     /** The most recent crash/ANR captured this session, or null. Surfaced in the Overview tab. */
     fun lastCrash(): QaLensCrash? = QaLensCrashHandler.peekLastCrash() ?: uiStateMutable.value.crashes.lastOrNull()
 
     /** Called by [QaLensFrameMetrics] to append a frame-timing sample (capped at 1000). */
-    internal fun appendFrameMetrics(sample: FrameMetricsSample) {
+    internal fun appendFrameMetrics(samples: List<FrameMetricsSample>) {
+        if (!configState.value.enabled) return
         uiStateMutable.update { old ->
-            old.copy(frameMetrics = (old.frameMetrics + sample).takeLast(1000))
+            old.copy(frameMetrics = (old.frameMetrics + samples).takeLast(1000))
         }
+        markAnalysisDirty()
     }
 
     // ── Connectivity (B5) ──────────────────────────────────────────────────────
     /** Called by [com.qalens.android.QaLensConnectivity] to update the current snapshot + transitions. */
     internal fun appendConnectivity(snapshot: ConnectivitySnapshot) {
+        if (!configState.value.enabled) return
+        val epoch = captureEpoch
+        QaLensSessionRecorder.evidence?.connectivity(snapshot)
         if (Looper.myLooper() == Looper.getMainLooper()) {
             uiStateMutable.update { old ->
                 old.copy(
@@ -893,6 +1144,7 @@ object QaLens {
             }
         } else {
             mainHandler.post {
+                if (!configState.value.enabled || epoch != captureEpoch) return@post
                 uiStateMutable.update { old ->
                     old.copy(
                         connectivity = snapshot,
@@ -908,10 +1160,14 @@ object QaLens {
 
     /** Called by [QaLensMemoryMonitor] to append a memory sample (capped at 200). B8. */
     internal fun appendMemorySample(sample: MemorySample) {
+        if (!configState.value.enabled) return
+        val epoch = captureEpoch
+        QaLensSessionRecorder.evidence?.memory(sample)
         if (Looper.myLooper() == Looper.getMainLooper()) {
             uiStateMutable.update { old -> old.copy(memorySamples = (old.memorySamples + sample).takeLast(200)) }
         } else {
             mainHandler.post {
+                if (!configState.value.enabled || epoch != captureEpoch) return@post
                 uiStateMutable.update { old -> old.copy(memorySamples = (old.memorySamples + sample).takeLast(200)) }
             }
         }
@@ -939,24 +1195,4 @@ object QaLens {
         }
     }
 
-    private fun mergeNodes(autoNodes: List<InspectNode>, manual: List<InspectNode>): List<InspectNode> {
-        val byId = linkedMapOf<String, InspectNode>()
-        autoNodes.forEach { byId[it.id] = it }
-        manual.forEach { node ->
-            val existing = node.testTag?.let { tag -> byId.values.firstOrNull { it.testTag == tag } }
-            if (existing == null) {
-                byId[node.id] = node
-            } else {
-                byId[existing.id] = existing.copy(
-                    qaName = node.qaName ?: existing.qaName,
-                    testTag = node.testTag ?: existing.testTag,
-                    hiddenFromReports = node.hiddenFromReports,
-                    source = NodeSource.MANUAL_QA_TAG
-                )
-            }
-        }
-        return byId.values
-            .filter { it.bounds.width > 0 && it.bounds.height > 0 }
-            .sortedWith(compareBy<InspectNode> { it.bounds.top }.thenBy { it.bounds.left })
-    }
 }

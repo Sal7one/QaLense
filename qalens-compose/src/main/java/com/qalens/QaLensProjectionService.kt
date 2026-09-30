@@ -18,6 +18,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.DisplayMetrics
 import androidx.core.app.ServiceCompat
+import com.qalens.compose.R
 import androidx.core.content.ContextCompat
 import java.io.File
 
@@ -44,7 +45,11 @@ class QaLensProjectionService : Service() {
             stopRecording()
             return START_NOT_STICKY
         }
-        startForegroundCompat()
+        try { startForegroundCompat() } catch (failure: Exception) {
+            QaLensSessionRecorder.onVideoConsentDenied(intent?.getStringExtra(EXTRA_VIDEO_PATH))
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
         @Suppress("DEPRECATION")
@@ -54,18 +59,19 @@ class QaLensProjectionService : Service() {
         val path = intent?.getStringExtra(EXTRA_VIDEO_PATH)
 
         if (resultCode == 0 || data == null || path == null) {
-            QaLensSessionRecorder.onVideoConsentDenied()
+            QaLensSessionRecorder.onVideoConsentDenied(path)
             stopSelf()
             return START_NOT_STICKY
         }
 
+        if (!QaLensSessionRecorder.isAwaitingVideo(path)) { stopSelf(); return START_NOT_STICKY }
         runCatching { startRecording(resultCode, data, File(path)) }
             .onFailure {
                 QaLens.log("Video recording failed to start: ${it.message}")
-                QaLensSessionRecorder.onVideoConsentDenied()
+                QaLensSessionRecorder.onVideoConsentDenied(path)
                 stopSelf()
             }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startRecording(resultCode: Int, data: Intent, output: File) {
@@ -89,6 +95,7 @@ class QaLensProjectionService : Service() {
 
         val rec = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(this)
                   else @Suppress("DEPRECATION") MediaRecorder()
+        recorder = rec // release even if prepare fails
         rec.apply {
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
@@ -115,7 +122,7 @@ class QaLensProjectionService : Service() {
             rec.surface, null, null
         )
         rec.start()
-        QaLensSessionRecorder.onVideoStarted()
+        QaLensSessionRecorder.onVideoStarted(output.absolutePath)
     }
 
     private var stopped = false
@@ -174,14 +181,20 @@ class QaLensProjectionService : Service() {
             Intent(this, QaLensProjectionService::class.java).setAction(ACTION_STOP),
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
+        val controlsIntent = android.app.PendingIntent.getActivity(
+            this, 3,
+            Intent(this, QaLensControlActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
         val notification: Notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("QaLens · Recording screen")
-            .setContentText("Tap to stop and save the recording")
+            .setContentTitle(getString(R.string.qalens_recording_notification_title))
+            .setContentText(getString(R.string.qalens_recording_notification_text))
             .setOngoing(true)
             .setSilent(true)
-            .setContentIntent(stopIntent)
-            .addAction(0, "■ Stop recording", stopIntent)
+            .setContentIntent(controlsIntent)
+            .addAction(0, getString(R.string.qalens_stop_recording), stopIntent)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

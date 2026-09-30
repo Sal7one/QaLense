@@ -54,8 +54,12 @@ object QaLensPrefs {
     private const val KEY_WEBHOOK_QUEUE = "webhook_pending_queue"
 
     fun webhookUrl(context: Context): String = prefs(context).getString(KEY_WEBHOOK_URL, "") ?: ""
-    fun setWebhookUrl(context: Context, value: String) =
-        prefs(context).edit().putString(KEY_WEBHOOK_URL, value.trim()).apply()
+    fun setWebhookUrl(context: Context, value: String) {
+        val editor = prefs(context).edit().putString(KEY_WEBHOOK_URL, value.trim())
+        if (!com.qalens.QaLensUploadPolicy.sameOrigin(webhookUrl(context), value))
+            editor.remove(KEY_WEBHOOK_HEADER_VALUE)
+        editor.apply()
+    }
 
     fun webhookHeaderName(context: Context): String =
         prefs(context).getString(KEY_WEBHOOK_HEADER_NAME, "Authorization") ?: "Authorization"

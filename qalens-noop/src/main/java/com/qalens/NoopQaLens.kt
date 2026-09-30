@@ -1,6 +1,7 @@
 package com.qalens
 
 import android.app.Application
+import android.view.View
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.room.RoomDatabase
@@ -51,6 +52,9 @@ object QaLens {
     fun setWatchMode(on: Boolean) = Unit
     fun toggleWatchMode() = Unit
     fun selectNode(node: InspectNode?) = Unit
+    fun invalidateInspection() = Unit
+    fun registerComposeRoot(view: View) = Unit
+    fun unregisterComposeRoot(view: View) = Unit
 
     fun pushError(kind: ErrorKind, message: String, retry: (() -> Unit)? = null) = Unit
     fun dismissError(id: String) = Unit
@@ -60,11 +64,12 @@ object QaLens {
     fun clearBookmarks() = Unit
 
     fun bridgeCrashes(bridge: QaLensCrashBridge) = Unit
+    fun reportCrash(crash: QaLensCrash) = Unit
     fun lastCrash(): QaLensCrash? = null
     fun currentConnectivity(): ConnectivitySnapshot? = null
 
     fun coroutineExceptionHandler(): kotlinx.coroutines.CoroutineExceptionHandler =
-        kotlinx.coroutines.CoroutineExceptionHandler { _, _ -> }
+        QaLensCoroutineExceptionHandler.capture()
 
     fun registerDeepLinkScenario(
         name: String,
@@ -84,12 +89,16 @@ object QaLens {
         provider: () -> Map<String, String>
     ) = Unit
     fun observeRoom(db: RoomDatabase, vararg tables: String) = Unit
+    fun stopObservingRoom(db: RoomDatabase, vararg tables: String) = Unit
     fun <T> observeDataStore(name: String, flow: Flow<T>, describe: (T) -> String = { "updated" }) = Unit
+    fun stopObservingDataStore(name: String) = Unit
     fun registerDataSourceObserver(observer: DataSourceObserver) = Unit
     fun unregisterDataSourceObserver(observer: DataSourceObserver) = Unit
     fun notifyDataChange(source: String, tableName: String, changeType: ChangeType) = Unit
     fun notifyDataError(source: String, error: String) = Unit
 
+    fun networkSink(source: String): QaLensNetworkSink = QaLensNetworkSink { }
+    fun integrationReport(): String = "QaLens disabled (release no-op)"
     fun markNetworkAvailable() = Unit
     fun logNetwork(event: NetworkEvent) = Unit
     fun clearNetworkLog() = Unit
@@ -156,6 +165,7 @@ fun Modifier.qaTag(tag: String, hiddenFromReports: Boolean = false): Modifier = 
 fun Modifier.qaName(name: String): Modifier = this
 fun Modifier.qaHiddenFromReports(): Modifier = this
 fun Modifier.qaContentDescription(value: String): Modifier = this
+fun Modifier.qaInspectionRoot(): Modifier = this
 
 @Composable
 fun Modifier.qaLensRecompose(name: String): Modifier = this

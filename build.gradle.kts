@@ -10,8 +10,11 @@ plugins {
 // `./gradlew qalensDist` publishes every library module into build/qalens-repo (a plain
 // file-based Maven repository), then writes SHA-256SUMS for integrity verification.
 // Ship that folder (or scripts/release_internal.sh's zip of it) to your internal hosting;
-// consumers add it as a maven repo — see integration_llm.md.
+// consumers add it as a maven repo — see integration.md.
 subprojects {
+    // Composite builds substitute com.qalens:<module> without publishing first.
+    group = "com.qalens"
+    version = providers.gradleProperty("qalensVersion").orElse("0.9.0").get()
     plugins.withId("maven-publish") {
         configure<PublishingExtension> {
             repositories {

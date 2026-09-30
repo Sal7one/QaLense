@@ -156,6 +156,19 @@ class QaLensEnginesTest {
         assertTrue(!repro.hasData)
     }
 
+    @Test
+    fun reproKeepsFirstDistinctStepsAndStillReportsFailureBeyondTheStepLimit() {
+        val timeline = buildList {
+            repeat(20) { index ->
+                repeat(3) { add(TimelineEvent(index.toLong(), TimelineKind.ACTION, "action-$index")) }
+            }
+            add(TimelineEvent(100, TimelineKind.ERROR, "late failure", isError = true))
+        }
+        val repro = ReproStepGenerator.generate(timeline)
+        assertEquals((0 until 12).map { "${it + 1}. Trigger: action-$it" }, repro.steps)
+        assertTrue(repro.actual.contains("late failure"))
+    }
+
     // ── Build safety ────────────────────────────────────────────────────────
 
     @Test

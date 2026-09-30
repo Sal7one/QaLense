@@ -8,6 +8,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.contentDescription
@@ -27,6 +28,7 @@ fun Modifier.qaTag(
 ): Modifier = composed {
     val id = remember(tag) { "manual:${tag}:${UUID.randomUUID()}" }
     val density = LocalDensity.current
+    val view = LocalView.current
 
     DisposableEffect(id) {
         onDispose { QaLens.unregisterManualNode(id) }
@@ -38,7 +40,7 @@ fun Modifier.qaTag(
             if (hiddenFromReports) qaLensHiddenFromReports = true
         }
         .onGloballyPositioned { coordinates ->
-            val bounds: Rect = coordinates.boundsInWindow()
+            val bounds: Rect = QaLensActivityInstaller.mapToHostWindow(view, coordinates.boundsInWindow())
             QaLens.registerManualNode(
                 InspectNode(
                     id = id,
@@ -53,7 +55,7 @@ fun Modifier.qaTag(
                     heightDp = with(density) { bounds.height.toDp().value },
                     source = NodeSource.MANUAL_QA_TAG,
                     hiddenFromReports = hiddenFromReports
-                )
+                ), view
             )
         }
 }
@@ -63,3 +65,13 @@ fun Modifier.qaName(name: String): Modifier = semantics { qaLensName = name }
 fun Modifier.qaHiddenFromReports(): Modifier = semantics { qaLensHiddenFromReports = true }
 
 fun Modifier.qaContentDescription(value: String): Modifier = semantics { contentDescription = value }
+
+/** Include a separate Compose window such as a Dialog or Popup in QaLens inspection. */
+fun Modifier.qaInspectionRoot(): Modifier = composed {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        QaLens.registerComposeRoot(view)
+        onDispose { QaLens.unregisterComposeRoot(view) }
+    }
+    this.onGloballyPositioned { QaLens.invalidateInspection() }
+}

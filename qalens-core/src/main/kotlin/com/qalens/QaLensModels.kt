@@ -186,6 +186,16 @@ data class FrameMetricsSample(
         const val JANK_THRESHOLD_MS = 16L
         /** A frame taking longer than this (ms) means the app appeared frozen to the user. */
         const val FROZEN_THRESHOLD_MS = 700L
+
+        fun fromNanoseconds(total: Long, layout: Long = 0, draw: Long = 0, gpu: Long = 0): FrameMetricsSample =
+            FrameMetricsSample(
+                totalMs = total.coerceAtLeast(0) / 1_000_000,
+                layoutMs = layout.coerceAtLeast(0) / 1_000_000,
+                drawMs = draw.coerceAtLeast(0) / 1_000_000,
+                gpuMs = gpu.coerceAtLeast(0) / 1_000_000,
+                jank = total > JANK_THRESHOLD_MS * 1_000_000,
+                frozen = total > FROZEN_THRESHOLD_MS * 1_000_000
+            )
     }
 }
 
@@ -278,12 +288,13 @@ data class NetworkEvent(
 data class QaLensUiState(
     val isInstalled: Boolean = false,
     val isPanelOpen: Boolean = false,
-    /** QA-minimal panel (big colorful controls) instead of the full developer panel. */
+    /** Tester quick-actions sheet instead of the full developer panel. */
     val minimalPanel: Boolean = false,
     val isInspectMode: Boolean = false,
     /** Tag mode: like inspect, but draws every visible automation/test tag on its component. */
     val isTagMode: Boolean = false,
     val isRecording: Boolean = false,
+    val isSavingRecording: Boolean = false,
     /** Watch mode: translucent, non-interactive live overlay; touches pass to the app. */
     val isWatchMode: Boolean = false,
     /** Overlay opacity (0.1–1.0), driven by the transparency slider. */
@@ -307,6 +318,8 @@ data class QaLensUiState(
     val featureFlags: Map<String, Boolean> = emptyMap(),
     val screenQuality: Map<String, ScreenQualitySnapshot> = emptyMap(),
     val networkAvailable: Boolean = false,
+    /** Declared adapter names; not a guarantee of complete network coverage. */
+    val networkSources: Set<String> = emptySet(),
     val deepLinkScenarios: List<DeepLinkScenario> = emptyList(),
     val scenarioRuns: Map<String, ScenarioRun> = emptyMap(),
     val contractResult: ContractResult? = null,

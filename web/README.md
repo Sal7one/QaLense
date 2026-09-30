@@ -1,119 +1,80 @@
-# QaLens Mission Control (web)
+# QaLens web replay and CLI
 
-A zero-dependency, offline web viewer for `.sal` session recordings produced by QaLens.
+The primary viewer is `index-v2.html`, with `app-v2.js` and `styles-v2.css`. The classic
+`index.html`/`app.js` viewer remains supported and contains the `.appsal` configuration editor.
+Both share `sal.js`. Start at [the project handover](../HANDOVER.md) for contributor context.
 
-## Use it
+## Open a recording
 
-Just open `web/index.html` in a browser, or serve the folder:
+From the repository root:
 
-```bash
-cd web && python3 -m http.server 8000   # then open http://localhost:8000
+```sh
+python3 -m http.server 8100 --bind 127.0.0.1
+# Open http://127.0.0.1:8100/web/index-v2.html
 ```
 
-Drag a `.sal` onto the window (or click **Open .sal**). Everything runs locally — nothing is uploaded.
+Drop a `.sal` onto the viewer or use its file picker. Offline file:// drag-drop works without a
+server; buttons that fetch the bundled sample need HTTP. `demo.sh quick` starts the local demo
+services and opens v2. `?sample&t=24.6` loads the synthetic sample at a failing-transfer moment.
 
-To explore without a device, click **Watch demo session** (when served over http) or drag
-**`web/sample.sal`** onto the window — a bundled 32s demo with real app frames (failing transfer,
-score 58, Backend/API, a slow FX call and a mid-session feature-flag flip for the Insights tab).
-Regenerate it with `web/tools/make_sample.js` (needs playwright-core on NODE_PATH; renders the fake
-app screens with headless Chromium and packs the .sal with a built-in STORE-only ZIP writer).
-Appending `?sample` to the URL auto-loads it, and `?t=<seconds>` opens AT that moment
-(`?sample&t=24.6` lands right on the failing transfer) — paste these links in tickets.
+Playback has synced media, timeline/network/log/state views, insights, report/AI brief, bookmarks,
+filmstrip, event seeking, fullscreen and comparison. The interfaces differ; changes affecting shared
+behavior need checks in both viewers. Classic keyboard shortcuts include Space, arrows, `e`, `s`,
+`f`, `t`, `x`, `m`, `?` and `1–7`; use each viewer's help for its current controls.
 
-## What you get
+## Data, privacy and compatibility
 
-- **Video / frame viewport** with scrubber (error markers inline), filmstrip thumbnails,
-  play/pause, step-to-next/prev-event, jump-to-first-error, and **playback speed** (0.5–4×).
-  A live overlay shows the current screen name at the playhead.
-- **Headline stat bar** — duration, score, requests, failed, slow, events, error logs, screens.
-- **Summary** card — release score donut, likely owner + reasons, "why this score", repro steps.
-- **Live State** at the playhead — screen, route, feature flags, DataStore/Room snapshots.
-- **Seven tracks**:
-  - **Timeline / Network / Logs** — filterable, searchable, color-coded, expandable rows; with
-    *follow playhead* they reveal in sync as you scrub.
-  - **Network** adds per-request latency waterfalls and a stats strip (failed / slow / avg / p95 /
-    bytes / hosts).
-  - **Screens** — visit map derived from the state track, with durations and jump-to.
-  - **Insights** — auto-detected anomalies: failed & slow requests, error bursts, feature-flag
-    flips mid-session, rapid screen churn, heavy payloads. Each one jumps to its moment.
-  - **Report** — the raw redacted full report.
-  - **AI Brief** — the recorder's self-describing `for_ai.md` (schema, join rules, how to analyze);
-    synthesized for older files that lack it.
-- **⭐ Mark moment** — drop a bookmark at the playhead (key `m`); stars show in the scrubber and
-  timeline, and are included in Export and the backend summary. Marks embedded in the file
-  (`marks.json`) are shown alongside in-viewer marks.
-- **Export** — one click copies a Jira/Slack-ready markdown summary of the session, including
-  bookmarks.
-- **Instant-replay recents** — sessions are cached in **IndexedDB** (cap ~120 MB, oldest evicted),
-  so clicking a recent card replays it without re-dropping the file. Toggle/clear in Settings.
-- **Settings drawer** — theme, compact density, default speed, autoplay, follow, cache controls;
-  every preference persists in localStorage.
+LocalStorage stores preferences; IndexedDB supports cached recents and can be cleared in settings.
+Reading an archive does not upload it. Explicit **Send to backend** uses the configured Backend URL:
+raw archives post as multipart `file` to `/webhook`; summary-only sessions post JSON to `/api/ingest`.
+The bundled [backend](../backend/README.md) is an unauthenticated development mock.
 
-## How it works
+The reader parses ZIP locally using native `DecompressionStream`, then recognizes gzip-compressed
+JSON inside ZIP entries. Both v1 and v2 are supported; newer versions are refused. The bundled
+`sample.sal` is v1, so it alone cannot prove Android v2 compatibility. v2 nested-compression
+fixtures cover that path. ZIP and listed manifest CRC mismatches, oversized expansion and missing
+listed entries are rejected. The reader has per-entry and total expansion budgets; see
+[the SAL contract](../docs/SAL_FORMAT.md) for exact limits and remaining differences.
 
-- `sal.js` reads the `.sal` ZIP with **no library**: it parses the central directory and inflates
-  DEFLATE entries with the browser-native `DecompressionStream("deflate-raw")`. Needs a recent
-  Chrome / Edge / Safari / Firefox.
-- `app.js` renders the UI and keeps the media synced to the tracks.
-- **localStorage** holds preferences + recents metadata; **IndexedDB** holds cached session payloads.
-- `.sal` archives carry `formatVersion`; the reader **throws** on `formatVersion > 2` (a newer
-  major than this player understands) instead of silently misrendering.
-- The layout is **responsive / touch-friendly**: the transport and filmstrip reflow on narrow
-  screens (mobile breakpoints), and track rows + scrubber stars stay tappable.
+Recorded text and pixels have different privacy boundaries. Review artifacts before sharing;
+Android masks known sensitive Compose regions but opt-in video is unmasked. The web viewer does
+not provide automatic OCR/redaction of arbitrary recorded media.
 
-### .sal format v2
+## App configuration editor
 
-Format v2 keeps the same ZIP container but compresses every JSON track entry with **gzip**
-(RFC 1952, magic bytes `1f 8b`) instead of raw DEFLATE, and adds a **per-entry CRC-32** checksum
-over the uncompressed content. `manifest.files` becomes an array of objects
-`{name, crc32, compressed}` (v1 used an array of strings); the reader accepts both shapes. On a
-CRC mismatch it logs `QaLens: crc32 mismatch for <name>` and **continues** — a single corrupt
-entry never hard-fails the whole recording. **v1 stays fully supported**, and a
-`formatVersion > 2` is refused loudly. The bundled `web/sample.sal` demo remains a v1 file.
+Open the classic `index.html` and choose **.appsal editor**, drop a `.appsal`, or use `?appsal`.
+Edit panel style, webhook settings, saved SQL, macros and watched preferences, then download JSON
+for **Control Room → App Config → Import**. This is configuration, not a session archive.
 
-Every row in Timeline/Network/Logs/Screens is **clickable and seeks the player to that exact
-moment** (forward too — rows ahead of the playhead are dimmed, not hidden). **Theatre mode** and
-true **fullscreen** buttons live in the transport. Sessions recorded by current QaLens carry
-`analysis.json`; the Insights tab shows those on-device anomalies directly (labeled "recorded on
-device") instead of recomputing.
+A masked webhook header placeholder is not a guarantee that the file has no secrets. Macro steps,
+SQL and other user-entered fields can contain literals. Android secret-free export also omits
+webhook userinfo/query/fragment and extra params; do not assume every web editor field follows that
+same policy. [Client migration](../docs/CLIENT_SAFETY_FIXES.md) explains credential isolation.
 
-Keyboard: **Space** play/pause · **←/→** step event · **e** first error · **s** speed ·
-**f** follow · **t** theatre · **x** fullscreen · **m** ⭐ mark moment · **?** help ·
-**1–7** switch track.
+## CLI
 
-## Mission Control backend (optional)
-
-The player can hand a session to a QaLens "Mission Control" backend for server-side analysis. It
-is **off by default** — nothing is uploaded until you set a URL in **Settings → Backend URL** and
-press **⇪ Send to backend**. When a raw `.sal` buffer is available the player posts it as a
-`multipart/form-data` `file` field to `<base>/webhook` with `X-QaLens-*` headers (mirroring
-the mobile Control Room); otherwise it posts a JSON summary to `<base>/api/ingest`. A bundled
-mock backend ships at `backend/server.py` — run `python3 backend/server.py` to exercise the
-contract locally (it also accepts the mobile webhook format).
-
-## .appsal App Config editor
-
-Mission Control also edits **`.appsal`** files (per-app QA configs: panel style, webhook, saved
-SQL queries, macros, watched prefs). Drop one on the window, click **⚙ .appsal editor** for a
-blank config, or open `?appsal` for the bundled demo (`web/sample.appsal`). Edit everything in
-forms, then **⬇ Download** `<package>.appsal` and import it on-device
-(Control Room → App Config → ⤓ Import). Webhook secrets stay masked (`•••`) in shared files.
-
-## CLI (CI-friendly)
-
-```bash
-node web/tools/sal_report.js session.sal           # Jira-ready markdown report
-node web/tools/sal_report.js session.sal --json    # machine digest (incl. analysis.json passthrough)
-node web/tools/sal_report.js session.sal --for-ai  # structured brief (incl. the for_ai.md brief)
+```sh
+node web/tools/sal_report.js session.sal
+node web/tools/sal_report.js session.sal --json
+node web/tools/sal_report.js session.sal --for-ai
+node web/tools/sal_report.js candidate.sal --compare baseline.sal
 ```
 
-The markdown report includes **On-device anomalies** (from `analysis.json`, deduped against the
-web heuristic) and **Bookmarks** (`marks.json`). Exits **1** when the session contains failures —
-failed requests, error events, or device-flagged anomalies — so you can gate a pipeline on
-uploaded `.sal` artifacts.
+Exit 1 means observed failures or a comparison regression. Exit 2 means invalid input or reported
+partial evidence without an observed failure, including partial comparisons. Otherwise the current
+rules return 0; this does not establish full instrumentation coverage. `--json` keeps diagnostics
+off stdout. The built-in demo intentionally produces exit 1.
 
-## Tests
+## Verification and files
 
-```bash
+```sh
 node web/test/read.test.js
 ```
+
+The shared reader and CLI are exercised by this script, including v1/v2 nested compression,
+archive validation, retention warnings and CLI behavior. Dated test results live in
+[HANDOVER.md](../HANDOVER.md); [next.md](../next.md) owns open work.
+
+`web/tools/make_sample.js` regenerates the synthetic demo using headless Chromium and
+`playwright-core` supplied through NODE_PATH. It is not needed for normal replay or reader tests.
+Keep both viewers usable over file:// drag-drop and HTTP; avoid absolute fetch paths.
