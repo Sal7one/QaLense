@@ -64,18 +64,19 @@ character-read budget and preservation of long-address masking. Custom regex tim
 
 The Android runner uses platform Instrumentation without third-party test dependencies. Run it on
 a **disposable sample-app emulator**: it launches the sample, generates synthetic evidence, opens
-the normal share chooser, and saves synthetic recordings under the app's usual retention policy (which
-keeps five files). It does not send HTTP requests to the fixture hostname or share files externally. The OSS
-extension makes a loopback HTTP request through Chucker and QaLens; the client-safety extension
+the normal share chooser, and saves synthetic recordings under the app's usual retention policy
+(at most 30 archives / 1 GiB). It does not send HTTP requests to the fixture hostname or share files
+externally. The OSS extension makes a loopback HTTP request through Chucker and QaLens; the client-safety extension
 also tests upload queue pressure and transient failures on loopback servers. Cleartext is allowed only
 for local hosts in the sample debug manifest, never in the SDK or release manifest.
 
 ```sh
-# Use JDK 17 / Gradle 9.1.0 as documented in HANDOVER.md.
-gradle :sample-app:assembleDebug :sample-app:assembleDebugAndroidTest
-adb -s emulator-5554 install -r sample-app/build/outputs/apk/debug/sample-app-debug.apk
-adb -s emulator-5554 install -r sample-app/build/outputs/apk/androidTest/debug/sample-app-debug-androidTest.apk
-adb -s emulator-5554 shell am instrument -w -r com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+# Configure JDK 17 / Android SDK as documented in CONTRIBUTING.md.
+# Run adb devices and replace YOUR_DISPOSABLE_SERIAL with the intended emulator.
+./gradlew :sample-app:assembleDebug :sample-app:assembleDebugAndroidTest
+adb -s YOUR_DISPOSABLE_SERIAL install -r sample-app/build/outputs/apk/debug/sample-app-debug.apk
+adb -s YOUR_DISPOSABLE_SERIAL install -r sample-app/build/outputs/apk/androidTest/debug/sample-app-debug-androidTest.apk
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -r com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
 ```
 
 Success requires the `OK: 600 requests and logs survived UI clearing` message (with raw

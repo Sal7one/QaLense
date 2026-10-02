@@ -14,13 +14,12 @@ captures/
 release/
 *.apk
 .kotlin
-.log
+*.log
 
 # Mock webhook backend storage (recorded .sal uploads — may contain QA data)
 backend/data/
 tools/local-bridge/data/
 
-__pycache__
-# Python bytecode (mock backend)
+# Python bytecode
 __pycache__/
 *.pyc

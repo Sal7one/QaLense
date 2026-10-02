@@ -1,6 +1,6 @@
 # QaLens architecture
 
-Describes the Android client including the 2026-10-01 continuous-log responsiveness changes.
+Describes the Android client and desktop/clip paths through 2026-10-02.
 Start with [HANDOVER.md](../HANDOVER.md) for dated verification and [next.md](../next.md) for
 unresolved work.
 
@@ -17,6 +17,7 @@ unresolved work.
 | `sample-app` | Banking demo, debug Chucker coexistence, release no-op dependencies, instrumented regression runner |
 | `integration-tests/consumer` | Separate composite-build application using normal coordinates; checks both API visibility and release isolation |
 | `web` | v2 and classic viewers, shared `sal.js` reader, sample fixtures/generator and CLI |
+| `tools/local-bridge` | Python browser desktop, owned adb forwarding, component/recording libraries, fixed phone tasks and trusted component processors; serves the existing web sources |
 | `backend` | Python stdlib mock upload/chunk server, persistence, dashboard and deterministic verdict |
 
 Main dependency direction is core → Android → active Compose → navigation wrappers. Replay is
@@ -67,16 +68,24 @@ the calling thread remain explicit boundaries rather than being moved to an unsa
 Session identity rejects late callbacks. `RecordingEvidenceStore` retains session observations
 independently of dashboard clearing/eviction. [Retention](RECORDING_RETENTION.md) defines its budgets.
 
-Frame mode captures the current window approximately twice per second. It masks sensitive Compose
+Frame mode samples the current window at a duration-aware interval: approximately once per second
+at the default 60-minute setting, with a 500 ms minimum. It masks sensitive Compose
 bounds before/after asynchronous capture and refuses `FLAG_SECURE`. Main owns View/semantics work;
 frame scaling/JPEG writes run on the serialized writer. Screenshot PNG/storage uses a bounded
 worker and atomic file publication; sharing/UI completion returns to main.
 
 Video mode requires host `allowUnmaskedVideo=true` and Android consent. The projection service
-encodes full-display H.264 without per-node masks. Sidecar frames provide a fallback if video is
+checks supported encoder sizes/alignment/rates and encodes full-display H.264 without per-node masks.
+MediaRecorder preparation/stop run on a dedicated worker. Sidecar frames provide a fallback if video is
 unusable. Video consent/start time and session start time must remain distinct where applicable.
 Stop freezes evidence and packages a v2 archive off main, publishing it atomically. Handled crashes
 attempt finalization before delegating; abrupt process death can still lose the in-memory journal.
+
+An independent bounded recent journal supports marks while the master keeps earliest evidence.
+`RecordingClipWindow` fixes each interval at its mark; the serialized writer pins available frames
+and evidence, then exports separate archives after stop. `QaLensVideoClip` remuxes finalized video
+from a previous keyframe, recording actual/requested timestamps. Sampling, retained media and marks
+have explicit budgets; [recording clips](RECORDING_CLIPS.md) owns their current limits and coverage.
 
 Stop controls include the optional system overlay chip, in-window control, notification command
 service, shake and Control Room. `QaLensControlActivity` and `QaLensPlayerActivity` have separate
@@ -103,8 +112,8 @@ contain user-authored SQL/macro literals even when webhook secrets are omitted. 
 
 The producer and readers share the [SAL contract](SAL_FORMAT.md). Android applies bounded ZIP/gzip
 extraction, canonical path validation, streaming CRC checks and session-cache cleanup. Frame decode
-is downsampled on IO, and event rows use lazy rendering. Web/backend do not yet share all Android
-limits or CRC rejection behavior; do not assume uniform guarantees across readers.
+is downsampled on IO, and event rows use lazy rendering. Reader implementations have individual
+budgets and compatibility rules; use the SAL contract for their current differences.
 
 
 ## Explicit local automation bridge
@@ -117,10 +126,16 @@ semantics handlers. Main dispatch has a deadline and generation guard; disable c
 cancels pending dispatch. Already running synchronous host handlers cannot be safely interrupted.
 
 `tools/local-bridge/server.py` binds PC loopback, creates/removes only its own adb forward and proxies
-three fixed authenticated endpoints to a browser tree/bounds UI. JSON/redaction remain off main;
+fixed authenticated endpoints to the desktop tree/bounds, component and recording UI. JSON/redaction remain off main;
 cached observations never query host databases/providers on demand. This is live debug automation,
 not an archive-format change or a company service. The release no-op exposes identical facade APIs
 without transport work. Pairing tokens are memory-only and host-owned.
+
+`workbench.py` owns profiles, explicit component persistence and trusted pipeline jobs. `desktop.py`
+owns shared viewer assets, bounded recording/Downloads transfers and installed scrcpy lifecycle.
+The browser shell embeds both existing viewers through same-origin parent messages into their
+existing reader paths. Finished archive polling is opt-in and resets with connection changes/errors.
+Desktop files persist privately; pairing tokens and unsaved component previews do not.
 
 The decor overlay is a `QaLensOverlayHost` containing its Compose surface. It routes two-finger
 inspect/tag drags to the underlying Activity content after cancelling the overlay gesture; it never

@@ -2,6 +2,16 @@
 
 ## Unreleased — post-0.9.0
 
+### Product onboarding and documentation cleanup — 2026-10-02
+- Add one onboarding guide for SDK/web/desktop/backend evaluation, data hooks, recording/clips,
+  pairing, persistence, component processors, privacy, troubleshooting and team integration advice.
+- Replace superseded handover verification history with the current dated baseline; retain older
+  history in Git. Shorten the demo, link the guide from entry points and correct stale architecture,
+  storage and resolved lint notes. Keep next.md as the only backlog.
+- Use the Gradle wrapper/configured toolchain in contributor and demo flows, respect the selected
+  backend port, and describe demo checks as a convenience subset rather than full CI/device coverage.
+- Keep source/private capture data separate and ignore local log output consistently.
+
 ### Desktop launcher and retrospective bug clips — 2026-10-02
 - Embed the existing modern/classic web clients directly in the Python GUI, with onboarding choices,
   sticky Back/Start, browser history and viewport-aware replay. Keep one source for reader/viewers.

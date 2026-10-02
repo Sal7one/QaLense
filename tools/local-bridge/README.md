@@ -1,10 +1,13 @@
-# QaLens component workbench
+# QaLens desktop and component workbench
 
 A local browser GUI for a **QaLens-enabled Android QA build**. Inspect the live Compose tree, search
 exact tags, highlight components on the phone and invoke public tap/type/scroll actions. Send a
 selected component from the phone, read its attributes and tree position, save deduplicated JSON,
 and run your own processors. Python standard library only; no Appium server or extra Android
 library is required. Release builds still use `qalens-noop`.
+
+Start with [ONBOARDING.md](../../ONBOARDING.md) for the SDK/web/Python overview. This guide owns
+the desktop pairing, component, transfer and processor contracts.
 
 Coverage is visible Compose semantics from attached/registered roots in the foreground Activity.
 Native views, WebViews, arbitrary private state and unregistered windows are outside this tool.
@@ -107,8 +110,10 @@ Default storage is **`~/.qalens/bridge`**; override with `--data-dir /your/local
 `profiles.json` holds allowlisted settings, `components/<hash>.json` holds explicitly saved data,
 and `runs/<random-id>/` holds processor outputs plus `result.json`. New directories/files use
 private permissions where supported. Existing directory permissions, disk encryption, backups,
-retention and deleting files remain the PC owner's responsibility. No localStorage, cookies,
-telemetry or automatic background disk captures are used.
+retention and deleting files remain the PC owner's responsibility. The component workspace uses
+no cookies or localStorage for pairing/credentials. Embedded
+web viewers use origin-scoped browser storage for their own preferences/recents; recording
+automatic-copy is separately opt-in and memory-only. No telemetry is added.
 
 Configure trusted processors with `--pipeline-config`. The GUI cannot author executable commands.
 For example:
@@ -190,6 +195,7 @@ are clamped within system/IME bounds in LTR/RTL and retained across size changes
 ```sh
 python3 tools/local-bridge/test_server.py
 python3 tools/local-bridge/test_workbench.py
+python3 tools/local-bridge/test_desktop.py
 node --check tools/local-bridge/app.js
 # Build/install sample debug + androidTest APKs as in CONTRIBUTING.md, then:
 adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e bridgeOnly true \

@@ -72,6 +72,8 @@ baselines and project context. Older changelog entries are historical, not uncom
    Test password/redaction-matched/custom content and multiple windows, plus the API 23 screenshot
    fallback. Acceptance: no host crash, no stuck capture/saving controls, no cross-session callbacks,
    and explicit failure/coverage when output cannot be preserved. Keep frame recording as default.
+   The reported HD failure in a newer host remains undiagnosed: establish whether OS consent
+   appeared, check the explicit unmasked-video opt-in, and compare SDK builds in the same app/phone.
 3. **Self-hosted company service boundary.** Decide how teams will bring their own identity, TLS,
    tenant isolation, retention/deletion and storage. The current Python service intentionally remains
    a loopback development mock with no authentication; put production deployment/auth in a separate,
@@ -88,9 +90,9 @@ baselines and project context. Older changelog entries are historical, not uncom
 - **Close Android lint follow-ups.** Frame metrics now use a weak Activity reference and detach on
   destroy; the in-app stop chip detaches on destroy, exposes an accessibility click and uses string
   resources. The projection notification body opens controls while its action stops recording.
-  Validate TalkBack and rotation on physical devices; the active chip still intentionally holds its
-  View until stop/destroy and lint reports that static-field warning. Review remaining sample
-  metadata and dependency-freshness warnings without masking them with a baseline.
+  The stop chip now uses weak View references; its prior static-field lint warning is resolved.
+  Validate TalkBack and rotation on physical devices. Review remaining sample metadata, Compose
+  and dependency-freshness warnings without masking them with a baseline.
 - **Facade decomposition.** `AnalysisEngine`, recording lifecycle/window, journals and crash
   registration have been extracted. Observation, recording coordination, panel state, evidence
   services and activity bridging still overlap in the facade. Extract one boundary at a time with

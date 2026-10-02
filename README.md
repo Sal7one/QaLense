@@ -5,8 +5,11 @@ QA/debug build, inspect screen/network/log context, then export a bug report or 
 recording. Engineers can replay it on Android, in the browser, or inspect it with a Node CLI.
 Release builds use a separate no-op artifact.
 
-**New contributor: read [HANDOVER.md](HANDOVER.md).** It contains the project context, current
-verified baseline, code map, engineering contracts and next steps.
+**New to QaLens? Start with [ONBOARDING.md](ONBOARDING.md).** It covers the Android SDK, web app,
+Python desktop, local backend, recording/inspection workflows and practical team advice.
+
+For development, read [HANDOVER.md](HANDOVER.md) for the current verified baseline and engineering
+contracts, then [next.md](next.md) for the backlog.
 
 ## What it does
 
@@ -62,7 +65,7 @@ python3 backend/tests/test_backend.py
 ```
 
 QaLens is free and self-hostable under the MIT license; the included backend is a local test mock,
-not a hosted multi-company service. See [DEMO.md](DEMO.md) for the 60-second upload walkthrough and
+not a hosted multi-company service. See [DEMO.md](DEMO.md) for a short upload walkthrough and
 [backend setup](backend/README.md) for the mobile and web send paths. The backend binds to loopback
 by default and has no authentication or production storage guarantees. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the complete JDK 17 / Gradle 9.1.0 Android build, lint,
@@ -75,22 +78,19 @@ button requires HTTP serving. `web/index.html` remains the classic fallback and 
 
 | Need | Document |
 |---|---|
+| Get started across SDK, web and Python tools | [Onboarding](ONBOARDING.md) |
 | Take over development | [Handover](HANDOVER.md), [current backlog](next.md) |
 | Understand modules and data flow | [Architecture](docs/ARCHITECTURE.md) |
 | Understand overlay behavior and token coverage | [Overlay design](docs/OVERLAY_DESIGN.md) |
 | Integrate into an app | [Integration](integration.md), [OSS contracts](docs/OSS_INTEGRATIONS.md) |
 | Understand client fixes and compatibility changes | [Client fixes](docs/CLIENT_SAFETY_FIXES.md) |
-| Implement or inspect recordings | [SAL format](docs/SAL_FORMAT.md), [retention](docs/RECORDING_RETENTION.md) |
+| Implement or inspect recordings | [SAL format](docs/SAL_FORMAT.md), [retention](docs/RECORDING_RETENTION.md), [clips](docs/RECORDING_CLIPS.md) |
+| Pair phones, inspect components and process saved files | [Desktop guide](tools/local-bridge/README.md) |
 | Run replay/upload tools | [Web](web/README.md), [backend](backend/README.md), [demo](DEMO.md) |
 | Build, verify or distribute locally | [Contributing](CONTRIBUTING.md) |
 | Review history | [Changelog](CHANGELOG.md), Git history |
 
-## License
-
-[MIT](LICENSE). Copyright © 2026 Saleh Alanazi.
-
-
-### PC inspector over adb
+## Desktop and phone inspection
 
 The [local PC tool](tools/local-bridge/README.md) reads a live Compose tree, searches test tags,
 shows selectable bounds and runs exact-tag/ID tap, type and scroll actions in an explicitly paired
@@ -104,5 +104,9 @@ the filters and selected-node card. Bubble/dock movement follows physical screen
 
 The [local desktop launcher](tools/local-bridge/README.md) embeds the existing replay viewers alongside
 phone pairing, Compose inspection, saved components, processing pipelines and adb/file tools.
-[Long sessions and bug clips](docs/RECORDING_CLIPS.md) adds retrospective 10/20/60-second/custom marks
+[Long sessions and bug clips](docs/RECORDING_CLIPS.md) describes retrospective 10/20/60-second/custom marks
 without stopping capture, plus opt-in finished-recording collection on your PC.
+
+## License
+
+[MIT](LICENSE). Copyright © 2026 Saleh Alanazi.

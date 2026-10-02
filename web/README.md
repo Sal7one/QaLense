@@ -2,7 +2,8 @@
 
 The primary viewer is `index-v2.html`, with `app-v2.js` and `styles-v2.css`. The classic
 `index.html`/`app.js` viewer remains supported and contains the `.appsal` configuration editor.
-Both share `sal.js`. Start at [the project handover](../HANDOVER.md) for contributor context.
+Both share `sal.js`. Start with [onboarding](../ONBOARDING.md) for the full SDK/web/Python flow,
+or [the handover](../HANDOVER.md) for contributor context.
 
 ## Open a recording
 

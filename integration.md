@@ -1,5 +1,6 @@
 # QaLens Integration Guide (for developers and their AI agents)
 
+Read [ONBOARDING.md](ONBOARDING.md) first for the product/tools overview and evaluation workflow.
 This file is written to be followed mechanically — every step is copy-pasteable and verifiable.
 QaLens is a **debug-only** QA evidence SDK for Android Jetpack Compose apps: floating QA panel,
 session recording to a portable `.sal` file, raw-SQL/data tooling, macros, webhook upload for AI
@@ -318,7 +319,9 @@ used** first. Verbs:
 
 - Compose-first: semantics inspection covers Compose UI; classic Views appear only as frames.
 - The timeline never fabricates events: no interceptor → no network rows; no Timber → no logs.
-- Frame recording is ~2fps (permission-free). HD video requires `allowUnmaskedVideo=true` plus
+- Frame recording is permission-free and samples according to configured duration (about once
+  per second for the default hour, with a 500 ms minimum interval). [Clip/media limits](docs/RECORDING_CLIPS.md)
+  describe retention and omissions. HD video requires `allowUnmaskedVideo=true` plus
   Android consent and has no per-node masks. Secure windows are refused by screenshot/frame capture.
 - `tap`/`type` need semantics: tag your interactive elements (`Modifier.qaTag`) or they fall back
   to text matching.
