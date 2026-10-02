@@ -67,6 +67,10 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
         QaLens.scheduleInspection()
     }
 
+    fun isResumed(activity: Activity): Boolean = activity in resumed
+
+    fun semanticsId(node: SemanticsNode): String = ComposeSemanticsReader.semanticsId(node)
+
     fun inspectionRoots(activity: Activity?): List<View> = if (activity == null) emptyList() else
         synchronized(extraRoots) {
             extraRoots.filter { (view, entry) -> entry.owner.get() === activity && view.isAttachedToWindow }.keys.toList()
@@ -141,17 +145,21 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
         val decor = activity.window.decorView as? ViewGroup ?: return
         if (decor.findViewWithTag<View>(OVERLAY_TAG) != null) return
 
-        val overlay = ComposeView(activity).apply {
+        val compose = ComposeView(activity).apply {
             tag = OVERLAY_TAG
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             // DO NOT set isClickable = false or isFocusable = false here.
             // Those flags prevent Compose gesture detectors (clickable, pointerInput) from
             // receiving ACTION_DOWN, so buttons in the panel never fire. The Compose tree
-            // already passes through touches that no composable consumes, so the underlying
-            // app stays interactive without these flags.
+            // leaves unused regions available to the host. The parent QaLensOverlayHost
+            // explicitly routes two-finger inspect/tag drags across the sibling View boundary.
             setContent { QaLensOverlay() }
         }
 
+        val overlay = QaLensOverlayHost(activity).apply {
+            tag = OVERLAY_TAG
+            addView(compose, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
         decor.addView(overlay, ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
@@ -341,6 +349,8 @@ private object ComposeSemanticsReader {
     private fun rootId(root: androidx.compose.ui.node.RootForTest): Long = synchronized(rootIds) {
         rootIds.getOrPut(root) { ++nextRootId }
     }
+
+    fun semanticsId(node: SemanticsNode): String = "semantics:${node.root?.let(::rootId)}:${node.id}"
 
     private fun SemanticsNode.isHiddenFromReports(): Boolean {
         var current: SemanticsNode? = this

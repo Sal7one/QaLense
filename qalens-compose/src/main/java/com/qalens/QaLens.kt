@@ -97,7 +97,7 @@ object QaLens {
         val allowedVideo = configState.value.allowUnmaskedVideo
         configState.update { current -> QaLensConfig.Builder(current).apply(block).build() }
         val nowEnabled = configState.value.enabled
-        if (!nowEnabled) captureEpoch++
+        if (!nowEnabled) { captureEpoch++; QaLensLocalBridge.stop() }
         onMain {
             if (allowedVideo && !configState.value.allowUnmaskedVideo) {
                 pendingRecordingVideo = null
@@ -376,6 +376,13 @@ object QaLens {
                 .onFailure { log("DataSourceObserver.onError failed: ${it.message}") }
         }
     }
+
+    /** Explicitly expose redacted live semantics/actions on device loopback for adb forwarding.
+     * Use a freshly generated token. Nothing starts automatically or survives disable/process exit.
+     */
+    fun startLocalBridge(token: String, port: Int = 8766) = QaLensLocalBridge.start(token, port)
+    fun stopLocalBridge() = QaLensLocalBridge.stop()
+    val localBridgeStatus: StateFlow<String> = QaLensLocalBridge.status
 
     fun install(application: Application) {
         appRef = WeakReference(application)

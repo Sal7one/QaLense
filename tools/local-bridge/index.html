@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QaLens PC inspector</title><link rel="stylesheet" href="/style.css">
+<header><h1>QaLens PC inspector</h1><p>Live Compose semantics over adb · local, explicit control</p></header>
+<form id="connect"><label>Pairing token <input id="token" type="password" autocomplete="off" required></label><button>Connect / refresh tree</button></form>
+<p id="status" role="status">Start the bridge in your QA app, then enter its token.</p>
+<nav><label>Find tag or label <input id="search" type="search"></label><label><input id="tagged" type="checkbox"> Tagged only</label><button id="refresh">Refresh tree</button><button id="events">Read observations</button></nav>
+<main><section><h2 id="screen">Semantics tree</h2><div id="tree"></div></section><section><h2>Selected element</h2><div id="summary" class="card">Choose a tree node or a rectangle.</div><div id="actions"></div><h2>Window bounds</h2><svg id="map" aria-label="Selectable element bounds"></svg><details><summary>Raw semantics</summary><pre id="details">Choose an element to see its raw semantics.</pre></details></section></main>
+<section class="observations"><h2>Observed diagnostics</h2><p>Bounded dashboard data. Room/DataStore sources must be registered and allowlisted by the host. No screenshots or automatic recording.</p><pre id="observations">Use “Read observations” to fetch recent logs, network metadata and cached app data.</pre></section>
+<script src="/app.js" defer></script></html>

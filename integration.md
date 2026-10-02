@@ -359,3 +359,24 @@ Apply the smallest useful integration, keep privacy defaults, run both builds an
 then verify one synthetic request/report/frame recording on a disposable device if available.
 State exactly what was wired and tested. For SDK development, start at [HANDOVER.md](HANDOVER.md)
 instead. The independent consumer fixture is the executable example for external dependency setup.
+
+
+## Local PC inspection and Compose control
+
+For explicit QA sessions, `QaLens.startLocalBridge(token, port = 8766)` exposes redacted visible
+semantics and tap/type/scroll handlers on device loopback. `QaLens.stopLocalBridge()` closes it;
+`QaLens.localBridgeStatus` reports readiness/failure. No-op builds never open a socket. It is off by
+default, uses a host-generated random token, stops when QaLens is disabled and requires another
+explicit start after re-enable. Keep the pairing UI and token out of reports using
+`qaHiddenFromReports()`; never persist/log the token.
+
+The [PC tool and complete protocol](tools/local-bridge/README.md) create an adb forward and provide a
+local browser tree/bounds inspector plus observed logs/network metadata/cached app-data snapshots.
+Exact tag queries reject duplicates; IDs are root-scoped and live-session only. Hidden subtrees and
+password values are excluded. Host privacy/allowlisting still govern ordinary text and snapshots.
+Actions report handler acceptance, not proof of a completed workflow. This is Compose automation
+inside your QA build, with no automatic capture or production service.
+
+In inspect/tag mode, use **two fingers to scroll the host** and one tap to select/copy. Drag the
+**Move inspector** handle to move the filters/detail dock. Bubble and dock coordinates are physical
+and clamped above system navigation/keyboard bounds in both LTR and RTL.

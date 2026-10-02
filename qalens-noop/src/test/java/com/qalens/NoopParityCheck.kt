@@ -18,6 +18,9 @@ object NoopParityCheck {
 
     fun exerciseAll() {
         val q = com.qalens.QaLens
+        q.startLocalBridge("synthetic-token-0123456789")
+        q.stopLocalBridge()
+        check(q.localBridgeStatus.value.startsWith("Disabled"))
 
         // Core lifecycle — install requires non-null Application, skip in test (it's a noop anyway)
         q.configure {}

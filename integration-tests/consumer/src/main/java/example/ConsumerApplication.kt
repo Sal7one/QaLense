@@ -14,6 +14,9 @@ class ConsumerApplication : Application() {
     /** Compile the same optional Compose integration calls against debug and release artifacts. */
     @Suppress("unused")
     private fun inspectionApiParity(view: View): Modifier {
+        QaLens.startLocalBridge("synthetic-compile-only-0123456789")
+        QaLens.stopLocalBridge()
+        QaLens.localBridgeStatus.value
         QaLens.invalidateInspection()
         QaLens.registerComposeRoot(view)
         QaLens.unregisterComposeRoot(view)

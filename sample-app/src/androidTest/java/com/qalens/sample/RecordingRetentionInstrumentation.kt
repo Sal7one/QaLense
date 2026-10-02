@@ -37,8 +37,10 @@ import java.util.zip.ZipFile
  * Exercises the real SDK observation hooks, UI clearing, async writer and Android ZIP producer.
  */
 class RecordingRetentionInstrumentation : Instrumentation() {
+    private var bridgeOnly = false
     private var overlayLoadOnly = false
     override fun onCreate(arguments: Bundle?) {
+        bridgeOnly = arguments?.getString("bridgeOnly") == "true"
         overlayLoadOnly = arguments?.getString("overlayLoadOnly") == "true"
         super.onCreate(arguments)
         start()
@@ -47,6 +49,12 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     override fun onStart() {
         val result = Bundle()
         try {
+            if (bridgeOnly) {
+                LocalBridgeChecks(this).run()
+                result.putString("stream", "\nOK: Local bridge semantics/actions/privacy/shutdown and LTR/RTL inspector gestures pass.\n")
+                finish(android.app.Activity.RESULT_OK, result)
+                return
+            }
             if (overlayLoadOnly) {
                 verifyContinuousOverlayLoad()
                 result.putString("stream", "\nOK: Overlay/Repro/Logs/Network remain responsive under continuous log and network load.\n")
@@ -70,6 +78,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             verifyRealDataStoreIntegration()
             verifyClientSafety()
             verifyComposeInspection()
+            LocalBridgeChecks(this).run()
             verifyContinuousOverlayLoad()
             val limited = record("budget", 100, "x".repeat(100_000), clearUi = false)
             ZipFile(limited).use { zip ->
@@ -81,7 +90,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
                 check(network.getLong("retained") == JSONArray(read(zip, "network.json")).length().toLong())
                 check(read(zip, "report.txt").contains("observations omitted"))
             }
-            result.putString("stream", "\nOK: 600 requests and logs survived UI clearing; saved archives are durable, shareable and legacy cache archives migrate; Compose dialog roots, hidden subtrees and semantics-only updates are inspected; real Room/DataStore hooks and preference snapshot changes reach recording analysis; byte-budget loss is disclosed; Chucker coexistence, adapters and crash bridge pass; client privacy, disable/resume, navigation, macros, SQL, replay and webhook queue/retry checks pass.\n")
+            result.putString("stream", "\nOK: 600 requests and logs survived UI clearing; saved archives are durable, shareable and legacy cache archives migrate; Compose dialog roots, hidden subtrees and semantics-only updates are inspected; local bridge actions/privacy/shutdown and LTR/RTL inspector gestures pass; real Room/DataStore hooks and preference snapshot changes reach recording analysis; byte-budget loss is disclosed; Chucker coexistence, adapters and crash bridge pass; client privacy, disable/resume, navigation, macros, SQL, replay and webhook queue/retry checks pass.\n")
             result.putString("retainedArchive", retained.name)
             result.putString("limitedArchive", limited.name)
             finish(android.app.Activity.RESULT_OK, result)

@@ -105,3 +105,24 @@ The producer and readers share the [SAL contract](SAL_FORMAT.md). Android applie
 extraction, canonical path validation, streaming CRC checks and session-cache cleanup. Frame decode
 is downsampled on IO, and event rows use lazy rendering. Web/backend do not yet share all Android
 limits or CRC rejection behavior; do not assume uniform guarantees across readers.
+
+
+## Explicit local automation bridge
+
+`QaLensLocalBridge` is an opt-in QA listener on device loopback. Its IO coroutine serves one bounded
+connection at a time; core `QaLensBridgeProtocol` validates framing/authentication before any host
+access. Main-dispatched reads reuse public Compose root discovery and root IDs, excluding hidden
+nodes and password values. Commands resolve an exact visible tag or node ID and invoke public
+semantics handlers. Main dispatch has a deadline and generation guard; disable closes sockets and
+cancels pending dispatch. Already running synchronous host handlers cannot be safely interrupted.
+
+`tools/local-bridge/server.py` binds PC loopback, creates/removes only its own adb forward and proxies
+three fixed authenticated endpoints to a browser tree/bounds UI. JSON/redaction remain off main;
+cached observations never query host databases/providers on demand. This is live debug automation,
+not an archive-format change or a company service. The release no-op exposes identical facade APIs
+without transport work. Pairing tokens are memory-only and host-owned.
+
+The decor overlay is a `QaLensOverlayHost` containing its Compose surface. It routes two-finger
+inspect/tag drags to the underlying Activity content after cancelling the overlay gesture; it never
+re-dispatches through the decor into itself. Bubble/dock placement uses physical offsets inside safe
+insets, independent of layout direction.

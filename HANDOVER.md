@@ -1,8 +1,8 @@
 # QaLens: start here
 
-Updated 2026-10-01. This is the authoritative handover for a contributor or AI with no prior
+Updated 2026-10-02. This is the authoritative handover for a contributor or AI with no prior
 conversation context. It covers the tester flow, local backend, Compose inspection and data hooks
-through `a16ca21`, plus the continuous-log responsiveness fixes below. Check `git status` and `git log` because code and publication state
+through `a16ca21`, plus the continuous-log responsiveness and local PC bridge/inspector movement work below. Check `git status` and `git log` because code and publication state
 may have changed. Historical claims in CHANGELOG are not a current verification matrix.
 
 ## Product and user priorities
@@ -52,6 +52,7 @@ iOS capture and native Ktor/Cronet/Apollo adapters are not. Generic transport ca
 | [Overlay design](docs/OVERLAY_DESIGN.md) | Token coverage and remaining UI migration |
 | [Contributing](CONTRIBUTING.md) | Portable build/test/device commands and distribution workflow |
 | [Demo](DEMO.md), [web](web/README.md), [backend](backend/README.md) | Operating the sample and replay/upload tools |
+| [PC bridge](tools/local-bridge/README.md) | Pairing, adb forwarding, browser inspector, HTTP API and coverage limits |
 | [Changelog](CHANGELOG.md) | Historical changes; Git preserves deleted historical documents |
 
 Root `AGENTS.md` directs contributors here; this file and `next.md` are the only current project
@@ -204,6 +205,42 @@ list. See [integration.md](integration.md) for limits and synchronous API bounda
   flush pending observations. This is synthetic coverage; retest the reported host app.
 - Initial input redaction and host snapshot providers retain their caller/main-thread contracts;
   custom regexes, huge individual messages and blocking providers can still be expensive.
+
+## Local PC bridge and inspector movement — 2026-10-02
+
+Remote `master` (`dea9048`) was the latest baseline and had merged remote `dev` (`9e52fc9`);
+their code trees were identical. The local `dev` checkout was fast-forwarded to that baseline.
+
+- Explicit `startLocalBridge(token, port)` / `stopLocalBridge()` and `localBridgeStatus` expose an
+  authenticated loopback device endpoint; no-op builds remain inert. It stops on disable, rejects
+  stale queued commands and requires explicit restart. IO/JSON/redaction run off main; live semantics
+  reads/actions stay on main. A running synchronous host action cannot be interrupted safely.
+- The Python standard-library PC server owns its adb forward and serves a browser semantics forest,
+  test-tag search, bounds selection, device highlight and tap/type/scroll controls. Recent diagnostics
+  read bounded dashboard observations and cached host-owned data sources, without querying providers
+  on demand or exposing network bodies. Exact tags reject duplicates; IDs are live/root-scoped.
+- Hidden subtrees and password values stay out of snapshots. The debug sample Settings provides
+  explicit pairing; its token is process-memory only, stable across navigation/rotation and hidden
+  from reports. This is Compose control within a QA build, not universal Appium or a company backend.
+- A decor `QaLensOverlayHost` forwards two-finger inspect/tag drags to host content as a one-finger
+  centroid drag, cancels the pending inspector tap and suppresses residual fingers. The bubble and
+  movable inspector dock use physical normalized coordinates within system/IME-safe bounds in RTL/LTR.
+- 172 core, 30 Compose and 2 no-op unit tests passed. Python proxy tests (4) and JS syntax passed.
+  Sample debug/release/androidTest and independent-consumer debug/release builds and both release
+  isolation gates passed. Compose/Android/sample debug lint passed with zero errors; after removing
+  the new View-constructor warning, 26 warnings and 2 informational findings remain for existing dependency/platform metadata.
+- The full disposable API 36 runner passed with three-button navigation, including real bridge
+  semantics/auth/hidden/password/duplicate-tag/timeout/disable/restart checks and injected LTR/RTL
+  two-finger scrolling, bubble/dock movement and filters above current system/IME insets. The existing
+  continuous-log case produced 4,202 background logs, with a 27 ms worst main-thread heartbeat.
+- The real PC → owned adb forward → sample round trip read 50 Settings nodes, excluded the pairing
+  token, changed the theme by exact tag and verified Dark Mode in the next tree; diagnostics also
+  returned through the proxy. No real host tokens/data or recordings are part of the changes; tests use synthetic fixtures.
+
+See the PC guide for exact limits and commands. The focused bridge/gesture runner also passed at 360 × 640 dp with three-button navigation.
+Physical devices, TalkBack, separate-window gesture
+forwarding and Compose versions beyond 1.7.8 remain unverified. The endpoint reads registered dialog
+roots; touch forwarding stays within the host Activity content window.
 
 ## What changed recently
 

@@ -124,6 +124,7 @@ cmd_test() {
   say "2/4 mock backend end-to-end (python):"
   python3 "$ROOT/backend/tests/test_backend.py" 2>&1 | grep -E "^(Ran|OK|FAILED)"
   echo
+  python3 "$ROOT/tools/local-bridge/test_server.py"
   say "3/4 kotlin unit tests + release parity (gradle):"
   GRADLE_BIN="${QALENS_GRADLE:-$ROOT/gradlew}"
   (cd "$ROOT" && JAVA_HOME="${JAVA_HOME:-/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home}" "$GRADLE_BIN" :qalens-core:test :qalens-compose:testDebugUnitTest :qalens-replay:testDebugUnitTest :qalens-noop:testDebugUnitTest :qalens-replay:compileDebugKotlin :sample-app:compileDebugKotlin :sample-app:compileReleaseKotlin :sample-app:verifyReleaseIsolation --console=plain 2>&1 | tail -6)

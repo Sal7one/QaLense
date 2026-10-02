@@ -16,6 +16,8 @@ gradle :sample-app:assembleDebug :sample-app:assembleRelease :sample-app:verifyR
 gradle -p integration-tests/consumer assembleDebug assembleRelease verifyReleaseIsolation
 node web/test/read.test.js
 python3 backend/tests/test_backend.py
+python3 tools/local-bridge/test_server.py
+node --check tools/local-bridge/app.js
 ```
 
 The consumer fixture resolves normal `com.qalens:*` coordinates through `includeBuild`; it catches
@@ -68,3 +70,16 @@ not establish that `com.qalens` artifacts are available from Maven Central. Run
 `scripts/release_internal.sh --verify` for a checked local zip, or add `--version 0.9.0-preview1`
 for a preview with matching coordinates across modules. The script clears stale generated
 publications before packaging. Publishing externally is a separate step.
+
+
+For only the local bridge and inspector gesture cases, install the same debug/test APKs and run:
+
+```sh
+adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e bridgeOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: Local bridge semantics/actions/privacy/shutdown and LTR/RTL inspector gestures pass`.
+The full runner includes this case. It injects real single/two-pointer gestures and validates filters
+against current system/IME insets; run with gesture and three-button navigation. The
+[PC bridge guide](tools/local-bridge/README.md) describes pairing and adb-forward ownership.

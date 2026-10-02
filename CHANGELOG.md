@@ -2,6 +2,23 @@
 
 ## Unreleased — post-0.9.0
 
+### Local PC bridge and inspector movement — 2026-10-02
+- Add explicit `startLocalBridge` / `stopLocalBridge` and readiness state, mirrored by the release
+  no-op. The authenticated device listener binds loopback, stops on disable, bounds requests and
+  main dispatch, and rejects queued actions after cancellation. Socket/JSON/redaction work runs off main.
+- Add a Python standard-library PC server with owned adb-forward cleanup and a browser tree/bounds
+  inspector. Read visible, root-scoped parent relationships/test tags, select nodes and invoke public
+  Compose tap/type/scroll actions. Ambiguous tags fail explicitly; hidden subtrees and password values
+  are excluded. Recent bounded observations include network metadata and cached host-owned data sources.
+- Expose a manual pairing control in the debug sample Settings. Pairing stays in process memory and
+  is hidden from reports; no bridge, browser polling or recording starts automatically.
+- Forward two-finger inspect/tag drags to the host as centroid-based single-finger drags. Cancel the
+  pending inspect tap, end when a finger lifts and suppress the remaining finger's accidental click.
+- Replace mirrored/unbounded bubble offsets with physical normalized positions and add a draggable
+  inspector dock. Clamp both against system/IME safe bounds and preserve positions across size changes.
+- Add protocol/proxy tests and real-device semantics/privacy/lifecycle/timeout plus LTR/RTL gesture
+  checks. See `tools/local-bridge/README.md` for operation, API limits and coverage boundaries.
+
 ### Overlay responsiveness under continuous logging — 2026-10-01
 - Batch log and network dashboard updates every 100 ms with bounded pending queues, instead of
   posting a main-thread task and copying history for each observation. Keep recording admission

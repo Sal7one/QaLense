@@ -1,7 +1,22 @@
 # Current backlog
 
-Updated 2026-10-01. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
+Updated 2026-10-02. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
+
+## Completed 2026-10-02: PC control and inspector movement
+
+- [x] Add an explicitly enabled local automation bridge and a PC browser tool using adb forwarding.
+  Read redacted, root-scoped Compose trees, select exact tags/IDs, and run tap/type/scroll actions.
+  Include bounded observed logs/network/data snapshots, clear command errors, authentication,
+  loopback binding, shutdown on disable, and release/no-op parity. No hidden content or implicit capture.
+- [x] Route two-finger inspector drags to the host scroll surface while single taps inspect.
+  Verify actual host scrolling, no accidental clicks, cancellation, and normal overlay controls.
+- [x] Use physical, bounded bubble coordinates in LTR/RTL; reclamp for size/inset changes.
+- [x] Add a movable inspector dock with a drag handle, safe system-bar/IME placement and persistence.
+  Verify the four filters and selected-node detail stay usable on small screens after viewport
+  changes and with three-button navigation. Physical rotation remains in the device matrix.
+- [x] Exercise the PC-to-device path, gestures and RTL on a disposable emulator, run unit/build/lint
+  and release isolation checks, and update integration instructions and the handover with limits.
 
 ## Priority 1: make the client useful to real QA teams
 
