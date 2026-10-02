@@ -3,6 +3,24 @@
 Updated 2026-10-02. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Completed 2026-10-02: desktop launcher and retrospective clips
+
+- [x] Onboarding choices and Back/browser-history navigation; embed both existing `web/` viewers
+  directly without copied sources. Keep replay controls reachable and pause video when leaving.
+- [x] Add connected-device Back/Home/Wake/Settings, optional installed scrcpy lifecycle and bounded
+  Downloads push/pull. Require the current connection nonce; keep launch separate and no-reset.
+- [x] Detect completed archives and provide explicit Copy/Open replay plus connection-scoped,
+  off-by-default automatic transfer of new sessions/clips. Stream privately with content hashes.
+- [x] Remove the five-minute stop, add a configured duration and media/disk retention bounds;
+  mark 10/20/60s or custom 1–300s without stopping. Export separate `.sal` clips after stop using
+  an independent recent evidence buffer and playable-keyframe video trimming.
+- [x] Move MediaRecorder setup/stop off main, check actual encoder sizes/alignment/rates, fall back
+  resolutions and validate encoded samples. Pass real API 36 consent, HD master/clip playback,
+  a >5-minute continuity check, automatic PC collection and GUI file push/pull.
+- Still validate full-hour endurance, physical-phone encoders/rotation/consent recovery and TalkBack;
+  actual scrcpy mirroring is unverified here because scrcpy is not installed. See
+  [recording clips](docs/RECORDING_CLIPS.md) for budgets and evidence/timing limits.
+
 ## Completed 2026-10-02: PC component workbench
 
 - [x] Send a selected component beside Copy test tag; preview redacted public attributes, values,

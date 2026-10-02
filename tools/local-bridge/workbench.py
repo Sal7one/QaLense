@@ -111,6 +111,8 @@ class Workbench:
         self.worker = None
         self.stopping = threading.Event()
         self.process = None
+        from desktop import Desktop
+        self.desktop = Desktop(self)
 
     def load_pipelines(self, path):
         if not path: return {}
@@ -187,6 +189,7 @@ class Workbench:
         return self.connection
 
     def disconnect(self, server):
+        self.desktop.stop_mirror()
         with self.lock:
             server.device_port = None; server.token = None
             self.connection = None
@@ -314,6 +317,7 @@ class Workbench:
         except ProcessLookupError: pass
 
     def close(self, server):
+        self.desktop.stop_mirror()
         self.stopping.set()
         with self.lock:
             process = self.process

@@ -10,13 +10,14 @@ import android.content.pm.ServiceInfo
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.MediaRecorder
+import android.media.MediaCodecList
+import android.media.MediaFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
-import android.os.Looper
-import android.util.DisplayMetrics
 import androidx.core.app.ServiceCompat
 import com.qalens.compose.R
 import androidx.core.content.ContextCompat
@@ -33,6 +34,9 @@ import java.io.File
  */
 class QaLensProjectionService : Service() {
 
+    private val captureThread = HandlerThread("qalens-video").apply { start() }
+    private val captureHandler = Handler(captureThread.looper)
+    private var starting = false
     private var projection: MediaProjection? = null
     private var recorder: MediaRecorder? = null
     private var virtualDisplay: VirtualDisplay? = null
@@ -42,7 +46,7 @@ class QaLensProjectionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            stopRecording()
+            captureHandler.post { stopRecording() }
             return START_NOT_STICKY
         }
         try { startForegroundCompat() } catch (failure: Exception) {
@@ -65,62 +69,75 @@ class QaLensProjectionService : Service() {
         }
 
         if (!QaLensSessionRecorder.isAwaitingVideo(path)) { stopSelf(); return START_NOT_STICKY }
-        runCatching { startRecording(resultCode, data, File(path)) }
+        if (starting) return START_NOT_STICKY
+        starting = true
+        captureHandler.post { runCatching {
+            if (!QaLensSessionRecorder.isAwaitingVideo(path)) { stopSelf(); return@runCatching }
+            startRecording(resultCode, data, File(path))
+        }
             .onFailure {
                 QaLens.log("Video recording failed to start: ${it.message}")
+                QaLens.pushError(ErrorKind.RECORDING, "HD video could not start: ${it.message}. Use frame recording.")
                 QaLensSessionRecorder.onVideoConsentDenied(path)
-                stopSelf()
-            }
+                stopRecording()
+            } }
         return START_NOT_STICKY
     }
 
     private fun startRecording(resultCode: Int, data: Intent, output: File) {
         videoFile = output
         val metrics = resources.displayMetrics
-        // Cap the encode to a safe size. Modern phones (e.g. Pixel 8 Pro: 1344×2992) exceed common
-        // H.264 encoder limits, and the encoder then produces ZERO frames — the "always no frames"
-        // bug. Scale the longest side to ≤1280 (even dimensions; aspect preserved); the virtual
-        // display mirrors the full screen into this surface.
-        var w = metrics.widthPixels
-        var h = metrics.heightPixels
-        val maxDim = 1280
-        val longest = maxOf(w, h)
-        if (longest > maxDim) {
-            val scale = maxDim.toFloat() / longest
-            w = (w * scale).toInt()
-            h = (h * scale).toInt()
+        val capabilities = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { it.isEncoder && it.supportedTypes.any { mime -> mime.equals(MediaFormat.MIMETYPE_VIDEO_AVC, true) } }
+            .mapNotNull { runCatching { it.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).videoCapabilities }.getOrNull() }
+        // Query real encoder alignment/ranges; even dimensions alone are insufficient on some phones.
+        var prepared: MediaRecorder? = null
+        var width = 0; var height = 0
+        for (longEdge in listOf(1920, 1280, 960, 720)) {
+            val scale = minOf(1.0, longEdge.toDouble() / maxOf(metrics.widthPixels, metrics.heightPixels))
+            for (caps in capabilities) {
+                val w = ((metrics.widthPixels * scale).toInt() / caps.widthAlignment) * caps.widthAlignment
+                val h = ((metrics.heightPixels * scale).toInt() / caps.heightAlignment) * caps.heightAlignment
+                if (w <= 0 || h <= 0 || !caps.areSizeAndRateSupported(w, h, 30.0)) continue
+                val rec = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(this)
+                    else @Suppress("DEPRECATION") MediaRecorder()
+                // Fit the shared reader's 256 MiB video-entry limit for the configured session duration.
+                // Longer sessions trade bitrate for duration; no claim that bitrate is a quality guarantee.
+                val seconds = QaLens.config.value.recordingMaxDurationMinutes.coerceIn(1, 180) * 60
+                val bitrate = minOf(4_000_000L, 230L * 1024 * 1024 * 8 / seconds).toInt()
+                val ready = runCatching {
+                    rec.setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                    rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                    rec.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                    rec.setVideoSize(w, h); rec.setVideoFrameRate(30)
+                    rec.setVideoEncodingBitRate(caps.bitrateRange.clamp(bitrate))
+                    rec.setMaxFileSize(240L * 1024 * 1024)
+                    rec.setOnInfoListener { _, what, _ ->
+                        if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED) captureHandler.post { stopRecording() }
+                    }
+                    rec.setOutputFile(output.absolutePath); rec.prepare()
+                }.isSuccess
+                if (ready) { prepared = rec; width = w; height = h; break }
+                runCatching { rec.release() }
+            }
+            if (prepared != null) break
         }
-        val width = (w / 2) * 2     // encoders require even dimensions
-        val height = (h / 2) * 2
-
-        val rec = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(this)
-                  else @Suppress("DEPRECATION") MediaRecorder()
-        recorder = rec // release even if prepare fails
-        rec.apply {
-            setVideoSource(MediaRecorder.VideoSource.SURFACE)
-            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-            setVideoSize(width, height)
-            setVideoFrameRate(30)
-            setVideoEncodingBitRate(5_000_000)
-            setOutputFile(output.absolutePath)
-            prepare()
-        }
+        val rec = checkNotNull(prepared) { "No supported H.264 screen encoder; use frame recording" }
         recorder = rec
-
         val mpm = getSystemService(MediaProjectionManager::class.java)
         val proj = mpm.getMediaProjection(resultCode, data)
         // Required on API 34+ before creating a VirtualDisplay.
         proj.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() { stopRecording() }
-        }, Handler(Looper.getMainLooper()))
+        }, captureHandler)
         projection = proj
 
         virtualDisplay = proj.createVirtualDisplay(
             "qalens-capture", width, height, metrics.densityDpi,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            rec.surface, null, null
+            rec.surface, null, captureHandler
         )
+        if (!QaLensSessionRecorder.isAwaitingVideo(output.absolutePath)) { stopRecording(); return }
         rec.start()
         QaLensSessionRecorder.onVideoStarted(output.absolutePath)
     }
@@ -154,14 +171,14 @@ class QaLensProjectionService : Service() {
         // A5: the task was swiped away (or removed) — the app can no longer drive the stop UI. Stop
         // the projection cleanly so the recorder finalizes (or falls back to frames) and isRecording
         // never strands true.
-        if (recorder != null || projection != null) runCatching { stopRecording() }
+        captureHandler.post { stopRecording() }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         // A5: service torn down while the projection is still active (system reclaim / task removal)
         // — stop and hand the result back to the recorder so isRecording flips false.
-        if (recorder != null || projection != null) runCatching { stopRecording() }
+        captureHandler.post { stopRecording(); captureThread.quitSafely() }
     }
 
     private fun startForegroundCompat() {

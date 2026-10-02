@@ -101,3 +101,8 @@ device/app profiles and run locally configured processing pipelines. Release/no-
 
 On the phone, use two fingers to scroll in inspect/tag mode, and drag **Move inspector** to reposition
 the filters and selected-node card. Bubble/dock movement follows physical screen directions in RTL.
+
+The [local desktop launcher](tools/local-bridge/README.md) embeds the existing replay viewers alongside
+phone pairing, Compose inspection, saved components, processing pipelines and adb/file tools.
+[Long sessions and bug clips](docs/RECORDING_CLIPS.md) adds retrospective 10/20/60-second/custom marks
+without stopping capture, plus opt-in finished-recording collection on your PC.

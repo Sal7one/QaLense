@@ -2,6 +2,22 @@
 
 ## Unreleased — post-0.9.0
 
+### Desktop launcher and retrospective bug clips — 2026-10-02
+- Embed the existing modern/classic web clients directly in the Python GUI, with onboarding choices,
+  sticky Back/Start, browser history and viewport-aware replay. Keep one source for reader/viewers.
+- Add common connection-guarded adb actions, optional installed scrcpy and bounded Downloads push/pull.
+  Discover finished recordings; explicitly copy/open or opt into new-session/clip collection on this
+  connection. Stream privately, deduplicate by SHA-256 and reset automatic collection on failures/switches.
+- Add `saveRecentClip` in active/no-op APIs and presets/custom intervals beside REC. Continue capture
+  while marking; save independent `.sal` clips after stop with recent-buffer evidence and aligned
+  keyframe video. Preserve master keep-earliest journals and disclose coverage/budget losses.
+- Replace the five-minute stop with a configured duration (default hour), duration-aware JPEG/video
+  sampling/bitrate and media/clip/history limits. Move recorder setup/stop and cleanup off main;
+  check encoder alignment/ranges, fall back sizes and reject videos without readable samples.
+- Verify API 36 real consent, HD master/clip replay, late evidence after log overflow, >5-minute
+  continuity, GUI collection/file round trips and existing safety/integration/load checks. Full-hour,
+  physical-phone encoder/TalkBack and actual scrcpy checks remain open; see the current handover.
+
 ### PC component workbench — 2026-10-02
 - Add Send to PC beside Copy test tag, with asynchronous bounded memory previews, acknowledgement,
   overflow accounting and stop/disable cleanup. Capture public semantics attributes, values, bounds

@@ -2,7 +2,7 @@
 
 Updated 2026-10-02. This is the authoritative handover for a contributor or AI with no prior
 conversation context. It covers the tester flow, local backend, Compose inspection and data hooks
-through `a16ca21`, plus the continuous-log responsiveness and local PC bridge/inspector movement and component workbench work below. Check `git status` and `git log` because code and publication state
+through `a16ca21`, plus the continuous-log responsiveness and local PC bridge/inspector movement component workbench, desktop launcher and retrospective clip work below. Check `git status` and `git log` because code and publication state
 may have changed. Historical claims in CHANGELOG are not a current verification matrix.
 
 ## Product and user priorities
@@ -48,6 +48,7 @@ iOS capture and native Ktor/Cronet/Apollo adapters are not. Generic transport ca
 | [Integration](integration.md) | Host-app setup, including instructions for AI integrators |
 | [OSS integrations](docs/OSS_INTEGRATIONS.md) | Supported Chucker, transport, Timber and crash-reporter contracts |
 | [SAL format](docs/SAL_FORMAT.md) | Archive versions, compression, tracks, timestamps and reader differences |
+| [Long sessions and clips](docs/RECORDING_CLIPS.md) | Mark/export timing, encoder/media/evidence budgets and opt-in desktop collection |
 | [Recording retention](docs/RECORDING_RETENTION.md) | Recording-owned journal budgets and evidence-loss accounting |
 | [Overlay design](docs/OVERLAY_DESIGN.md) | Token coverage and remaining UI migration |
 | [Contributing](CONTRIBUTING.md) | Portable build/test/device commands and distribution workflow |
@@ -277,6 +278,43 @@ roots; touch forwarding stays within the host Activity content window.
   PC Save wrote the actual JSON file, and browser download completion remains to check in Chrome/Safari.
 
 The [workbench guide](tools/local-bridge/README.md) owns usage, storage, API and processor limits.
+
+## Desktop launcher and retrospective clips — 2026-10-02
+
+- The Python GUI now starts with Replay / Connect / Inspect / Collect choices, Back/browser-history
+  navigation and direct embedding of both `web/` viewers from their existing source files. Replay
+  occupies the available viewport and pauses video on leaving. Saved files survive desktop restarts.
+- Add connection-guarded Back/Home/Wake/Settings and optional installed scrcpy lifecycle. Bounded
+  32 MiB file push/pull operates only through phone Downloads and private PC transfer storage.
+- Explicit finished-recording discovery/copy/Open replay and opt-in new-recording polling use the
+  existing device pairing. Transfer streams into private SHA-256 `.sal` files (400 MiB / 60 seconds)
+  with basic ZIP/manifest limits; replay validates tracks/checksums. Automatic copy is off by default,
+  not persisted, baseline-based and disabled after a connection switch/disconnect/failure.
+- `saveRecentClip(seconds, label)` and the REC window's ★ Clip menu mark presets 10/20/60s or a
+  custom 1–300s interval without stopping. A bounded independent recent journal avoids starvation
+  after main keep-earliest budgets fill. Clips export after stop with matching media/observations;
+  H.264 remuxing starts at the preceding keyframe and records actual/requested provenance.
+- Default duration becomes 60 minutes (builder 1–180), replacing the five-minute cap. JPEGs use
+  duration-aware sampling and 3,600-frame / 192 MiB bounds; video has 650 fallback frames, adaptive
+  bitrate and a 240 MiB ceiling. Saved archives retain 30 files / 1 GiB. Media/evidence eviction is
+  disclosed. Marks have count/evidence/pinned-media budgets. Abrupt-death recovery remains unimplemented.
+- MediaRecorder preparation/stop, clip IO/remuxing and capture cleanup run off main. Actual encoder
+  capability checks choose aligned resolutions with fallback; a readable sample is required before
+  selecting video over frame fallback. Stop controls now use weak View references and detach normally.
+- Verification: 177 core, 30 Compose, 2 no-op and 5 replay unit tests; 18 Python proxy/workbench/desktop
+  cases; existing web reader/CLI and 23 backend cases; sample debug/release/androidTest and
+  sample/independent-consumer release isolation passed. Latest Compose/Android/sample lint has zero
+  errors, 25 warnings and 2 informational findings. The full API 36 runner passed its existing
+  recording/privacy/observer/bridge/gesture/replay/upload checks; continuous logging produced 3,305
+  background observations with a worst 21 ms main heartbeat.
+- Focused emulator checks passed consent approval/denial and readable HD master/clip tracks, preset/custom controls, no stop at mark,
+  recent logs after a 12,000-line burst, post-mark exclusion and >5-minute frame continuity. A copied
+  clip decoded and played in the embedded browser at 862×1920. GUI automatic completion collection,
+  restart/library, Back/demo replay and synthetic Downloads push/pull preserved bytes.
+- Full-hour endurance, physical phones/rotation/encoder vendors/TalkBack and real scrcpy mirroring
+  remain unverified. `scrcpy` is absent on this host; subprocess argv/owned cleanup are regression-tested.
+  Reader version/ZIP/gzip contracts remain v2; additive clip/media/retention metadata is documented
+  in [recording clips](docs/RECORDING_CLIPS.md), which owns current limits and acceptance commands.
 
 ## What changed recently
 

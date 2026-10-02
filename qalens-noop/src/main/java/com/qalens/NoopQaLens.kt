@@ -112,6 +112,7 @@ object QaLens {
     fun takeScreenshot(share: Boolean = true) = Unit
     fun restartActivity() = Unit
     fun startRecording(video: Boolean = false) = Unit
+    fun saveRecentClip(seconds: Int = 20, label: String = "Bug clip") { }
     fun stopRecording() = Unit
     fun toggleRecording() = Unit
     fun refreshRecordings() = Unit

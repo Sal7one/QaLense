@@ -201,3 +201,43 @@ phone button transfers, queue overflow/ack/restart, main timeout cancellation, d
 LTR/RTL gestures. Python checks cover hashing/dedup/restart, profiles/no-reset, local API controls,
 connection freshness and real pipeline success/failure/timeout/shutdown/output paths. Physical
 phones, TalkBack, other Compose versions and Windows processor cleanup remain unverified.
+
+## Desktop launcher, replay and phone tasks
+
+`--gui` starts on a choice screen: Replay evidence, Connect a phone, Inspect components or Collect
+recordings. Sticky Back/Start and browser history navigate between pages; leaving Replay pauses its
+video. Modern and classic replay load directly from the repository's `web/` source files through
+an explicit asset allowlist, so fixes to those viewers apply here too. File picking/drop, timeline,
+comparisons and the `.appsal` editor remain the existing web client's features. The shell and
+viewers share one localhost origin; viewer preferences/recents use that origin's browser storage.
+
+Devices & apps includes phone Back/Home/Wake, Android settings and the existing explicit no-reset
+launch. Start mirror launches **your installed `scrcpy`** in a separate window, using this profile's
+serial and adb executable. Stop mirror/disconnect/server exit closes the owned process. If scrcpy
+is absent the GUI reports how to enable it; this tool does not download/install it. No external
+mirror is embedded or remote-exposed. scrcpy launch was covered by the argv contract; real mirroring
+requires installed scrcpy and remains unverified on this host.
+
+Push explicitly chooses a browser file, up to 32 MiB, and writes `/sdcard/Download/<filename>`;
+an existing same-name phone file is replaced. Names allow only letters/numbers/dot/dash/underscore.
+Pull accepts one similarly named file under Downloads and writes a random-prefixed private PC file
+under `transfers/`. Arbitrary device paths, shell commands, resets and uninstall operations are
+not exposed. These actions require the current connection nonce; they never operate on a new
+phone using a stale page's request. adb operations time out after 10 seconds.
+
+Recordings lists completed device `.sal` files and offers explicit Copy to PC / Open replay.
+Automatic copy is opt-in, watches new completed files only after enabling, is not persisted,
+and resets on device changes or failures. Archives stream over the authenticated device bridge
+into private `recordings/<sha256>.sal` files; metadata remembers the original filename/app.
+Transfer is bounded to 400 MiB / 60 seconds, basic ZIP/manifest budgets are checked before
+publication, and the replay reader performs full track/checksum validation. A slow/failed transfer
+leaves no `.partial` file. Discovery contains filenames/sizes only, and runs without rescanning
+semantics. This can copy unmasked video when its producer opted in; review capture permissions.
+See [recording clips](../../docs/RECORDING_CLIPS.md) for Android usage, timings and coverage.
+
+Added authenticated PC APIs: GET `/api/recordings/device`, `/api/recordings/local`,
+`/api/recordings/file?id=<sha256>`; POST `/api/recordings/receive` (`name`, `connectionId`),
+`/api/adb` (`action`, `connectionId`, optional `remote`); POST `/api/file/push` (raw bytes,
+`X-Qalens-File`, `X-Qalens-Connection`). Device GET `/v1/recordings` and
+`/v1/recordings/<generated-name>.sal` require the same bearer pairing. Binary copying uses an IO
+worker with a 60-second deadline; it can occupy the bridge's single client slot until done.

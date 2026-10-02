@@ -59,8 +59,13 @@ internal object QaLensLocalBridge {
                             }
                             socket.soTimeout = 3_000
                             socket.tcpNoDelay = true
-                            val deadline = scope.launch { delay(6_000); runCatching { socket.close() } }
-                            try { serve(socket, token, generation) } finally { deadline.cancel() }
+                            val transferring = java.util.concurrent.atomic.AtomicBoolean(false)
+                            val deadline = scope.launch {
+                                delay(6_000)
+                                if (transferring.get()) delay(54_000)
+                                runCatching { socket.close() }
+                            }
+                            try { serve(socket, token, generation) { transferring.set(true) } } finally { deadline.cancel() }
                             synchronized(this@QaLensLocalBridge) { if (client === socket) client = null }
                         }
                     }
@@ -76,11 +81,37 @@ internal object QaLensLocalBridge {
         }
     }
 
-    private suspend fun serve(socket: Socket, token: String, generation: Long) {
+    private suspend fun serve(socket: Socket, token: String, generation: Long, transferring: () -> Unit) {
         var status = 200
         val body = try {
             val request = QaLensBridgeProtocol.read(socket.getInputStream(), token)
+            if (request.method == "GET" && request.path.startsWith("/v1/recordings/")) {
+                if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
+                val name = request.path.removePrefix("/v1/recordings/")
+                if (!name.matches(Regex("(?:session|clip)_[A-Za-z0-9_]+\\.sal"))) throw QaLensBridgeFailure(400, "Invalid recording name")
+                val context = QaLens.appContext ?: throw QaLensBridgeFailure(503, "No app context")
+                val file = java.io.File(QaLensSessionRecorder.recordingsDir(context), name)
+                if (!file.isFile || file.length() > 400L * 1024 * 1024) throw QaLensBridgeFailure(404, "Recording unavailable")
+                transferring()
+                file.inputStream().use { input ->
+                    val output = socket.getOutputStream()
+                    output.write(("HTTP/1.1 200 Bridge\r\nContent-Type: application/octet-stream\r\nContent-Length: ${input.channel.size()}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n").toByteArray())
+                    input.copyTo(output, 128 * 1024); output.flush()
+                }
+                return
+            }
             when {
+                request.method == "GET" && request.path == "/v1/recordings" -> {
+                    if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
+                    val context = QaLens.appContext ?: throw QaLensBridgeFailure(503, "No app context")
+                    mapOf("ok" to true, "recording" to QaLens.state.value.isRecording,
+                        "saving" to QaLens.state.value.isSavingRecording,
+                        "items" to (QaLensSessionRecorder.recordingsDir(context).listFiles()
+                            ?.filter { it.isFile && it.name.matches(Regex("(?:session|clip)_[A-Za-z0-9_]+\\.sal")) }
+                            ?.sortedByDescending { it.lastModified() }?.take(30)?.map {
+                                mapOf("name" to it.name, "size" to it.length(), "finishedAtMillis" to it.lastModified())
+                            } ?: emptyList<Map<String, Any>>()))
+                }
                 request.method == "GET" && request.path == "/v1/snapshot" -> snapshot(generation)
                 request.method == "GET" && request.path == "/v1/events" -> observations(generation)
                 request.method == "GET" && request.path == "/v1/components/inbox" -> {

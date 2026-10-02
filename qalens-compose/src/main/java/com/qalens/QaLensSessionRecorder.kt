@@ -28,12 +28,12 @@ import java.util.zip.ZipOutputStream
 internal object QaLensSessionRecorder {
 
     private const val FPS = 2
-    private const val MAX_FRAMES = 600          // ~5 min at 2fps
+    private const val MAX_FRAMES = 3_600          // Leaves room for structured entries within the shared ZIP budget.
     private const val MAX_FRAME_WIDTH = 720
-    private const val MAX_SAVED_SAL = 5
+    private const val MAX_SAVED_SAL = 30
     private const val WATCHDOG_TIMEOUT_MS = 10_000L // A5: auto-cancel if no frame for 10s
     private const val WATCHDOG_TICK_MS = 2_000L       // A5: watchdog polls every 2s
-    private val intervalMs = 1000L / FPS
+    private var intervalMs = 1000L / FPS
 
     private val handler = Handler(Looper.getMainLooper())
     private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
@@ -56,6 +56,7 @@ internal object QaLensSessionRecorder {
 
     /** True while a recording uses the floating system-window chip (overlay stays fully hidden). */
     val usesSystemChip: Boolean get() = systemChipMode
+    internal val captureStartedAt: Long get() = startMs
     private val mediaLock = Any()
     @Volatile private var frameCounter = 0
     private val frameIndex = linkedMapOf<Long, String>()
@@ -65,6 +66,17 @@ internal object QaLensSessionRecorder {
     private var stopMs = 0L
     private var sessionDir: File? = null
     private var videoFile: File? = null
+    private var frameBytes = 0L
+    private var omittedFrames = 0L
+    private var maxDurationMs = 3_600_000L
+    private data class Clip(val window: RecordingClipWindow.Window, val label: String, val dir: File,
+        val captured: RecordingEvidenceStore.Snapshot, val state: QaLensUiState, val frames: Map<Long, String>,
+        val omittedFrames: Long)
+    private val clips = mutableListOf<Clip>()
+    private var clipCount = 0
+    private var clipEvidenceBytes = 0L
+    private var clipMediaBytes = 0L
+
 
     // A5: Watchdog — poll every 2s; auto-cancel the recording if no frame arrives for
     // WATCHDOG_TIMEOUT_MS (screen may be FLAG_SECURE, or capture stalled).
@@ -91,14 +103,12 @@ internal object QaLensSessionRecorder {
             // Capture PixelCopy frames in BOTH modes. In video mode they're a SAFETY NET: if
             // MediaProjection produces an empty/unplayable video.mp4 (common on emulators and
             // locked-down encoders) the .sal still replays from frames instead of "no frames".
-            if (frameCounter < MAX_FRAMES && System.currentTimeMillis() - startMs < 300_000L) {
-                captureFrame()
-            } else {
-                QaLens.log("Recording hit ${MAX_FRAMES}-frame cap; stopping.")
-                stop()
-                return
+            if (System.currentTimeMillis() - startMs >= maxDurationMs) {
+                QaLens.log("Recording reached configured duration limit; saving.")
+                stop(); return
             }
-            handler.postDelayed(this, if (videoMode) 500L else intervalMs)
+            captureFrame()
+            handler.postDelayed(this, if (videoMode) 1000L else intervalMs)
         }
     }
 
@@ -120,6 +130,9 @@ internal object QaLensSessionRecorder {
         shareWhenSaved = true
         savingStarted = false
         frameCounter = 0
+        frameBytes = 0; omittedFrames = 0; clipCount = 0; clipEvidenceBytes = 0; clipMediaBytes = 0; clips.clear()
+        maxDurationMs = QaLens.config.value.recordingMaxDurationMinutes.coerceIn(1, 180) * 60_000L
+        intervalMs = maxOf(500L, maxDurationMs / MAX_FRAMES)
         frameIndex.clear()
         evidence = null
         capturedEvidence = null
@@ -163,7 +176,7 @@ internal object QaLensSessionRecorder {
 
     private fun startEvidence() {
         startMs = System.currentTimeMillis()
-        evidence = RecordingEvidenceStore(startMs)
+        evidence = RecordingEvidenceStore.withRecent(startMs)
     }
 
     private fun freezeEvidence() {
@@ -228,7 +241,7 @@ internal object QaLensSessionRecorder {
         }
         videoMode = false
         QaLens.setRecording(false)
-        discarded?.deleteRecursively()
+        discarded?.let { writer.execute { it.deleteRecursively() } }
         QaLens.log("Recording discarded.")
     }
 
@@ -304,7 +317,7 @@ internal object QaLensSessionRecorder {
             restoreOverlay()
             QaLens.setRecording(false)
             QaLens.log("Screen recording permission denied — recording cancelled.")
-            sessionDir?.deleteRecursively()
+            sessionDir?.let { discarded -> writer.execute { discarded.deleteRecursively() } }
             sessionDir = null
         }
     }
@@ -332,12 +345,13 @@ internal object QaLensSessionRecorder {
         QaLensScreenCapture.captureFrame(activity, manageOverlay = false) { bmp ->
             if (bmp == null) { capturing = false; return@captureFrame }
             // Serialize media writes with archive writes, but never compress or wait for disk on main.
+            val capturedAt = System.currentTimeMillis()
             writer.execute {
                 var scaled: Bitmap? = null
                 try {
                     if (!lifecycle.acceptsFrame(id) || !QaLens.config.value.enabled) return@execute
                     scaled = scale(bmp)
-                    val ts = System.currentTimeMillis()
+                    val ts = capturedAt
                     val name = "frames/%06d.jpg".format(frameCounter + 1)
                     val file = File(dir, name)
                     FileOutputStream(file).use { check(scaled.compress(Bitmap.CompressFormat.JPEG, 60, it)) }
@@ -346,6 +360,14 @@ internal object QaLensSessionRecorder {
                             frameCounter++
                             frameIndex[ts] = name
                             lastFrameTimestamp = ts
+                            frameBytes += file.length()
+                            val cap = if (videoMode) 650 else MAX_FRAMES
+                            while (frameIndex.size > cap || frameBytes > 192L * 1024 * 1024) {
+                                val oldest = frameIndex.entries.first()
+                                val obsolete = File(dir, oldest.value)
+                                frameBytes -= obsolete.length(); obsolete.delete()
+                                frameIndex.remove(oldest.key); omittedFrames++
+                            }
                         } else file.delete()
                     }
                 } catch (failure: Exception) {
@@ -392,130 +414,45 @@ internal object QaLensSessionRecorder {
         val endMs = stopMs
         val startMs = this.startMs
         val frameIndex = synchronized(mediaLock) { this.frameIndex.toMap() }
-        val stateSamples = captured.stateSamples
         val videoStartMs = this.videoStartMs
         if (Looper.myLooper() == Looper.getMainLooper()) QaLensFrameMetrics.flushPending()
         val s = RecordingWindow.slice(captured.applyTo(QaLens.state.value), startMs, endMs)
         val storageContext = activity ?: QaLens.appContext
         val save = Runnable {
             try {
-                val windowEvents = s.events.filter { it.timestampMillis >= startMs }
-                val windowNetwork = s.networkEvents.filter { it.timestampMillis >= startMs }
-                val timeline = TimelineMerger.merge(windowEvents, windowNetwork, cfg)
-
-                // Derived insight over the recorded window (warnings are the at-stop snapshot).
-                val buildIssues = s.buildSafety?.issues ?: emptyList()
-                val score = ReleaseReadinessEngine.score(s.warnings, s.screen, windowNetwork, buildIssues, cfg.slowNetworkThresholdMs, s.frameMetrics)
-                val classification = BugClassifier.classify(windowNetwork, s.warnings, s.screen.history, cfg.slowNetworkThresholdMs, buildIssues)
-                val repro = ReproStepGenerator.generate(timeline)
-
-                // Machine-readable digest + self-describing guide → every .sal is AI-ready on arrival.
-                val sessionCrashes = s.crashes
-                    .filter { it.timestampMillis in startMs..endMs }
-                val sessionFrameMetrics = s.frameMetrics.filter { it.timestampMillis in startMs..endMs }
-                val sessionConnectivity = s.connectivityTransitions.filter { it.timestampMillis in startMs..endMs }
-                val analysisJson = QaLensAnalysis.digest(
-                    coverage = QaLensAnalysis.Coverage(
-                        hasFrames = !usingVideo && frameIndex.isNotEmpty(),
-                        hasVideo = usingVideo,
-                        networkInterceptorInstalled = s.networkAvailable,
-                        networkCount = windowNetwork.size,
-                        logCount = windowEvents.size,
-                        stateCount = stateSamples.size,
-                        crashCount = sessionCrashes.size,
-                        frameMetricsCount = sessionFrameMetrics.size,
-                        connectivityCount = sessionConnectivity.size,
-                        networkCaptureEnabled = cfg.captureNetwork,
-                        logCaptureEnabled = cfg.captureLogs,
-                        networkFromChucker = false,
-                        networkSources = s.networkSources.toList(),
-                        recordingRetention = captured.retention
-                    ),
-                    startMillis = startMs,
-                    endMillis = endMs,
-                    network = windowNetwork,
-                    events = windowEvents,
-                    timeline = timeline,
-                    stateSamples = stateSamples,
-                    classification = classification,
-                    config = cfg,
-                    crashes = sessionCrashes,
-                    frameMetrics = sessionFrameMetrics,
-                    connectivityTransitions = sessionConnectivity
-                )
-
-                // Every track except manifest.json (whose checksum depends on the file list — keep it out
-                // of files[] to avoid a self-referential crc32).
-                val texts = mapOf(
-                    "summary.json" to SalTracks.summary(score, classification, repro, cfg),
-                    "timeline.json" to SalTracks.timeline(timeline, cfg),
-                    "network.json" to SalTracks.network(windowNetwork, cfg),
-                    "logs.json" to SalTracks.logs(windowEvents, cfg),
-                    "state.json" to SalTracks.state(stateSamples, cfg),
-                    "crashes.json" to SalTracks.crashes(sessionCrashes, cfg),
-                    "performance.json" to SalTracks.performance(sessionFrameMetrics, cfg),
-                    "connectivity.json" to SalTracks.connectivity(sessionConnectivity),
-                    "memory.json" to SalTracks.memory(s.memorySamples.filter { it.timestampMillis in startMs..endMs }),
-                    "marks.json" to SalTracks.marks(s.bookmarks.filter { it.timestampMillis in startMs..endMs }),
-                    "analysis.json" to analysisJson,
-                    "for_ai.md" to QaLensAnalysis.aiGuide(),
-                    "report.txt" to (captured.retention.notes().takeIf { it.isNotEmpty() }
-                        ?.joinToString("\n", prefix = "Recording coverage:\n", postfix = "\n\n") ?: "") + QaLensReports.full(EvidenceBuilder.build(
-                        snapshot = InspectionSnapshot(screen = s.screen, device = s.device, nodes = s.nodes,
-                            warnings = s.warnings, testTags = s.nodes.mapNotNull { it.testTag }, events = windowEvents),
-                        network = windowNetwork, config = cfg, featureFlags = s.featureFlags,
-                        networkInterceptorInstalled = s.networkAvailable, slowThresholdMs = cfg.slowNetworkThresholdMs,
-                        dataSources = s.dataSources, frameMetrics = sessionFrameMetrics
-                    ), cfg)
-                )
-
-                val frameRelPaths = if (usingVideo) emptyList() else frameIndex.values.toList()
-                val extras = if (usingVideo) mapOf("video.mp4" to video!!) else emptyMap()
-
-                // R9 v2: compute per-entry checksums (of uncompressed content) before building the manifest.
-                val framesDir = File(dir, "frames")
-                val fileEntries = buildFileEntries(texts, framesDir, frameRelPaths, extras)
-
-                val manifest = SalManifest(
-                    formatVersion = 2,
-                    createdAtMillis = endMs,
-                    appName = s.device.appName,
-                    appVersion = s.device.appVersion,
-                    buildVariant = s.device.buildVariant,
-                    environment = s.device.environment,
-                    gitSha = s.device.gitSha,
-                    device = "${s.device.manufacturer} ${s.device.deviceModel}",
-                    androidVersion = s.device.androidVersion,
-                    startMillis = startMs,
-                    endMillis = endMs,
-                    fps = if (usingVideo) 30 else FPS,
-                    frameIndex = if (usingVideo) emptyMap() else frameIndex,
-                    files = fileEntries.map { it.name },
-                    counts = mapOf(
-                        "frames" to if (usingVideo) 0 else frameIndex.size,
-                        "network" to windowNetwork.size,
-                        "logs" to windowEvents.size,
-                        "timeline" to timeline.size
-                    ),
-                    videoFile = if (usingVideo) "video.mp4" else null,
-                    videoStartMillis = if (usingVideo) videoStartMs else null,
-                    sessionId = java.util.UUID.randomUUID().toString(),
-                    sdkInt = s.device.sdkVersion,
-                    locale = java.util.Locale.getDefault().toString(),
-                    timezone = java.util.TimeZone.getDefault().id,
-                    screenWidthDp = s.device.screenWidthDp,
-                    screenHeightDp = s.device.screenHeightDp,
-                    density = s.device.density,
-                    fontScale = s.device.fontScale
-                )
-                val manifestJson = SalTracks.manifest(manifest, fileEntries)
-
-                val salDir = recordingsDir(checkNotNull(storageContext) { "No app context to save recording" })
-                val target = File(salDir, "session_$startMs.sal")
-                writeSalZip(target, manifestJson, texts, framesDir, frameRelPaths, extras)
+                val checkedVideo = video?.takeIf { candidate -> runCatching {
+                    val extractor = android.media.MediaExtractor()
+                    try {
+                        extractor.setDataSource(candidate.absolutePath)
+                        val track = (0 until extractor.trackCount).firstOrNull { extractor.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+                        check(track != null); extractor.selectTrack(track); check(extractor.sampleTime >= 0)
+                    } finally { extractor.release() }
+                }.isSuccess }
+                if (video != null && checkedVideo == null) QaLens.log("Encoded video has no readable samples; saving frame fallback.")
+                val target = exportArchive(dir, storageContext, cfg, s, captured, startMs, endMs,
+                    frameIndex, checkedVideo, videoStartMs, "session_$startMs.sal", omittedFrames)
+                var preserveSources = false
+                for (clip in synchronized(clips) { clips.toList() }) {
+                    try {
+                        val trimmed = checkedVideo?.let { runCatching { QaLensVideoClip.cut(it, File(clip.dir, "video.mp4"),
+                            maxOf(0, clip.window.startMillis - (videoStartMs ?: startMs)),
+                            maxOf(0, clip.window.endMillis - (videoStartMs ?: startMs))) }.getOrElse { QaLens.log("Clip video unavailable; using sampled frames: ${it.message}"); null } }
+                        val actualStart = trimmed?.let { (videoStartMs ?: startMs) + it.startOffsetMillis } ?: clip.window.startMillis
+                        val clipState = RecordingWindow.slice(clip.state, actualStart, clip.window.endMillis)
+                        val samples = clip.captured.stateSamples
+                        val initial = samples.lastOrNull { it.timestampMillis <= actualStart }?.copy(timestampMillis = actualStart)
+                        val frozen = clip.captured.copy(stateSamples = listOfNotNull(initial) + samples.filter { it.timestampMillis > actualStart && it.timestampMillis <= clip.window.endMillis })
+                        exportArchive(clip.dir, storageContext, cfg, clipState, frozen, actualStart, clip.window.endMillis,
+                            clip.frames, trimmed?.file, if (trimmed != null) actualStart else null,
+                            "clip_${clip.window.endMillis}_${clip.dir.name}.sal", clip.omittedFrames, clip.window, clip.label)
+                    } catch (failure: Exception) {
+                        preserveSources = true
+                        QaLens.pushError(ErrorKind.RECORDING, "Clip could not be saved; source retained: ${failure.message}")
+                    }
+                }
                 val sizeNote = if (usingVideo) "video" else "${frameIndex.size} frames"
                 QaLens.log("Recording saved: ${target.name} ($sizeNote, ${(endMs - startMs) / 1000}s)")
-                trimRetention(salDir, dir)
+                trimRetention(recordingsDir(checkNotNull(storageContext)), dir, preserveSources)
                 handler.post {
                     videoMode = false
                     sessionDir = null
@@ -536,6 +473,192 @@ internal object QaLensSessionRecorder {
         }
         // A crash must finish before the process dies; normal saves never block the UI thread.
         if (crash != null) save.run() else writer.execute(save)
+    }
+
+    private fun exportArchive(dir: File, storageContext: android.content.Context?, cfg: QaLensConfig,
+        s: QaLensUiState, captured: RecordingEvidenceStore.Snapshot, startMs: Long, endMs: Long,
+        frameIndex: Map<Long, String>, video: File?, videoStartMs: Long?, fileName: String, omittedMedia: Long,
+        clipWindow: RecordingClipWindow.Window? = null, clipLabel: String = ""): File {
+        val usingVideo = video != null
+        val stateSamples = captured.stateSamples
+        val windowEvents = s.events.filter { it.timestampMillis >= startMs }
+        val windowNetwork = s.networkEvents.filter { it.timestampMillis >= startMs }
+        val timeline = TimelineMerger.merge(windowEvents, windowNetwork, cfg)
+
+        // Derived insight over the recorded window (warnings are the at-stop snapshot).
+        val buildIssues = s.buildSafety?.issues ?: emptyList()
+        val score = ReleaseReadinessEngine.score(s.warnings, s.screen, windowNetwork, buildIssues, cfg.slowNetworkThresholdMs, s.frameMetrics)
+        val classification = BugClassifier.classify(windowNetwork, s.warnings, s.screen.history, cfg.slowNetworkThresholdMs, buildIssues)
+        val repro = ReproStepGenerator.generate(timeline)
+
+        // Machine-readable digest + self-describing guide → every .sal is AI-ready on arrival.
+        val sessionCrashes = s.crashes
+            .filter { it.timestampMillis in startMs..endMs }
+        val sessionFrameMetrics = s.frameMetrics.filter { it.timestampMillis in startMs..endMs }
+        val sessionConnectivity = s.connectivityTransitions.filter { it.timestampMillis in startMs..endMs }
+        val analysisJson = QaLensAnalysis.digest(
+            coverage = QaLensAnalysis.Coverage(
+                hasFrames = !usingVideo && frameIndex.isNotEmpty(),
+                hasVideo = usingVideo,
+                networkInterceptorInstalled = s.networkAvailable,
+                networkCount = windowNetwork.size,
+                logCount = windowEvents.size,
+                stateCount = stateSamples.size,
+                crashCount = sessionCrashes.size,
+                frameMetricsCount = sessionFrameMetrics.size,
+                connectivityCount = sessionConnectivity.size,
+                networkCaptureEnabled = cfg.captureNetwork,
+                logCaptureEnabled = cfg.captureLogs,
+                networkFromChucker = false,
+                networkSources = s.networkSources.toList(),
+                recordingRetention = if (!usingVideo && omittedMedia > 0) captured.retention.copy(tracks = captured.retention.tracks +
+                    ("media" to RecordingEvidenceStore.TrackCoverage(omittedMedia + frameIndex.size, frameIndex.size, omittedMedia, 0, 0, RecordingEvidenceStore.Limit(MAX_FRAMES, 192L * 1024 * 1024)))) else captured.retention
+            ),
+            startMillis = startMs,
+            endMillis = endMs,
+            network = windowNetwork,
+            events = windowEvents,
+            timeline = timeline,
+            stateSamples = stateSamples,
+            classification = classification,
+            config = cfg,
+            crashes = sessionCrashes,
+            frameMetrics = sessionFrameMetrics,
+            connectivityTransitions = sessionConnectivity
+        )
+
+        // Every track except manifest.json (whose checksum depends on the file list — keep it out
+        // of files[] to avoid a self-referential crc32).
+        val texts = mapOf(
+            "summary.json" to SalTracks.summary(score, classification, repro, cfg),
+            "timeline.json" to SalTracks.timeline(timeline, cfg),
+            "network.json" to SalTracks.network(windowNetwork, cfg),
+            "logs.json" to SalTracks.logs(windowEvents, cfg),
+            "state.json" to SalTracks.state(stateSamples, cfg),
+            "crashes.json" to SalTracks.crashes(sessionCrashes, cfg),
+            "performance.json" to SalTracks.performance(sessionFrameMetrics, cfg),
+            "connectivity.json" to SalTracks.connectivity(sessionConnectivity),
+            "memory.json" to SalTracks.memory(s.memorySamples.filter { it.timestampMillis in startMs..endMs }),
+            "marks.json" to SalTracks.marks(s.bookmarks.filter { it.timestampMillis in startMs..endMs }),
+            "analysis.json" to org.json.JSONObject(analysisJson).apply {
+                getJSONObject("coverage").put("media", org.json.JSONObject(mapOf(
+                    "omittedFrames" to if (usingVideo) 0 else omittedMedia,
+                    "sampleIntervalMillis" to if (videoMode) 1000L else intervalMs,
+                    "note" to if (usingVideo) "Unmasked video; encoding quality depends on session duration budget." else "Sampled frames; older frames may be omitted by disk/count budgets.")))
+                clipWindow?.let { put("clip", org.json.JSONObject(mapOf("label" to cfg.redact(clipLabel),
+                    "requestedSeconds" to it.requestedSeconds, "markedAtMillis" to it.endMillis,
+                    "requestedStartMillis" to it.startMillis, "actualStartMillis" to startMs,
+                    "note" to "Video begins at a preceding keyframe. Retention counters describe the recent buffer lifetime, including observations outside this clip."))) }
+            }.toString(),
+            "for_ai.md" to QaLensAnalysis.aiGuide(),
+            "report.txt" to (if (!usingVideo && omittedMedia > 0) "Media coverage: $omittedMedia older frames omitted.\n\n" else "") + (captured.retention.notes().takeIf { it.isNotEmpty() }
+                ?.joinToString("\n", prefix = "Recording coverage:\n", postfix = "\n\n") ?: "") + QaLensReports.full(EvidenceBuilder.build(
+                snapshot = InspectionSnapshot(screen = s.screen, device = s.device, nodes = s.nodes,
+                    warnings = s.warnings, testTags = s.nodes.mapNotNull { it.testTag }, events = windowEvents),
+                network = windowNetwork, config = cfg, featureFlags = s.featureFlags,
+                networkInterceptorInstalled = s.networkAvailable, slowThresholdMs = cfg.slowNetworkThresholdMs,
+                dataSources = s.dataSources, frameMetrics = sessionFrameMetrics
+            ), cfg)
+        )
+
+        val frameRelPaths = if (usingVideo) emptyList() else frameIndex.values.distinct()
+        val extras = if (usingVideo) mapOf("video.mp4" to video!!) else emptyMap()
+
+        // R9 v2: compute per-entry checksums (of uncompressed content) before building the manifest.
+        val framesDir = File(dir, "frames")
+        val fileEntries = buildFileEntries(texts, framesDir, frameRelPaths, extras)
+
+        val manifest = SalManifest(
+            formatVersion = 2,
+            createdAtMillis = endMs,
+            appName = s.device.appName,
+            appVersion = s.device.appVersion,
+            buildVariant = s.device.buildVariant,
+            environment = s.device.environment,
+            gitSha = s.device.gitSha,
+            device = "${s.device.manufacturer} ${s.device.deviceModel}",
+            androidVersion = s.device.androidVersion,
+            startMillis = startMs,
+            endMillis = endMs,
+            fps = if (usingVideo) 30 else FPS,
+            frameIndex = if (usingVideo) emptyMap() else frameIndex,
+            files = fileEntries.map { it.name },
+            counts = mapOf(
+                "frames" to if (usingVideo) 0 else frameIndex.size,
+                "network" to windowNetwork.size,
+                "logs" to windowEvents.size,
+                "timeline" to timeline.size
+            ),
+            videoFile = if (usingVideo) "video.mp4" else null,
+            videoStartMillis = if (usingVideo) videoStartMs else null,
+            sessionId = java.util.UUID.randomUUID().toString(),
+            sdkInt = s.device.sdkVersion,
+            locale = java.util.Locale.getDefault().toString(),
+            timezone = java.util.TimeZone.getDefault().id,
+            screenWidthDp = s.device.screenWidthDp,
+            screenHeightDp = s.device.screenHeightDp,
+            density = s.device.density,
+            fontScale = s.device.fontScale
+        )
+        val manifestJson = SalTracks.manifest(manifest, fileEntries)
+
+        val salDir = recordingsDir(checkNotNull(storageContext) { "No app context to save recording" })
+        val target = File(salDir, fileName)
+        writeSalZip(target, manifestJson, texts, framesDir, frameRelPaths, extras)
+        return target
+    }
+
+    /** Main-thread mark only schedules IO; the master recorder remains capturing. */
+    fun markClip(seconds: Int, label: String) {
+        if (lifecycle.phase != RecordingLifecycle.Phase.CAPTURING) {
+            clipError("Start recording before marking a clip."); return
+        }
+        if (seconds !in 1..300 || clipCount >= 20) {
+            clipError("Use 1–300 seconds; at most 20 clips per session."); return
+        }
+        QaLensFrameMetrics.flushPending()
+        val safeLabel = QaLens.config.value.redact(label.take(256))
+        QaLens.addBookmark(safeLabel, BookmarkSeverity.BUG)
+        val window = RecordingClipWindow.at(startMs, maxOf(startMs, System.currentTimeMillis()), seconds)
+        val store = evidence ?: return
+        val state = QaLens.state.value
+        val root = sessionDir ?: return
+        val id = lifecycle.sessionId
+        val ordinal = ++clipCount
+        writer.execute {
+            try {
+                if (id != lifecycle.sessionId || sessionDir != root) return@execute
+                val captured = store.recentSnapshot() ?: return@execute
+                val dir = File(root, "clip_${startMs}_$ordinal").apply { mkdirs() }
+                File(dir, "frames").mkdirs()
+                val frames = synchronized(mediaLock) {
+                    val before = frameIndex.entries.lastOrNull { it.key <= window.startMillis }
+                    frameIndex.filterKeys { it in window.startMillis..window.endMillis }.toMutableMap().apply {
+                        before?.let { put(window.startMillis, it.value) }
+                    }
+                }
+                val estimated = captured.retention.tracks.values.sumOf { it.estimatedBytes }
+                val media = frames.values.distinct().sumOf { File(root, it).length() }
+                check(clipEvidenceBytes + estimated <= 32L * 1024 * 1024 && clipMediaBytes + media <= 128L * 1024 * 1024) {
+                    "Clip evidence/media capacity reached; main recording continues"
+                }
+                frames.values.distinct().forEach { rel -> File(root, rel).copyTo(File(dir, rel), overwrite = true) }
+                if (id != lifecycle.sessionId || sessionDir != root || !QaLens.config.value.enabled) {
+                    dir.deleteRecursively(); return@execute
+                }
+                clipEvidenceBytes += estimated; clipMediaBytes += media
+                synchronized(clips) { clips += Clip(window, safeLabel, dir, captured,
+                    captured.applyTo(state), frames, omittedFrames) }
+                handler.post { android.widget.Toast.makeText(QaLens.appContext, QaLens.appContext?.getString(com.qalens.compose.R.string.qalens_clip_marked, seconds) ?: "Clip marked", android.widget.Toast.LENGTH_SHORT).show() }
+            } catch (failure: Exception) {
+                clipError("Could not mark clip: ${failure.message}")
+            }
+        }
+    }
+
+    private fun clipError(message: String) {
+        QaLens.pushError(ErrorKind.RECORDING, message)
+        handler.post { QaLens.appContext?.let { android.widget.Toast.makeText(it, message, android.widget.Toast.LENGTH_LONG).show() } }
     }
 
     private fun fileCrc32(file: File): String {
@@ -618,13 +741,16 @@ internal object QaLensSessionRecorder {
 
     /** Frees space: deletes this session's media dir only after a successful save,
      *  and keeps only the newest [MAX_SAVED_SAL] `.sal` files. */
-    private fun trimRetention(salDir: File, currentSessionDir: File) {
+    private fun trimRetention(salDir: File, currentSessionDir: File, preserveSources: Boolean = false) {
         runCatching {
-            currentSessionDir.deleteRecursively()
+            if (!preserveSources) currentSessionDir.deleteRecursively()
+            var keptBytes = 0L
             salDir.listFiles { f -> f.isFile && f.name.endsWith(".sal") }
                 ?.sortedByDescending { it.lastModified() }
-                ?.drop(MAX_SAVED_SAL)
-                ?.forEach { it.delete() }
+                ?.forEachIndexed { index, file ->
+                    if (index >= MAX_SAVED_SAL || keptBytes + file.length() > 1024L * 1024 * 1024) file.delete()
+                    else keptBytes += file.length()
+                }
         }
     }
 

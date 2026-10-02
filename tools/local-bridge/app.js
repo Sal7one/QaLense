@@ -13,15 +13,27 @@ async function api(path, command) {
 }
 async function perform(work) {
   if (busy) return;
-  busy = true; document.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  busy = true; document.querySelectorAll('button:not([data-tab]):not(#back)').forEach(b => { b.disabled = true; });
   try { await work(); } catch (error) { status(error.message); }
-  finally { busy = false; document.querySelectorAll('button').forEach(b => { b.disabled = false; }); componentButtons(); }
+  finally { busy = false; document.querySelectorAll('button').forEach(b => { b.disabled = false; }); componentButtons(); $('back').disabled = location.hash === '#home'; }
 }
-function tab(id) {
+const pageNames = {home: 'Start', inspect: 'Inspector', devices: 'Devices & apps', library: 'Saved components', automation: 'Automation', recordings: 'Recordings', replay: 'Replay viewer'};
+function tab(id, push = true) {
+  if (!pageNames[id]) id = 'home';
+  if (push && location.hash !== `#${id}`) history.pushState({qalens: true}, '', `#${id}`);
   document.querySelectorAll('.page').forEach(page => { page.hidden = page.id !== id; });
   document.querySelectorAll('[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === id));
+  $('page-label').textContent = pageNames[id];
+  document.body.classList.toggle('replaying', id === 'replay');
+  window.scrollTo({top: 0});
+  $('back').disabled = id === 'home';
+  $('viewer').contentWindow?.postMessage({type: 'qalens-visibility', visible: id === 'replay'}, location.origin);
 }
 document.querySelectorAll('[data-tab]').forEach(button => { button.onclick = () => tab(button.dataset.tab); });
+$('back').onclick = () => { if (history.state?.qalens) history.back(); else tab('home', false); };
+window.addEventListener('popstate', () => tab(location.hash.slice(1), false));
+history.replaceState({qalens: false}, '', location.hash || '#home');
+tab(location.hash.slice(1), false);
 function button(text, onclick, parent, className = '') {
   const element = document.createElement('button'); element.textContent = text; element.onclick = onclick; element.className = className; parent.append(element); return element;
 }
@@ -110,6 +122,8 @@ function renderPreviews() {
 async function loadWorkbench() {
   workbench = await api('workbench');
   const connection = workbench.connection;
+  if (recordingConnection && recordingConnection !== workbench.connectionId) resetRecordingTransfer();
+  document.querySelector('[data-adb="mirror"]').title = workbench.scrcpyAvailable ? 'Start installed scrcpy' : 'Install scrcpy to enable this tool';
   $('connection').textContent = workbench.connected ? connection ? `${connection.serial} · Android ${connection.actualPlatformVersion} · ${connection.package}` : 'Terminal-paired bridge' : 'Not connected';
   $('storage').textContent = `Local storage: ${workbench.dataDir}`;
   $('profiles').replaceChildren();
@@ -188,12 +202,12 @@ $('packages-button').onclick = () => perform(async () => {
 $('pair').onclick = () => perform(async () => {
   const result = await api('connect', {profile: formProfile(), token: $('profile-token').value});
   $('profile-token').value = ''; snapshot = null; selected = null; render(); details();
-  await loadWorkbench(); tab('inspect'); $('receive').checked = true;
+  resetRecordingTransfer(); await loadWorkbench(); tab('inspect'); $('receive').checked = true;
   const expected = result.connection.platformVersion, actual = result.connection.actualPlatformVersion;
   status(`Forward connected. Start QaLens in the app, then refresh.${expected && expected !== actual ? ` Expected Android ${expected}; device is ${actual}.` : ''}`);
 });
 $('launch').onclick = () => perform(async () => { await api('launch', {}); status('Launch requested. App data preserved. Start its QaLens bridge if needed.'); });
-$('disconnect').onclick = () => perform(async () => { await api('disconnect', {}); $('receive').checked = false; $('profile-token').value = ''; snapshot = null; selected = null; render(); details(); await loadWorkbench(); status('Disconnected; saved files and profiles remain.'); });
+$('disconnect').onclick = () => perform(async () => { await api('disconnect', {}); resetRecordingTransfer(); $('receive').checked = false; $('profile-token').value = ''; snapshot = null; selected = null; render(); details(); await loadWorkbench(); status('Disconnected; saved files and profiles remain.'); });
 $('delete-profile').onclick = () => perform(async () => { if (!activeProfile) throw Error('Choose a saved profile first'); await api('profile/delete', {id: activeProfile.id}); activeProfile = null; await loadWorkbench(); status('Profile removed. App and saved components remain.'); });
 $('import-profile').onclick = () => perform(async () => { const result = await api('profile', {profile: JSON.parse($('capabilities').value)}); fillProfile(result.profile); await loadWorkbench(); $('capabilities').value = ''; status(result.notice); });
 $('reload-saved').onclick = () => perform(saved); $('reload-jobs').onclick = () => perform(loadWorkbench); $('pipeline').onchange = componentButtons;
@@ -210,4 +224,79 @@ setInterval(async () => {
   } catch (error) { $('receive').checked = false; status(`${error.message} Receive paused; reconnect and enable it to retry.`); }
   finally { polling = false; }
 }, 2500);
-perform(async () => { session = (await api('bootstrap')).session; await loadWorkbench(); await loadPreviews(); await saved(); status('Workbench ready. Start the app bridge, pair a device, and capture a component.'); });
+perform(async () => { session = (await api('bootstrap')).session; await loadWorkbench(); await loadPreviews(); await saved(); status('Ready. Choose what you want to do. Recordings transfer only when you choose.'); });
+
+let recordingConnection = '', knownRecordings = new Set(), recordingPolling = false;
+function resetRecordingTransfer() { $('auto-recordings').checked = false; recordingConnection = ''; knownRecordings.clear(); $('phone-recordings').replaceChildren(); }
+async function localRecordings() {
+  const result = await api('recordings/local'); $('pc-recordings').replaceChildren();
+  if (!result.items.length) $('pc-recordings').textContent = 'No recordings copied yet.';
+  for (const entry of result.items) button(`${entry.app || 'Recording'} · ${entry.name} · ${(entry.size / 1048576).toFixed(1)} MiB · Open replay`, () => perform(() => openRecording(entry.id)), $('pc-recordings'), 'node');
+}
+let viewerLoaded = false;
+$('viewer').addEventListener('load', () => { viewerLoaded = true; });
+async function openRecording(id) {
+  const response = await fetch(`/api/recordings/file?id=${encodeURIComponent(id)}`, {headers: {'X-Qalens-Session': session}, cache: 'no-store'});
+  if (!response.ok) throw Error('Saved recording unavailable');
+  const file = await response.arrayBuffer();
+  tab('replay');
+  if (!viewerLoaded) await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(Error('Replay viewer is still loading; try opening again')), 10000);
+    $('viewer').addEventListener('load', () => { clearTimeout(timeout); resolve(); }, {once:true});
+  });
+  $('viewer').contentWindow.postMessage({type: 'qalens-recording', name: `${id}.sal`, bytes: file}, location.origin, [file]);
+  status('Recording opened.');
+}
+async function copyRecording(name, connectionId = workbench.connectionId) {
+  status(`Copying ${name} to PC…`);
+  const result = await api('recordings/receive', {name, connectionId});
+  knownRecordings.add(name);
+  status(`${result.duplicate ? 'Already saved' : 'Saved to PC'} · ${name} · ${(result.size / 1048576).toFixed(1)} MiB`);
+  await localRecordings(); return result;
+}
+async function phoneRecordings(auto = false) {
+  const connectionId = workbench.connectionId;
+  const result = await api('recordings/device');
+  if (result.connectionId !== connectionId || workbench.connectionId !== connectionId) throw Error('Device changed during recording discovery; refresh before copying');
+  $('recording-state').textContent = result.recording ? 'Phone is recording. Bug clips save after the session stops.' : result.saving ? 'Phone is saving; waiting for completed files.' : 'Phone is ready. Completed archives appear below.';
+  $('phone-recordings').replaceChildren();
+  for (const entry of result.items) {
+    const line = documentElement('div', 'toolbar'); $('phone-recordings').append(line);
+    const label = documentElement('span', ''); label.textContent = `${entry.name} · ${(entry.size / 1048576).toFixed(1)} MiB`; line.append(label);
+    button('Copy to PC', () => perform(() => copyRecording(entry.name, connectionId)), line);
+  }
+  if (auto) for (const entry of result.items) if (!knownRecordings.has(entry.name)) await copyRecording(entry.name, connectionId);
+  return result;
+}
+$('auto-recordings').onchange = () => {
+  if (busy || recordingPolling) { resetRecordingTransfer(); status('Wait for the current operation, then enable recording transfer.'); return; }
+  perform(async () => {
+  if (!$('auto-recordings').checked) { recordingConnection = ''; return; }
+  try {
+    await loadWorkbench(); if (!workbench.connected) throw Error('Connect a phone first');
+    const current = await phoneRecordings(); knownRecordings = new Set(current.items.map(entry => entry.name));
+    recordingConnection = workbench.connectionId; status('Automatic transfer enabled for new recordings on this connection. Existing recordings require Copy.');
+  } catch (error) { resetRecordingTransfer(); throw error; }
+});
+};
+$('refresh-recordings').onclick = () => perform(() => phoneRecordings());
+$('refresh-local-recordings').onclick = () => perform(localRecordings);
+setInterval(async () => {
+  if (!$('auto-recordings').checked || !recordingConnection || busy || recordingPolling || document.hidden) return;
+  recordingPolling = true;
+  try { await loadWorkbench(); if ($('auto-recordings').checked) await phoneRecordings(true); }
+  catch (error) { resetRecordingTransfer(); status(`${error.message} Recording transfer paused; choose it again to retry.`); }
+  finally { recordingPolling = false; }
+}, 5000);
+for (const button of document.querySelectorAll('[data-adb]')) button.onclick = () => perform(async () => {
+  const result = await api('adb', {action: button.dataset.adb, connectionId: workbench.connectionId}); status(result.notice);
+});
+$('pull-file').onclick = () => perform(async () => { status((await api('adb', {action: 'pull', remote: $('pull-path').value, connectionId: workbench.connectionId})).notice); });
+$('push-file').onchange = event => perform(async () => {
+  const file = event.target.files[0]; if (!file) return;
+  if (file.size > 32 * 1048576) throw Error('File exceeds 32 MiB');
+  const response = await fetch('/api/file/push', {method: 'POST', headers: {'X-Qalens-Session': session, 'X-Qalens-Connection': workbench.connectionId, 'X-Qalens-File': file.name}, body: file});
+  const result = await response.json(); if (!response.ok) throw Error(result.error); status(result.notice); event.target.value = '';
+});
+$('viewer-modern').onclick = () => { viewerLoaded = false; $('viewer').src = '/web/index-v2.html?desktop'; status('Modern replay viewer selected.'); };
+$('viewer-classic').onclick = () => { viewerLoaded = false; $('viewer').src = '/web/index.html?desktop'; status('Classic replay viewer selected.'); };

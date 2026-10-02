@@ -285,7 +285,7 @@
     const warnings = [];
     for (const [name, track] of Object.entries(recording.tracks || {})) {
       if (Number(track.dropped) > 0)
-        warnings.push(`${name}: ${track.dropped} observations omitted, ${track.retained} retained.`);
+        warnings.push(`${recording.policy === "keep-latest-buffer" ? "Recent buffer lifetime · " : ""}${name}: ${track.dropped} observations omitted, ${track.retained} retained.`);
     }
     if (recording.truncated && !warnings.length) warnings.push("Recording evidence was truncated.");
     if (Number(recording.droppedFrameCallbacks) > 0)
@@ -302,6 +302,16 @@
       banner.style.cssText = "padding:12px 16px;background:#382b12;color:#ffe4a3;border:1px solid #967039;border-radius:8px;margin:8px;line-height:1.5;grid-column:1/-1";
       container.prepend(banner);
     }
+    let clipBanner = container.querySelector(".recording-clip");
+    const candidate = session.analysis?.clip;
+    const clip = candidate && typeof candidate === "object" && typeof candidate.label === "string" && Number.isInteger(candidate.requestedSeconds) && candidate.requestedSeconds >= 1 && candidate.requestedSeconds <= 300 ? candidate : null;
+    if (!clipBanner) {
+      clipBanner = document.createElement("div"); clipBanner.className = "recording-clip";
+      clipBanner.style.cssText = "padding:12px 16px;background:#16283e;color:#bedcff;border-radius:8px;margin:8px;grid-column:1/-1";
+      container.prepend(clipBanner);
+    }
+    clipBanner.hidden = !clip;
+    clipBanner.textContent = clip ? `Bug clip · ${String(clip.label || "Marked moment").slice(0, 256)} · requested last ${clip.requestedSeconds}s. Video may begin earlier at its preceding keyframe; timestamps match the exported window.` : "";
     const coverage = recordingCoverage(session);
     banner.hidden = !coverage.partial;
     banner.textContent = coverage.partial ? "Partial recording — " + coverage.warnings.join(" ") + " Conclusions cover captured evidence only." : "";

@@ -16,6 +16,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from workbench import Workbench, MAX_DOCUMENT
+from desktop import WEB_ROOT, WEB_ASSETS, MAX_TRANSFER
+from urllib.parse import urlsplit, parse_qs
+import mimetypes
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -50,7 +53,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "close")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+        # Existing replay permits explicit user-configured backend sends; shell APIs remain same-origin.
+        connect = "'self' http: https:" if self.path.startswith("/web/") else "'self'"
+        self.send_header("Content-Security-Policy", f"default-src 'self'; script-src 'self'; style-src 'self'; connect-src {connect}; frame-src 'self'; media-src 'self' blob:; img-src 'self' blob: data:; font-src 'self' data:; style-src-attr 'unsafe-inline'; frame-ancestors 'self'")
         self.end_headers()
         self.wfile.write(data)
         self.close_connection = True
@@ -69,6 +74,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {"ok": False, "error": "Loopback Host required"})
         if self.headers.get("Origin") not in {None, f"http://127.0.0.1:{port}", f"http://localhost:{port}"}:
             return self.reply(403, {"ok": False, "error": "External browser origin denied"})
+        parsed = urlsplit(self.path)
+        if self.command == "GET" and parsed.path.startswith("/web/"):
+            name = parsed.path.removeprefix("/web/")
+            if name not in WEB_ASSETS: return self.reply(404, {"ok": False, "error": "Unknown viewer asset"})
+            return self.reply(200, (WEB_ROOT / name).read_bytes(), mimetypes.guess_type(name)[0] or "application/octet-stream")
         assets = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8")}
         if self.command == "GET" and self.path in assets:
             name, mime = assets[self.path]
@@ -76,23 +86,44 @@ class Handler(BaseHTTPRequestHandler):
         bench = self.server.workbench
         if bench and self.command == "GET" and self.path == "/api/bootstrap":
             return self.reply(200, {"ok": True, "session": bench.session})
-        endpoints = {("GET", "/api/snapshot"): "/v1/snapshot", ("GET", "/api/events"): "/v1/events", ("POST", "/api/command"): "/v1/command", ("POST", "/api/component"): "/v1/component", ("GET", "/api/inbox"): "/v1/components/inbox"}
+        endpoints = {("GET", "/api/recordings/device"): "/v1/recordings", ("GET", "/api/snapshot"): "/v1/snapshot", ("GET", "/api/events"): "/v1/events", ("POST", "/api/command"): "/v1/command", ("POST", "/api/component"): "/v1/component", ("GET", "/api/inbox"): "/v1/components/inbox"}
         route = endpoints.get((self.command, self.path))
-        if not route and not (bench and self.path in WORKBENCH_ROUTES):
+        binary = parsed.path == "/api/recordings/file"
+        if not route and not (bench and (self.path in WORKBENCH_ROUTES or binary)):
             return self.reply(404, {"ok": False, "error": "Unknown endpoint"})
         desktop = bench and hmac.compare_digest(self.headers.get("X-Qalens-Session", "").encode(), bench.session.encode())
         device = self.server.token and hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode())
         if not (desktop or device):
             return self.reply(401, {"ok": False, "error": "Enter the device pairing token"})
+        if binary and self.command == "GET" and bench:
+            try:
+                path = bench.desktop.recording(parse_qs(parsed.query).get("id", [""])[0])
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(path.stat().st_size))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                with path.open("rb") as stream: shutil.copyfileobj(stream, self.wfile, 128 * 1024)
+                self.close_connection = True
+            except ValueError as error: return self.reply(400, {"ok": False, "error": str(error)})
+            return
         if len(self.headers.get_all("Content-Length", [])) > 1 or self.headers.get("Transfer-Encoding"):
             return self.reply(400, {"ok": False, "error": "Duplicate lengths/chunking unsupported"})
         try:
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             return self.reply(400, {"ok": False, "error": "Invalid content length"})
-        limit = MAX_DOCUMENT + 4096 if self.path == "/api/import" else MAX_BODY
+        limit = MAX_TRANSFER if self.path == "/api/file/push" else MAX_DOCUMENT + 4096 if self.path == "/api/import" else MAX_BODY
         if not 0 <= size <= limit:
             return self.reply(413, {"ok": False, "error": "Command too large"})
+        if self.path == "/api/file/push" and self.command == "POST" and bench:
+            try:
+                data = self.rfile.read(size)
+                if len(data) != size: raise ValueError("Incomplete file upload")
+                return self.reply(200, bench.desktop.push({"name": self.headers.get("X-Qalens-File", ""),
+                    "connectionId": self.headers.get("X-Qalens-Connection", "")}, data))
+            except (ValueError, OSError) as error: return self.reply(400, {"ok": False, "error": str(error)[:256]})
         body = None
         if self.command == "POST":
             if not self.headers.get("Content-Type", "").startswith("application/json"):
@@ -116,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not desktop and not hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode()):
                     return self.reply(401, {"ok": False, "error": "Device pairing changed; connect again"})
                 code, payload = self.proxy(route, body, self.command)
-                if code == 200 and bench and self.path == "/api/snapshot": payload["connectionId"] = bench.connection_id
+                if code == 200 and bench and self.path in {"/api/snapshot", "/api/recordings/device"}: payload["connectionId"] = bench.connection_id
                 if code == 200 and bench and self.path == "/api/component":
                     payload = {"ok": True, "document": bench.preview(payload)}
                 elif code == 200 and bench and self.path == "/api/inbox":
@@ -157,11 +188,14 @@ class Handler(BaseHTTPRequestHandler):
                     return {"ok": True, "connected": bool(self.server.token), "connection": bench.connection,
                             "connectionId": bench.connection_id, "profiles": bench.profiles(), "dataDir": str(bench.root.resolve()),
                             "pipelines": [{"id": p["id"], "name": p.get("name", p["id"])} for p in bench.pipelines.values()],
-                            "jobs": list(bench.jobs.values())}
+                            "jobs": list(bench.jobs.values()), "scrcpyAvailable": bool(shutil.which("scrcpy"))}
+            if self.path == "/api/recordings/local": return bench.desktop.library()
             if self.path == "/api/saved": return bench.saved()
             if self.path == "/api/previews":
                 with bench.lock: return {"ok": True, "documents": list(bench.pending.values()), "omittedPreviews": bench.preview_dropped}
             raise ValueError("POST required")
+        if self.path == "/api/adb": return bench.desktop.task(body)
+        if self.path == "/api/recordings/receive": return bench.desktop.receive(self.server, body)
         if self.path == "/api/devices": return {"ok": True, "devices": bench.devices()}
         if self.path == "/api/packages":
             serial = body.get("serial", "")
@@ -195,7 +229,7 @@ class Handler(BaseHTTPRequestHandler):
 
 WORKBENCH_ROUTES = {"/api/workbench", "/api/saved", "/api/previews", "/api/devices", "/api/packages",
                     "/api/profile", "/api/profile/delete", "/api/connect", "/api/disconnect", "/api/launch",
-                    "/api/import", "/api/save", "/api/document", "/api/run", "/api/artifacts", "/api/artifact"}
+                    "/api/adb", "/api/file/push", "/api/recordings/local", "/api/recordings/receive", "/api/import", "/api/save", "/api/document", "/api/run", "/api/artifacts", "/api/artifact"}
 
 
 

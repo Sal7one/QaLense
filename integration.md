@@ -387,3 +387,13 @@ see the PC guide for schema, privacy, queue budgets and processor contracts.
 In inspect/tag mode, use **two fingers to scroll the host** and one tap to select/copy. Drag the
 **Move inspector** handle to move the filters/detail dock. Bubble and dock coordinates are physical
 and clamped above system navigation/keyboard bounds in both LTR and RTL.
+
+### Long sessions and bug clips
+
+The default duration is now 60 minutes, configurable through `recordingMaxDurationMinutes` (1–180).
+`saveRecentClip(seconds = 20, label = "Checkout failed")` marks a retrospective interval without
+stopping; REC → ★ Clip also provides 10/20/60-second presets and a custom duration. Clips become
+separate `.sal` files after normal stop. See [recording clips](docs/RECORDING_CLIPS.md) for budgets,
+keyframe timing, opt-in video/privacy, evidence coverage and opt-in PC collection. Both active and
+no-op facades expose the API; the no-op does nothing. Saved archives now retain at most 30 files /
+1 GiB, and host backup exclusions still apply.

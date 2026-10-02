@@ -16,6 +16,7 @@ class ConsumerApplication : Application() {
     private fun inspectionApiParity(view: View): Modifier {
         QaLens.startLocalBridge("synthetic-compile-only-0123456789")
         QaLens.stopLocalBridge()
+        QaLens.saveRecentClip(seconds = 20, label = "Compile-only clip")
         QaLens.localBridgeStatus.value
         QaLens.invalidateInspection()
         QaLens.registerComposeRoot(view)
@@ -33,7 +34,7 @@ class ConsumerApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        QaLens.configure { appName = "External consumer"; allowUnmaskedVideo = false; saveScreenshotsToGallery = false }
+        QaLens.configure { appName = "External consumer"; allowUnmaskedVideo = false; saveScreenshotsToGallery = false; recordingMaxDurationMinutes = 60; recordingClipPresetsSeconds = listOf(10, 20, 60) }
         QaLens.install(this)
         OkHttpClient.Builder().addInterceptor(QaLensOkHttpInterceptor()).build()
         Timber.plant(QaLensTimberTree())

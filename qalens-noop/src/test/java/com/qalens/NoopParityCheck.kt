@@ -68,6 +68,8 @@ object NoopParityCheck {
         q.restartActivity()
 
         // Recording
+        q.saveRecentClip()
+        q.saveRecentClip(60, "Synthetic clip")
         q.startRecording()
         q.stopRecording()
         q.toggleRecording()

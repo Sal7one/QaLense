@@ -78,3 +78,12 @@ archive validation, retention warnings and CLI behavior. Dated test results live
 `web/tools/make_sample.js` regenerates the synthetic demo using headless Chromium and
 `playwright-core` supplied through NODE_PATH. It is not needed for normal replay or reader tests.
 Keep both viewers usable over file:// drag-drop and HTTP; avoid absolute fetch paths.
+
+## Desktop embedding
+
+`python3 tools/local-bridge/server.py --gui` (from the repository root) serves these exact source
+files inside its Replay viewer page. Modern/classic viewer buttons and desktop Back preserve the
+existing reader/tooling; leaving the page pauses video. Explicitly copied phone recordings can be
+opened via a same-origin, parent-only `?desktop` message hook which calls the same `loadFile` path.
+Standalone operation is unchanged. Bug clips display their label/requested interval and conservative
+recent-buffer coverage; see [recording clips](../docs/RECORDING_CLIPS.md).

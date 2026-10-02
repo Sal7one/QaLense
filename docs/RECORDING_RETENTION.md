@@ -22,8 +22,9 @@ small entry from fitting. Tracks have independent budgets, so log floods cannot 
 | State | 1,000 | 2 MiB |
 
 The 28 MiB total is **estimated object/text accounting**, not a measured or guaranteed JVM heap
-ceiling. Entry budgets also bound collection overhead. Media retains its existing 600-frame /
-five-minute limit and is stored separately. Serialization and UI buffers consume additional memory.
+ceiling. Entry budgets also bound collection overhead. Media uses duration-aware sampling, count/byte bounds and disclosed eviction, and is stored
+separately. [Long sessions and clips](RECORDING_CLIPS.md) defines those limits, the independent
+recent buffer and retained clip budgets. Serialization and UI buffers consume additional memory.
 This journal is in memory: normal and handled-crash finalization export it, but abrupt process death
 or power loss can still lose structured tracks. Disk journaling/recovery is not implemented.
 
@@ -31,7 +32,8 @@ or power loss can still lose structured tracks. Disk journaling/recovery is not 
 
 SAL remains v2 and analysis remains `qalens-analysis/1`. `analysis.json.coverage.recording` adds:
 
-- `policy: "keep-earliest"` and `truncated` (true if a retention budget omitted observations).
+- `policy: "keep-earliest"` for the master, or `"keep-latest-buffer"` for a clip (counters describe
+  buffer lifetime, not exclusively that clip's window), and `truncated` (true if a retention budget omitted observations).
 - `droppedFrameCallbacks`: Android-reported missed frame-metrics callbacks delivered during the
   recording. Boundary callbacks may describe frames before recording began. This is not a count of
   dropped video frames, and zero does not prove all frames were observed.

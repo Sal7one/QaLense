@@ -7,7 +7,8 @@ package com.qalens
  * for objects; it is not a measurement of JVM heap usage. Export still applies configured redaction.
  * All admission, annotation edits and close operations share a lock. Late callbacks are ignored.
  */
-class RecordingEvidenceStore(private val startMillis: Long, private val limits: Map<String, Limit> = emptyMap()) {
+class RecordingEvidenceStore(private val startMillis: Long, private val limits: Map<String, Limit> = emptyMap(),
+    private val keepLatest: Boolean = false, private val recent: RecordingEvidenceStore? = null) {
     data class Limit(val entries: Int, val estimatedBytes: Long) {
         init { require(entries >= 0 && estimatedBytes >= 0) }
     }
@@ -21,7 +22,7 @@ class RecordingEvidenceStore(private val startMillis: Long, private val limits: 
             "maxEstimatedBytes" to limit.estimatedBytes
         )
     }
-    data class Retention(val tracks: Map<String, TrackCoverage>, val droppedFrameCallbacks: Long) {
+    data class Retention(val tracks: Map<String, TrackCoverage>, val droppedFrameCallbacks: Long, val policy: String = "keep-earliest") {
         val truncated: Boolean get() = tracks.values.any { it.dropped > 0 }
         fun notes(): List<String> = tracks.filterValues { it.dropped > 0 }.map { (name, c) ->
             "Recording $name limit reached: ${c.dropped} observations omitted; ${c.retained} retained. Conclusions cover retained evidence only."
@@ -29,7 +30,7 @@ class RecordingEvidenceStore(private val startMillis: Long, private val limits: 
             "Android reported $droppedFrameCallbacks dropped frame-metrics callbacks during recording; performance statistics are partial."
         ) else emptyList()
         fun asMap(): Map<String, Any> = mapOf(
-            "policy" to "keep-earliest", "truncated" to truncated,
+            "policy" to policy, "truncated" to truncated,
             "droppedFrameCallbacks" to droppedFrameCallbacks,
             "tracks" to tracks.mapValues { it.value.asMap() }
         )
@@ -41,14 +42,18 @@ class RecordingEvidenceStore(private val startMillis: Long, private val limits: 
             memorySamples = state.memorySamples, bookmarks = state.bookmarks
         )
     }
-    private class Track<T>(val limit: Limit) {
-        val items = mutableListOf<Pair<T, Long>>()
+    private class Track<T>(val limit: Limit, val keepLatest: Boolean) {
+        val items = java.util.ArrayDeque<Pair<T, Long>>()
         var observed = 0L
         var dropped = 0L
         var removed = 0L
         var bytes = 0L
         fun add(value: T, size: Long) {
             observed++
+            if (size > limit.estimatedBytes || limit.entries == 0) { dropped++; return }
+            if (keepLatest) while (items.isNotEmpty() && (items.size >= limit.entries || size > limit.estimatedBytes - bytes)) {
+                bytes -= items.removeFirst().second; dropped++
+            }
             if (items.size >= limit.entries || size > limit.estimatedBytes - bytes) { dropped++; return }
             items += value to size
             bytes += size
@@ -64,48 +69,56 @@ class RecordingEvidenceStore(private val startMillis: Long, private val limits: 
         fun coverage() = TrackCoverage(observed, items.size, dropped, removed, bytes, limit)
     }
     private fun limit(name: String, entries: Int, mib: Long = 2) = limits[name] ?: Limit(entries, mib * 1024 * 1024)
-    private val logs = Track<QaEvent>(limit("logs", 10_000))
-    private val network = Track<NetworkEvent>(limit("network", 2_000, 8))
-    private val crashes = Track<QaLensCrash>(limit("crashes", 100))
-    private val performance = Track<FrameMetricsSample>(limit("performance", 40_000, 8))
-    private val connectivity = Track<ConnectivitySnapshot>(limit("connectivity", 1_000))
-    private val memory = Track<MemorySample>(limit("memory", 2_000))
-    private val marks = Track<Bookmark>(limit("marks", 1_000))
-    private val state = Track<StateSample>(limit("state", 1_000))
+    private val logs = Track<QaEvent>(limit("logs", 10_000), keepLatest)
+    private val network = Track<NetworkEvent>(limit("network", 2_000, 8), keepLatest)
+    private val crashes = Track<QaLensCrash>(limit("crashes", 100), keepLatest)
+    private val performance = Track<FrameMetricsSample>(limit("performance", 40_000, 8), keepLatest)
+    private val connectivity = Track<ConnectivitySnapshot>(limit("connectivity", 1_000), keepLatest)
+    private val memory = Track<MemorySample>(limit("memory", 2_000), keepLatest)
+    private val marks = Track<Bookmark>(limit("marks", 1_000), keepLatest)
+    private val state = Track<StateSample>(limit("state", 1_000), keepLatest)
     private var closed: Snapshot? = null
     private var droppedCallbacks = 0L
     private fun accepts(timestamp: Long) = closed == null && timestamp >= startMillis
     private fun text(vararg values: String?): Long = values.sumOf { if (it == null) 0L else 48L + it.length.toLong() * 2 }
 
     @Synchronized fun event(value: QaEvent) {
+        if (closed == null) recent?.event(value)
         if (accepts(value.timestampMillis)) logs.add(value, 128 + text(value.message, value.tag))
     }
     @Synchronized fun network(value: NetworkEvent) {
+        if (closed == null) recent?.network(value)
         if (accepts(value.timestampMillis)) network.add(value, 256 + text(value.method, value.url,
             value.error, value.requestBodyPreview, value.responseBodyPreview))
     }
     @Synchronized fun crash(value: QaLensCrash) {
+        if (closed == null) recent?.crash(value)
         if (accepts(value.timestampMillis) && crashes.items.none { it.first == value })
             crashes.add(value, 128 + text(value.thread, value.throwable, value.stackTrace, value.screen, value.route, value.lastNetworkSummary))
     }
     @Synchronized fun frame(value: FrameMetricsSample) {
+        if (closed == null) recent?.frame(value)
         if (accepts(value.timestampMillis)) performance.add(value, 128)
     }
     @Synchronized fun droppedFrames(count: Int) {
-        if (closed == null) droppedCallbacks += count.coerceAtLeast(0).toLong()
+        if (closed == null) { droppedCallbacks += count.coerceAtLeast(0).toLong(); recent?.droppedFrames(count) }
     }
     @Synchronized fun connectivity(value: ConnectivitySnapshot) {
+        if (closed == null) recent?.connectivity(value)
         if (accepts(value.timestampMillis)) connectivity.add(value, 128)
     }
     @Synchronized fun memory(value: MemorySample) {
+        if (closed == null) recent?.memory(value)
         if (accepts(value.timestampMillis)) memory.add(value, 128 + text(value.trimLevel))
     }
     @Synchronized fun bookmark(value: Bookmark) {
+        if (closed == null) recent?.bookmark(value)
         if (accepts(value.timestampMillis)) marks.add(value, 128 + text(value.id, value.label))
     }
-    @Synchronized fun removeBookmark(id: String) { if (closed == null) marks.remove { it.id == id } }
-    @Synchronized fun clearBookmarks() { if (closed == null) marks.remove { true } }
+    @Synchronized fun removeBookmark(id: String) { if (closed == null) { marks.remove { it.id == id }; recent?.removeBookmark(id) } }
+    @Synchronized fun clearBookmarks() { if (closed == null) { marks.remove { true }; recent?.clearBookmarks() } }
     @Synchronized fun state(value: StateSample) {
+        if (closed == null) recent?.state(value)
         if (!accepts(value.timestampMillis)) return
         val size = 128 + text(value.screenName, value.route) +
             value.featureFlags.entries.sumOf { 64 + text(it.key) } +
@@ -113,14 +126,16 @@ class RecordingEvidenceStore(private val startMillis: Long, private val limits: 
                 128 + text(name) + entries.entries.sumOf { 64 + text(it.key, it.value) }
             }
         // Copy host-owned maps; subsequent host mutation must not rewrite captured evidence.
-        if (state.items.size >= state.limit.entries || size > state.limit.estimatedBytes - state.bytes) {
+        if (size > state.limit.estimatedBytes || state.limit.entries == 0 || (!keepLatest && (state.items.size >= state.limit.entries || size > state.limit.estimatedBytes - state.bytes))) {
             state.observed++; state.dropped++; return
         }
         state.add(value.copy(featureFlags = value.featureFlags.toMap(),
             dataSources = value.dataSources.mapValues { it.value.toMap() }), size)
     }
-    /** Freezes evidence at stop, before potentially slow video finalization / archive writing. */
-    @Synchronized fun close(): Snapshot {
+    /** Copies the independent recent buffer without closing capture. */
+    @Synchronized fun recentSnapshot(): Snapshot? = recent?.snapshot()
+
+    @Synchronized fun snapshot(): Snapshot {
         closed?.let { return it }
         val tracks = linkedMapOf("logs" to logs, "network" to network, "crashes" to crashes,
             "performance" to performance, "connectivity" to connectivity, "memory" to memory,
@@ -128,9 +143,25 @@ class RecordingEvidenceStore(private val startMillis: Long, private val limits: 
         val snapshot = Snapshot(QaLensUiState(events = logs.values(), networkEvents = network.values(),
             crashes = crashes.values(), frameMetrics = performance.values(), connectivityTransitions = connectivity.values(),
             memorySamples = memory.values(), bookmarks = marks.values()), state.values(),
-            Retention(tracks.mapValues { it.value.coverage() }, droppedCallbacks))
-        closed = snapshot
-        tracks.values.forEach { it.items.clear() }
+            Retention(tracks.mapValues { it.value.coverage() }, droppedCallbacks, if (keepLatest) "keep-latest-buffer" else "keep-earliest"))
         return snapshot
+    }
+    @Synchronized fun close(): Snapshot {
+        closed?.let { return it }
+        val result = snapshot()
+        closed = result
+        recent?.close()
+        listOf(logs, network, crashes, performance, connectivity, memory, marks, state).forEach { it.items.clear() }
+        return result
+    }
+
+    companion object {
+        /** Independent recent evidence survives full-session keep-earliest budget exhaustion. */
+        fun withRecent(startMillis: Long): RecordingEvidenceStore {
+            val recentLimits = mapOf("logs" to Limit(2_000, 1024 * 1024),
+                "network" to Limit(500, 2 * 1024 * 1024), "performance" to Limit(8_000, 1024 * 1024),
+                "state" to Limit(650, 1024 * 1024), "memory" to Limit(650, 256 * 1024))
+            return RecordingEvidenceStore(startMillis, recent = RecordingEvidenceStore(startMillis, recentLimits, keepLatest = true))
+        }
     }
 }

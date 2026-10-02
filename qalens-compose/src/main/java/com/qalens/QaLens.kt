@@ -719,6 +719,9 @@ object QaLens {
         QaLensSessionRecorder.start(activity, video)
     }
 
+    /** Mark the last 1–300 seconds without stopping. Saved as a separate .sal after session stop. */
+    fun saveRecentClip(seconds: Int = 20, label: String = "Bug clip") = onMain { QaLensSessionRecorder.markClip(seconds, label) }
+
     /** Stop recording, package the `.sal`, and open the share sheet. */
     fun stopRecording() = onMain { QaLensSessionRecorder.stop() }
 

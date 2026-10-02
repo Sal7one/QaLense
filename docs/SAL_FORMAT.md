@@ -52,9 +52,13 @@ values are relative to session start. `videoStartMillis` maps video position to 
 do not assume it equals the time the tester first requested consent. Frame index keys are epoch
 milliseconds and values are relative filenames; held frames may be reused.
 
-Android frames are approximately 2 fps, scaled to at most 720 pixels wide, JPEG quality 60, bounded
-by the recorder's 600-frame/five-minute limits. They cannot preserve every animation glitch.
-Video is host-opt-in and requires Android consent. Recorded pixels are not universally text-redacted:
+Android frames are scaled to at most 720 pixels wide, JPEG quality 60, with a duration-aware sample
+interval and 3,600-frame / 192 MiB retention budget. Video keeps 650 fallback frames.
+`analysis.coverage.media.sampleIntervalMillis` records the actual configured interval; manifest fps
+is the nominal capture target. The default hour samples frame mode about once per second. They cannot preserve every animation glitch.
+Video is host-opt-in and requires Android consent. Long video uses a duration-aware bitrate and
+240 MiB file limit. [Retrospective clips](RECORDING_CLIPS.md) retain format v2 and add optional
+`analysis.clip` provenance; they align timestamps to the preceding playable video keyframe. Recorded pixels are not universally text-redacted:
 Compose frame masks cover known sensitive regions; full-display video has no per-node masking.
 See [client privacy](CLIENT_SAFETY_FIXES.md).
 

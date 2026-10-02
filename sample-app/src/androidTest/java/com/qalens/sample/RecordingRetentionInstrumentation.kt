@@ -37,9 +37,17 @@ import java.util.zip.ZipFile
  * Exercises the real SDK observation hooks, UI clearing, async writer and Android ZIP producer.
  */
 class RecordingRetentionInstrumentation : Instrumentation() {
+    private var videoDenyOnly = false
+    private var clipsOnly = false
+    private var videoOnly = false
+    private var longSession = false
     private var bridgeOnly = false
     private var overlayLoadOnly = false
     override fun onCreate(arguments: Bundle?) {
+        videoDenyOnly = arguments?.getString("videoDenyOnly") == "true"
+        clipsOnly = arguments?.getString("clipsOnly") == "true"
+        videoOnly = arguments?.getString("videoOnly") == "true"
+        longSession = arguments?.getString("longSession") == "true"
         bridgeOnly = arguments?.getString("bridgeOnly") == "true"
         overlayLoadOnly = arguments?.getString("overlayLoadOnly") == "true"
         super.onCreate(arguments)
@@ -49,6 +57,16 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     override fun onStart() {
         val result = Bundle()
         try {
+            if (videoDenyOnly) {
+                RecordingClipChecks(this).denyVideo()
+                result.putString("stream", "\nOK: Real video consent denial leaves no archive, clears recording/saving and allows subsequent frame capture.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (clipsOnly || videoOnly) {
+                RecordingClipChecks(this).run(videoOnly, longSession)
+                result.putString("stream", "\nOK: Retrospective clip preserved recent evidence, excluded post-mark logs, kept master capture running and exported compatible media (video=$videoOnly, long=$longSession).\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             if (bridgeOnly) {
                 LocalBridgeChecks(this).run()
                 result.putString("stream", "\nOK: Local bridge semantics/actions/privacy/shutdown and LTR/RTL inspector gestures pass.\n")
