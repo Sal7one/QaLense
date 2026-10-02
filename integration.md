@@ -377,6 +377,13 @@ password values are excluded. Host privacy/allowlisting still govern ordinary te
 Actions report handler acceptance, not proof of a completed workflow. This is Compose automation
 inside your QA build, with no automatic capture or production service.
 
+The workbench also supports **Send to PC** beside Copy test tag: preview public component attributes,
+values and visible tree position, then explicitly save hashed JSON. Hidden/password/custom values
+follow the bridge's coverage rules. Device/package/activity profiles persist on the PC; pairing
+credentials stay in memory. Locally configured processors consume saved component documents from
+the GUI or `tools/local-bridge/process.py`. These exports are separate from `.sal` recording archives;
+see the PC guide for schema, privacy, queue budgets and processor contracts.
+
 In inspect/tag mode, use **two fingers to scroll the host** and one tap to select/copy. Drag the
 **Move inspector** handle to move the filters/detail dock. Bubble and dock coordinates are physical
 and clamped above system navigation/keyboard bounds in both LTR and RTL.

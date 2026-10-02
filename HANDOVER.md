@@ -2,7 +2,7 @@
 
 Updated 2026-10-02. This is the authoritative handover for a contributor or AI with no prior
 conversation context. It covers the tester flow, local backend, Compose inspection and data hooks
-through `a16ca21`, plus the continuous-log responsiveness and local PC bridge/inspector movement work below. Check `git status` and `git log` because code and publication state
+through `a16ca21`, plus the continuous-log responsiveness and local PC bridge/inspector movement and component workbench work below. Check `git status` and `git log` because code and publication state
 may have changed. Historical claims in CHANGELOG are not a current verification matrix.
 
 ## Product and user priorities
@@ -241,6 +241,42 @@ See the PC guide for exact limits and commands. The focused bridge/gesture runne
 Physical devices, TalkBack, separate-window gesture
 forwarding and Compose versions beyond 1.7.8 remain unverified. The endpoint reads registered dialog
 roots; touch forwarding stays within the host Activity content window.
+
+## PC component workbench — 2026-10-02
+
+- Inspector **Send to PC** sits beside Copy test tag and works for untagged components. Networking,
+  redaction/JSON and queue accounting run on IO; public semantics reads remain on main. Inbox is
+  memory-only (10 / 1 MiB); dropped counts, idempotent acknowledgements and stop cleanup are explicit.
+- `qalens.component` v1 documents include public attributes/values, bounds, package/activity,
+  viewport and visible ancestry/sibling indices. Unsupported/custom values/actions are name-only.
+  Known keys are matched by identity, preventing custom keys named Text from bypassing policy.
+  Password text and QA names are omitted; ancestry beyond the budget is conservatively value-masked.
+- The Python GUI supports pairing/device/package discovery, no-reset launch, remembered profiles,
+  incoming/readable/bounds previews, explicit content-addressed file save/import/export and a library.
+  Data defaults to `~/.qalens/bridge`; no tokens are persisted. Canonical content hashes exclude
+  timestamps/live IDs, normalize integral numbers and distinguish changes in values/tree position.
+  GUI commands require the current PC connection nonce after a device switch.
+- Local owner-configured argv processors run sequentially off the HTTP handler, with one pipeline
+  at a time, per-step timeouts and cancellation. Require saved input; output directory/result files
+  persist, with bounded UTF-8 GUI previews excluding outside paths/symlinks. `process.py` runs the
+  same contract without adb/browser. Processes use the owner's privileges, not a sandbox.
+- Validation: 172 core, 30 Compose and 2 no-op unit tests; 4 proxy + 7 workbench Python cases; JS syntax;
+  sample debug/release/androidTest, sample release isolation and independent-consumer debug/release/
+  isolation passed. Compose/Android/sample lint still reports zero errors, 26 existing warnings and
+  2 informational findings. No public facade or archive format changes.
+- The full disposable API 36 runner passed, including real phone button transfers, queue overflow,
+  non-destructive reads/ack/restart, private/custom/spoofed key exclusions and prior gestures and
+  integration/recording/replay/upload regressions. Its continuous-log case emitted 3,000 background
+  logs; worst measured main-thread heartbeat was 21 ms. The final focused runner separately passed
+  password QA-name protection after that addition. Physical devices/TalkBack/other Compose versions
+  and Windows processor cleanup remain unverified.
+- Real GUI → adb → sample testing verified profile reload after PC restart, capture, phone transfer,
+  readable attributes/tree/bounds, file deduplication, library/import and successful processor output.
+  Standalone processing CLI also succeeded. Desktop/narrow layouts were visually checked. The
+  Codex browser reported a Blob download request but did not provide a download completion event;
+  PC Save wrote the actual JSON file, and browser download completion remains to check in Chrome/Safari.
+
+The [workbench guide](tools/local-bridge/README.md) owns usage, storage, API and processor limits.
 
 ## What changed recently
 

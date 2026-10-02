@@ -17,6 +17,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.qalens.*
@@ -57,13 +59,15 @@ internal class LocalBridgeChecks(private val runner: Instrumentation) {
         val scroll = ScrollState(0)
         val field = mutableStateOf("initial")
         val taps = java.util.concurrent.atomic.AtomicInteger()
+        val privateKey = SemanticsPropertyKey<String>("HostCustomValue")
+        val spoofKey = SemanticsPropertyKey<String>("Text")
         runner.runOnMainSync {
-            QaLens.closePanel(); QaLens.setInspectMode(false)
+            QaLens.closePanel(); QaLens.setWatchMode(false); QaLens.setInspectMode(false)
             activity.setContent {
                 Column(Modifier.fillMaxSize().testTag("bridge.scroll").verticalScroll(scroll).padding(top = 70.dp, bottom = 100.dp)) {
-                    Text("Bridge target", Modifier.testTag("bridge.tap").clickable { taps.incrementAndGet() })
+                    Text("Bridge target", Modifier.testTag("bridge.tap").semantics { this[privateKey] = "custom-value-must-not-export"; this[spoofKey] = "spoofed-key-must-not-export" }.clickable { taps.incrementAndGet() })
                     OutlinedTextField(field.value, { field.value = it }, Modifier.testTag("bridge.field"))
-                    OutlinedTextField("never-export-password", {}, Modifier.testTag("bridge.password"), visualTransformation = PasswordVisualTransformation())
+                    OutlinedTextField("never-export-password", {}, Modifier.testTag("bridge.password").qaName("never-export-password"), visualTransformation = PasswordVisualTransformation())
                     Column(Modifier.qaHiddenFromReports()) { Text("hidden-secret", Modifier.testTag("bridge.hidden")) }
                     Text("Duplicate one", Modifier.testTag("bridge.duplicate").clickable { taps.incrementAndGet() })
                     Text("Duplicate two", Modifier.testTag("bridge.duplicate").clickable { taps.incrementAndGet() })
@@ -86,6 +90,40 @@ internal class LocalBridgeChecks(private val runner: Instrumentation) {
             check(command("tap", "bridge.duplicate").first == 409) { "Ambiguous tag silently chose a node" }
             check(command("tap", "bridge.hidden").first == 404)
             check(command("tap", "bridge.tap").first == 200 && taps.get() == 1)
+            check(call("component", JSONObject().put("tag", "bridge.duplicate")).first == 409)
+            check(call("component", JSONObject().put("tag", "bridge.hidden")).first == 404)
+            val document = call("component", JSONObject().put("tag", "bridge.tap")).second
+            check(document.getString("schema") == "qalens.component")
+            check(document.getJSONObject("content").getJSONObject("tree").getJSONArray("path").length() > 0)
+            check(document.toString().contains("HostCustomValue") && !document.toString().contains("custom-value-must-not-export") && !document.toString().contains("spoofed-key-must-not-export"))
+            val passwordDocument = call("component", JSONObject().put("tag", "bridge.password")).second.toString()
+            check(!passwordDocument.contains("never-export-password")) { "Component leaked password attributes" }
+            check(command("select", "bridge.tap").first == 200)
+            runner.waitForIdleSync()
+            waitFor("Send to PC button missing next to Copy test tag; selected=${QaLens.state.value.selectedNode?.testTag}") { find("Send to PC") != null }
+            val send = find("Send to PC") ?: error("Send to PC button vanished")
+            check(find("Copy test tag") != null)
+            var sendButton = send
+            while (!sendButton.isClickable && sendButton.parent != null) sendButton = sendButton.parent
+            check(sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            waitFor("Phone selection did not queue a component") { call("components/inbox").second.getJSONArray("transfers").length() == 1 }
+            val transferId = call("components/inbox").second.getJSONArray("transfers").getJSONObject(0).getString("id")
+            check(call("components/inbox").second.getJSONArray("transfers").length() == 1) { "Reading inbox consumed a transfer" }
+            val ack = JSONObject().put("ids", org.json.JSONArray().put(transferId))
+            check(call("components/ack", ack).first == 200 && call("components/ack", ack).first == 200)
+            check(call("components/inbox").second.getJSONArray("transfers").length() == 0)
+            repeat(12) { index ->
+                val control = find("Send to PC") ?: error("Transfer control vanished")
+                check(control.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+                waitFor("Transfer queue did not enforce admission index=$index") {
+                    val inbox = call("components/inbox").second
+                    inbox.getJSONArray("transfers").length() == minOf(index + 1, 10) && inbox.getInt("dropped") == maxOf(0, index - 9)
+                }
+            }
+            runner.runOnMainSync { QaLens.stopLocalBridge(); QaLens.startLocalBridge(token, port) }
+            waitFor("Restart after queue overflow failed") { QaLens.localBridgeStatus.value.startsWith("Listening") }
+            check(call("components/inbox").second.getJSONArray("transfers").length() == 0) { "Stop retained component previews" }
+            runner.runOnMainSync { QaLens.setInspectMode(false) }
             check(command("type", "bridge.field", "text" to "مرحبا QA").first == 200)
             waitFor("SetText did not reach host") { field.value == "مرحبا QA" }
             check(command("scroll", "bridge.scroll", "dy" to 200).first == 200)
@@ -144,6 +182,7 @@ internal class LocalBridgeChecks(private val runner: Instrumentation) {
             runner.runOnMainSync { QaLens.startLocalBridge(token, port) }
             waitFor("Bridge restart failed") { QaLens.localBridgeStatus.value.startsWith("Listening") }
             check(call("snapshot").first == 200)
+            check(call("components/inbox").second.getJSONArray("transfers").length() == 0) { "Restart retained old previews" }
         } finally {
             runner.runOnMainSync { QaLens.stopLocalBridge(); QaLens.setInspectMode(false); activity.window.decorView.layoutDirection = View.LAYOUT_DIRECTION_LTR }
         }

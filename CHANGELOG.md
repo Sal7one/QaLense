@@ -2,6 +2,22 @@
 
 ## Unreleased — post-0.9.0
 
+### PC component workbench — 2026-10-02
+- Add Send to PC beside Copy test tag, with asynchronous bounded memory previews, acknowledgement,
+  overflow accounting and stop/disable cleanup. Capture public semantics attributes, values, bounds
+  and visible ancestry/sibling context; omit hidden/password/custom values and protect spoofed keys.
+- Expand the browser GUI with component attributes/viewport preview, explicit JSON save/import/export,
+  a saved library and SHA-256 identity over stable content. Changed values/positions create new files;
+  timestamps/live IDs do not. Profiles remember phones/packages/activities without pairing credentials.
+- Add GUI adb discovery/package suggestions/owned forwarding and explicit no-reset launch. Import
+  selected Appium-style profile fields, report ignored driver/reset options and version mismatches.
+  Browser commands against a switched device require a new snapshot.
+- Add trusted local argv pipelines with saved inputs, background execution, timeouts, failure results,
+  cancellation and bounded output inspection. Include a summary processor and a browser-free CLI.
+- Cover protocol/workspace/profile/hash/pipeline behavior with Python regressions and real API 36
+  phone transfers, private/custom-key exclusions, queue overflow/ack/restart and existing gestures.
+  The full recording/integration/load runner passes; physical phones/Windows remain unverified.
+
 ### Local PC bridge and inspector movement — 2026-10-02
 - Add explicit `startLocalBridge` / `stopLocalBridge` and readiness state, mirrored by the release
   no-op. The authenticated device listener binds loopback, stops on disable, bounds requests and

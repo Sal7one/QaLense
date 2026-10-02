@@ -183,6 +183,8 @@ private fun InspectCanvas(
     }
     val context = LocalContext.current
     val config by QaLens.config.collectAsState()
+    val bridgeTransfer by QaLensBridgeComponents.status.collectAsState()
+    val bridgeStatus by QaLensLocalBridge.status.collectAsState()
 
     Box(
         Modifier
@@ -272,20 +274,29 @@ private fun InspectCanvas(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                node.testTag?.let { tag ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    node.testTag?.let { tag ->
+                                        Text(
+                                            "Copy test tag", color = colors.accent, fontSize = 12.sp,
+                                            modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
+                                                .clickable(role = Role.Button) {
+                                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                                        as android.content.ClipboardManager
+                                                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("QaLens test tag", tag))
+                                                }
+                                                .padding(vertical = 10.dp)
+                                        )
+                                    }
                                     Text(
-                                        "Copy test tag",
-                                        color = colors.accent,
+                                        "Send to PC",
+                                        color = if (bridgeStatus.startsWith("Listening")) colors.accent else colors.fg2,
                                         fontSize = 12.sp,
                                         modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
-                                            .clickable(role = Role.Button) {
-                                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                                                    as android.content.ClipboardManager
-                                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("QaLens test tag", tag))
-                                            }
+                                            .clickable(role = Role.Button) { QaLensLocalBridge.sendComponent(node.id) }
                                             .padding(vertical = 10.dp)
                                     )
                                 }
+                                if (bridgeTransfer.isNotBlank()) Text(bridgeTransfer, color = colors.fg2, fontSize = 11.sp)
                             }
                         }
                     }

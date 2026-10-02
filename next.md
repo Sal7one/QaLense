@@ -3,6 +3,21 @@
 Updated 2026-10-02. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Completed 2026-10-02: PC component workbench
+
+- [x] Send a selected component beside Copy test tag; preview redacted public attributes, values,
+  bounds and visible tree context without automatically writing application data to disk.
+- [x] Save/import/export content-addressed JSON; identical content reuses a file, changed values
+  and tree position produce new hashes. Exclude capture times/live IDs from content identity.
+- [x] Remember phone/package/activity profiles without credentials or resets; GUI adb pairing,
+  installed-package suggestions, explicit launch and stale-connection guards.
+- [x] Add trusted local argv processing pipelines, a standalone CLI, asynchronous status and bounded
+  UTF-8 output previews. Require saved input; report failures/timeouts and cancel on shutdown.
+- [x] Verify privacy (including custom/spoofed keys/password QA names), bounded inbox/ack/restart,
+  hashes/files/profiles/pipelines, real phone-to-PC preview/save and browser import/results.
+  Physical phones, TalkBack and Windows cleanup remain outside the executed matrix.
+
+
 ## Completed 2026-10-02: PC control and inspector movement
 
 - [x] Add an explicitly enabled local automation bridge and a PC browser tool using adb forwarding.

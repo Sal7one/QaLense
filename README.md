@@ -95,8 +95,9 @@ button requires HTTP serving. `web/index.html` remains the classic fallback and 
 The [local PC tool](tools/local-bridge/README.md) reads a live Compose tree, searches test tags,
 shows selectable bounds and runs exact-tag/ID tap, type and scroll actions in an explicitly paired
 QA build. It also reads recent observed logs/network metadata and cached host data snapshots.
-Run `python3 tools/local-bridge/server.py --serial YOUR_DEVICE_SERIAL` after starting the sample's
-bridge in Settings. Release/no-op builds remain inert.
+Run `python3 tools/local-bridge/server.py --gui` after starting the sample’s bridge in Settings.
+Pair from the GUI, send component attributes from the phone, save hashed JSON snapshots, remember
+device/app profiles and run locally configured processing pipelines. Release/no-op builds remain inert.
 
 On the phone, use two fingers to scroll in inspect/tag mode, and drag **Move inspector** to reposition
 the filters and selected-node card. Bubble/dock movement follows physical screen directions in RTL.

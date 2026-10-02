@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Loopback PC UI/API -> adb forward -> explicitly enabled QaLens device bridge.
-Python standard library only. No recordings, tokens or application data are saved.
+Python standard library only. Component files require explicit Save; tokens stay in memory.
 """
 import argparse
 import getpass
@@ -12,7 +12,10 @@ import re
 import shutil
 import signal
 import subprocess
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import sys
+sys.path.insert(0, str(Path(__file__).parent))
+from workbench import Workbench, MAX_DOCUMENT
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -20,11 +23,13 @@ MAX_BODY = 16_384
 MAX_RESPONSE = 4 * 1024 * 1024
 
 
-class BridgeServer(HTTPServer):
-    def __init__(self, address, device_port, token):
+class BridgeServer(ThreadingHTTPServer):
+    daemon_threads = True
+    def __init__(self, address, device_port, token, workbench=None):
         super().__init__(address, Handler)
         self.device_port = device_port
         self.token = token
+        self.workbench = workbench
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -68,11 +73,16 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "GET" and self.path in assets:
             name, mime = assets[self.path]
             return self.reply(200, Path(__file__).with_name(name).read_bytes(), mime)
-        endpoints = {("GET", "/api/snapshot"): "/v1/snapshot", ("GET", "/api/events"): "/v1/events", ("POST", "/api/command"): "/v1/command"}
+        bench = self.server.workbench
+        if bench and self.command == "GET" and self.path == "/api/bootstrap":
+            return self.reply(200, {"ok": True, "session": bench.session})
+        endpoints = {("GET", "/api/snapshot"): "/v1/snapshot", ("GET", "/api/events"): "/v1/events", ("POST", "/api/command"): "/v1/command", ("POST", "/api/component"): "/v1/component", ("GET", "/api/inbox"): "/v1/components/inbox"}
         route = endpoints.get((self.command, self.path))
-        if not route:
+        if not route and not (bench and self.path in WORKBENCH_ROUTES):
             return self.reply(404, {"ok": False, "error": "Unknown endpoint"})
-        if not hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode()):
+        desktop = bench and hmac.compare_digest(self.headers.get("X-Qalens-Session", "").encode(), bench.session.encode())
+        device = self.server.token and hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode())
+        if not (desktop or device):
             return self.reply(401, {"ok": False, "error": "Enter the device pairing token"})
         if len(self.headers.get_all("Content-Length", [])) > 1 or self.headers.get("Transfer-Encoding"):
             return self.reply(400, {"ok": False, "error": "Duplicate lengths/chunking unsupported"})
@@ -80,7 +90,8 @@ class Handler(BaseHTTPRequestHandler):
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             return self.reply(400, {"ok": False, "error": "Invalid content length"})
-        if not 0 <= size <= MAX_BODY:
+        limit = MAX_DOCUMENT + 4096 if self.path == "/api/import" else MAX_BODY
+        if not 0 <= size <= limit:
             return self.reply(413, {"ok": False, "error": "Command too large"})
         body = None
         if self.command == "POST":
@@ -90,23 +101,102 @@ class Handler(BaseHTTPRequestHandler):
                 body = self.rfile.read(size)
                 if len(body) != size or not isinstance(json.loads(body), dict):
                     raise ValueError()
-            except (ValueError, TimeoutError):
+            except (ValueError, TimeoutError, RecursionError):
                 return self.reply(400, {"ok": False, "error": "Invalid command JSON"})
-        headers = {"Authorization": f"Bearer {self.server.token}", "Content-Type": "application/json"}
-        request = Request(f"http://127.0.0.1:{self.server.device_port}{route}", data=body, headers=headers, method=self.command)
         try:
-            try:
-                response = urlopen(request, timeout=5)
-            except HTTPError as error:
-                response = error
+            if bench and self.path in WORKBENCH_ROUTES:
+                return self.reply(200, self.workbench_request(json.loads(body) if body else {}))
+            if not self.server.token or not self.server.device_port:
+                return self.reply(503, {"ok": False, "error": "Connect a device first"})
+            # Serialize session switching with a device read/action; never replay a command.
+            from contextlib import nullcontext
+            with bench.lock if bench else nullcontext():
+                if desktop and self.command == "POST" and self.headers.get("X-Qalens-Connection") != bench.connection_id:
+                    return self.reply(409, {"ok": False, "error": "Device connection changed; refresh the tree before selecting a target"})
+                if not desktop and not hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode()):
+                    return self.reply(401, {"ok": False, "error": "Device pairing changed; connect again"})
+                code, payload = self.proxy(route, body, self.command)
+                if code == 200 and bench and self.path == "/api/snapshot": payload["connectionId"] = bench.connection_id
+                if code == 200 and bench and self.path == "/api/component":
+                    payload = {"ok": True, "document": bench.preview(payload)}
+                elif code == 200 and bench and self.path == "/api/inbox":
+                    ids = []
+                    for item in payload.get("transfers", [])[:10]:
+                        bench.preview(item["document"])
+                        ids.append(item["id"])
+                    # PC memory owns the preview before acknowledgement; Save is still explicit.
+                    if ids: self.proxy("/v1/components/ack", json.dumps({"ids": ids}).encode(), "POST")
+                    payload = {"ok": True, "dropped": payload.get("dropped", 0), "received": len(ids),
+                               "documents": list(bench.pending.values()), "omittedPreviews": bench.preview_dropped}
+                return self.reply(code, payload)
+        except ValueError as error:
+            return self.reply(400, {"ok": False, "error": str(error)[:256]})
+        except (KeyError, TypeError, RecursionError):
+            return self.reply(400, {"ok": False, "error": "Invalid component, profile or request; check required fields and limits"})
+        except (OSError, TimeoutError):
+            return self.reply(500, {"ok": False, "error": "Local storage unavailable; nothing was confirmed saved"})
+
+    def proxy(self, route, body, method):
+        headers = {"Authorization": f"Bearer {self.server.token}", "Content-Type": "application/json"}
+        request = Request(f"http://127.0.0.1:{self.server.device_port}{route}", data=body, headers=headers, method=method)
+        try:
+            try: response = urlopen(request, timeout=5)
+            except HTTPError as error: response = error
             with response:
                 data = response.read(MAX_RESPONSE + 1)
-                if len(data) > MAX_RESPONSE:
-                    return self.reply(502, {"ok": False, "error": "Device response exceeds bridge limit"})
-                json.loads(data)
-                return self.reply(response.code, data)
+                if len(data) > MAX_RESPONSE: raise ValueError("Device response exceeds limit")
+                return response.code, json.loads(data)
         except (URLError, TimeoutError, ConnectionError, ValueError):
-            return self.reply(502, {"ok": False, "error": "Device unavailable. Start its bridge, check token/adb, then refresh. Commands are never retried automatically."})
+            return 502, {"ok": False, "error": "Device unavailable. Start its bridge, check token/adb, then refresh. Commands are never retried automatically."}
+
+    def workbench_request(self, body):
+        bench = self.server.workbench
+        if self.command == "GET":
+            if self.path == "/api/workbench":
+                with bench.lock:
+                    return {"ok": True, "connected": bool(self.server.token), "connection": bench.connection,
+                            "connectionId": bench.connection_id, "profiles": bench.profiles(), "dataDir": str(bench.root.resolve()),
+                            "pipelines": [{"id": p["id"], "name": p.get("name", p["id"])} for p in bench.pipelines.values()],
+                            "jobs": list(bench.jobs.values())}
+            if self.path == "/api/saved": return bench.saved()
+            if self.path == "/api/previews":
+                with bench.lock: return {"ok": True, "documents": list(bench.pending.values()), "omittedPreviews": bench.preview_dropped}
+            raise ValueError("POST required")
+        if self.path == "/api/devices": return {"ok": True, "devices": bench.devices()}
+        if self.path == "/api/packages":
+            serial = body.get("serial", "")
+            if not isinstance(serial, str) or not re.fullmatch(r"[A-Za-z0-9_.:\[\]-]{1,128}", serial): raise ValueError("Invalid device serial")
+            rows = bench.adb_call(["shell", "pm", "list", "packages", "-3"], serial).splitlines()
+            return {"ok": True, "packages": [r.removeprefix("package:") for r in rows if r.startswith("package:")][:2000]}
+        if self.path == "/api/profile":
+            clean = bench.save_profile(body["profile"])
+            return {"ok": True, "profile": clean, "notice": "Only device/package/activity/version/port remembered. Appium reset, animation and driver options are ignored; no reset occurs."}
+        if self.path == "/api/profile/delete":
+            with bench.lock:
+                from workbench import write_json
+                write_json(bench.profiles_path, [p for p in bench.profiles() if p["id"] != body.get("id")])
+            return {"ok": True}
+        if self.path == "/api/connect": return {"ok": True, "connection": bench.connect(self.server, body["profile"], body.get("token"))}
+        if self.path == "/api/disconnect": bench.disconnect(self.server); return {"ok": True}
+        if self.path == "/api/launch":
+            with bench.lock:
+                current = bench.connection
+                if not current or not current["activity"]: raise ValueError("Connect a profile with an activity first")
+                bench.adb_call(["shell", "am", "start", "-n", current["package"] + "/" + current["activity"]], current["serial"])
+            return {"ok": True}
+        if self.path == "/api/import": return {"ok": True, "document": bench.preview(body["document"])}
+        if self.path == "/api/save": return bench.save(body.get("hash"))
+        if self.path == "/api/document": return {"ok": True, "document": bench.document(body.get("hash"))}
+        if self.path == "/api/artifacts": return {"ok": True, "files": bench.artifacts(body.get("job"))}
+        if self.path == "/api/artifact": return bench.artifact(body.get("job"), body.get("name"))
+        if self.path == "/api/run": return {"ok": True, "job": bench.run_pipeline(body.get("pipeline"), body.get("hash"))}
+        raise ValueError("Unknown operation")
+
+
+WORKBENCH_ROUTES = {"/api/workbench", "/api/saved", "/api/previews", "/api/devices", "/api/packages",
+                    "/api/profile", "/api/profile/delete", "/api/connect", "/api/disconnect", "/api/launch",
+                    "/api/import", "/api/save", "/api/document", "/api/run", "/api/artifacts", "/api/artifact"}
+
 
 
 def main():
@@ -116,9 +206,12 @@ def main():
     parser.add_argument("--device-port", type=int, default=8766, help="QaLens device port")
     parser.add_argument("--adb", default=shutil.which("adb"), help="adb executable")
     parser.add_argument("--no-adb", action="store_true", help="Use an existing forward at --device-port")
+    parser.add_argument("--gui", action="store_true", help="Start unpaired; choose a device and profile in the browser")
+    parser.add_argument("--data-dir", default="~/.qalens/bridge", help="Explicitly saved components, profiles and pipeline results")
+    parser.add_argument("--pipeline-config", help="Trusted local JSON pipeline configuration (never editable through HTTP)")
     args = parser.parse_args()
-    token = os.environ.get("QALENS_BRIDGE_TOKEN") or getpass.getpass("Device pairing token: ")
-    if not re.fullmatch(r"[A-Za-z0-9_-]{24,128}", token):
+    token = None if args.gui else os.environ.get("QALENS_BRIDGE_TOKEN") or getpass.getpass("Device pairing token: ")
+    if not args.gui and not re.fullmatch(r"[A-Za-z0-9_-]{24,128}", token):
         parser.error("Use the device's random 24–128 character token")
     if not (1024 <= args.port <= 65535 and 1024 <= args.device_port <= 65535):
         parser.error("Ports must be 1024–65535")
@@ -130,7 +223,9 @@ def main():
     forward = None
     adb = []
     try:
-        if not args.no_adb:
+        if args.gui:
+            device_port = None
+        elif not args.no_adb:
             if not args.adb:
                 parser.error("Install adb or pass --adb /path/to/adb")
             rows = subprocess.check_output([args.adb, "devices"], text=True).splitlines()[1:]
@@ -143,9 +238,14 @@ def main():
             device_port = int(forward)
         else:
             device_port = args.device_port
-        with BridgeServer(("127.0.0.1", args.port), device_port, token) as server:
-            print(f"QaLens PC inspector: http://127.0.0.1:{server.server_port} (Ctrl-C stops and removes this forward)", flush=True)
-            server.serve_forever()
+        bench = Workbench(args.data_dir, args.adb, args.pipeline_config)
+        with BridgeServer(("127.0.0.1", args.port), device_port, token, bench) as server:
+            if forward:
+                bench.owned_forward = (serial, device_port)
+                forward = None
+            print(f"QaLens workbench: http://127.0.0.1:{server.server_port} (Ctrl-C stops and removes this forward)", flush=True)
+            try: server.serve_forever()
+            finally: bench.close(server)
     except KeyboardInterrupt:
         pass
     finally:

@@ -32,6 +32,7 @@ internal object QaLensLocalBridge {
         runCatching { client?.close() }; client = null
         runCatching { listener?.close() }; listener = null
         mutableStatus.value = "Stopped"
+        QaLensBridgeComponents.clear()
     }
 
     @Synchronized fun start(token: String, port: Int) {
@@ -82,6 +83,20 @@ internal object QaLensLocalBridge {
             when {
                 request.method == "GET" && request.path == "/v1/snapshot" -> snapshot(generation)
                 request.method == "GET" && request.path == "/v1/events" -> observations(generation)
+                request.method == "GET" && request.path == "/v1/components/inbox" -> {
+                    onHost(generation) { true }
+                    QaLensBridgeComponents.inbox()
+                }
+                request.method == "POST" && request.path == "/v1/components/ack" -> {
+                    val input = readJson(request.body)
+                    val ids = input.optJSONArray("ids") ?: throw QaLensBridgeFailure(400, "Supply transfer ids")
+                    if (ids.length() > 10 || (0 until ids.length()).any { ids.opt(it) !is String || ids.getString(it).length > 128 })
+                        throw QaLensBridgeFailure(400, "Supply at most ten string transfer ids <=128 characters")
+                    onHost(generation) { true }
+                    QaLensBridgeComponents.acknowledge((0 until ids.length()).map { ids.getString(it) })
+                    mapOf("ok" to true)
+                }
+                request.method == "POST" && request.path == "/v1/component" -> component(readJson(request.body), generation)
                 request.method == "POST" && request.path == "/v1/command" -> {
                     val command = try { JSONObject(request.body) } catch (_: Exception) { throw QaLensBridgeFailure(400, "Invalid JSON") }
                     command(command, generation)
@@ -107,6 +122,9 @@ internal object QaLensLocalBridge {
         } catch (_: Exception) { /* A disconnected PC never affects the host. */ }
         finally { expiry.cancel() }
     }
+
+    private fun readJson(body: String): JSONObject = try { JSONObject(body) }
+        catch (_: Exception) { throw QaLensBridgeFailure(400, "Invalid JSON") }
 
     private suspend fun <T> onHost(generation: Long, block: (android.app.Activity) -> T): T =
         withTimeoutOrNull(1_500) {
@@ -136,11 +154,11 @@ internal object QaLensLocalBridge {
                 "omittedNodes" to (nodes.size - included.size),
                 "nodes" to nodes.take(1_000).map { node ->
                     val semantic = raw[node.id]
-                    val password = semantic?.config?.contains(SemanticsProperties.Password) == true
+                    val password = QaLensBridgeComponents.password(semantic)
                     var parent = semantic?.parent
                     while (parent != null && QaLensActivityInstaller.semanticsId(parent) !in included) parent = parent.parent
                     mapOf<String, Any?>("id" to node.id, "parentId" to parent?.let(QaLensActivityInstaller::semanticsId),
-                        "tag" to node.testTag, "label" to if (password) "[password]" else node.label,
+                        "tag" to node.testTag, "label" to if (password) "[protected]" else node.label,
                         "text" to if (password) emptyList() else node.text.take(8),
                         "description" to if (password) emptyList() else node.contentDescription.take(4), "role" to node.role,
                         "value" to if (password) null else semantic?.config?.getOrNull(SemanticsProperties.EditableText)?.text,
@@ -156,6 +174,37 @@ internal object QaLensLocalBridge {
         if (node.config.contains(SemanticsActions.OnClick)) add("tap")
         if (node.config.contains(SemanticsActions.SetText)) add("type")
         if (node.config.contains(SemanticsActions.ScrollBy)) add("scroll")
+    }
+
+    fun sendComponent(id: String) {
+        val generation = epoch
+        if (!status.value.startsWith("Listening")) { QaLensBridgeComponents.report("Start the bridge in your QA app first"); return }
+        QaLensBridgeComponents.report("Reading component…")
+        scope.launch {
+            try {
+                val document = component(JSONObject().put("id", id), generation)
+                synchronized(this@QaLensLocalBridge) {
+                    if (generation == epoch && QaLens.config.value.enabled) QaLensBridgeComponents.enqueue(document)
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: QaLensBridgeFailure) { if (generation == epoch) QaLensBridgeComponents.report(failure.message ?: "Transfer failed") }
+            catch (_: Exception) { if (generation == epoch) QaLensBridgeComponents.report("Transfer failed; refresh and retry") }
+        }
+    }
+
+    private suspend fun component(input: JSONObject, generation: Long): Map<String, Any?> {
+        for (field in listOf("id", "tag")) if (input.has(field) && input.opt(field) !is String)
+            throw QaLensBridgeFailure(400, "$field must be a string")
+        val id = input.optString("id"); val tag = input.optString("tag")
+        if (id.isBlank() == tag.isBlank()) throw QaLensBridgeFailure(400, "Supply exactly one exact id or tag")
+        val document = onHost(generation) { activity ->
+            val (visible, raw) = live(activity)
+            val matches = visible.filter { if (id.isNotBlank()) it.id == id else it.testTag == tag }
+            if (matches.isEmpty()) throw QaLensBridgeFailure(404, "Component absent, hidden or off-screen")
+            if (matches.size != 1) throw QaLensBridgeFailure(409, "Tag is ambiguous; use a live id")
+            QaLensBridgeComponents.capture(activity, matches.single(), visible, raw)
+        }
+        return sanitize(document)
     }
 
     private suspend fun command(command: JSONObject, generation: Long): Map<String, Any?> {
@@ -186,8 +235,10 @@ internal object QaLensLocalBridge {
             val hit = matches.single()
             val node = raw[hit.id] ?: throw QaLensBridgeFailure(409, "Target has no live semantics action")
             if (!hit.isEnabled && action != "select") throw QaLensBridgeFailure(409, "Target is disabled")
+            if (action == "select" && QaLens.state.value.isRecording)
+                throw QaLensBridgeFailure(409, "Stop recording before opening the inspector")
             val accepted = when (action) {
-                "select" -> { QaLens.closePanel(); QaLens.setInspectMode(true); QaLens.previewNode(hit); true }
+                "select" -> { QaLens.closePanel(); QaLens.setWatchMode(false); QaLens.setInspectMode(true); QaLens.previewNode(hit); true }
                 "tap" -> node.config.getOrNull(SemanticsActions.OnClick)?.action?.invoke() == true
                 "type" -> {
                     node.config.getOrNull(SemanticsActions.RequestFocus)?.action?.invoke()

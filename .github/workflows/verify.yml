@@ -36,6 +36,7 @@ jobs:
       - name: Local PC bridge regression tests
         run: |
           python3 tools/local-bridge/test_server.py
+          python3 tools/local-bridge/test_workbench.py
           node --check tools/local-bridge/app.js
       - name: Backend regression tests
         run: python3 backend/tests/test_backend.py

@@ -17,6 +17,7 @@ gradle -p integration-tests/consumer assembleDebug assembleRelease verifyRelease
 node web/test/read.test.js
 python3 backend/tests/test_backend.py
 python3 tools/local-bridge/test_server.py
+python3 tools/local-bridge/test_workbench.py
 node --check tools/local-bridge/app.js
 ```
 
