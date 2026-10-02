@@ -1,7 +1,55 @@
 # Current backlog
 
-Updated 2026-10-01. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
+Updated 2026-10-02. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
+
+## Completed 2026-10-02: desktop launcher and retrospective clips
+
+- [x] Onboarding choices and Back/browser-history navigation; embed both existing `web/` viewers
+  directly without copied sources. Keep replay controls reachable and pause video when leaving.
+- [x] Add connected-device Back/Home/Wake/Settings, optional installed scrcpy lifecycle and bounded
+  Downloads push/pull. Require the current connection nonce; keep launch separate and no-reset.
+- [x] Detect completed archives and provide explicit Copy/Open replay plus connection-scoped,
+  off-by-default automatic transfer of new sessions/clips. Stream privately with content hashes.
+- [x] Remove the five-minute stop, add a configured duration and media/disk retention bounds;
+  mark 10/20/60s or custom 1–300s without stopping. Export separate `.sal` clips after stop using
+  an independent recent evidence buffer and playable-keyframe video trimming.
+- [x] Move MediaRecorder setup/stop off main, check actual encoder sizes/alignment/rates, fall back
+  resolutions and validate encoded samples. Pass real API 36 consent, HD master/clip playback,
+  a >5-minute continuity check, automatic PC collection and GUI file push/pull.
+- Still validate full-hour endurance, physical-phone encoders/rotation/consent recovery and TalkBack;
+  actual scrcpy mirroring is unverified here because scrcpy is not installed. See
+  [recording clips](docs/RECORDING_CLIPS.md) for budgets and evidence/timing limits.
+
+## Completed 2026-10-02: PC component workbench
+
+- [x] Send a selected component beside Copy test tag; preview redacted public attributes, values,
+  bounds and visible tree context without automatically writing application data to disk.
+- [x] Save/import/export content-addressed JSON; identical content reuses a file, changed values
+  and tree position produce new hashes. Exclude capture times/live IDs from content identity.
+- [x] Remember phone/package/activity profiles without credentials or resets; GUI adb pairing,
+  installed-package suggestions, explicit launch and stale-connection guards.
+- [x] Add trusted local argv processing pipelines, a standalone CLI, asynchronous status and bounded
+  UTF-8 output previews. Require saved input; report failures/timeouts and cancel on shutdown.
+- [x] Verify privacy (including custom/spoofed keys/password QA names), bounded inbox/ack/restart,
+  hashes/files/profiles/pipelines, real phone-to-PC preview/save and browser import/results.
+  Physical phones, TalkBack and Windows cleanup remain outside the executed matrix.
+
+
+## Completed 2026-10-02: PC control and inspector movement
+
+- [x] Add an explicitly enabled local automation bridge and a PC browser tool using adb forwarding.
+  Read redacted, root-scoped Compose trees, select exact tags/IDs, and run tap/type/scroll actions.
+  Include bounded observed logs/network/data snapshots, clear command errors, authentication,
+  loopback binding, shutdown on disable, and release/no-op parity. No hidden content or implicit capture.
+- [x] Route two-finger inspector drags to the host scroll surface while single taps inspect.
+  Verify actual host scrolling, no accidental clicks, cancellation, and normal overlay controls.
+- [x] Use physical, bounded bubble coordinates in LTR/RTL; reclamp for size/inset changes.
+- [x] Add a movable inspector dock with a drag handle, safe system-bar/IME placement and persistence.
+  Verify the four filters and selected-node detail stay usable on small screens after viewport
+  changes and with three-button navigation. Physical rotation remains in the device matrix.
+- [x] Exercise the PC-to-device path, gestures and RTL on a disposable emulator, run unit/build/lint
+  and release isolation checks, and update integration instructions and the handover with limits.
 
 ## Priority 1: make the client useful to real QA teams
 
@@ -24,6 +72,8 @@ baselines and project context. Older changelog entries are historical, not uncom
    Test password/redaction-matched/custom content and multiple windows, plus the API 23 screenshot
    fallback. Acceptance: no host crash, no stuck capture/saving controls, no cross-session callbacks,
    and explicit failure/coverage when output cannot be preserved. Keep frame recording as default.
+   The reported HD failure in a newer host remains undiagnosed: establish whether OS consent
+   appeared, check the explicit unmasked-video opt-in, and compare SDK builds in the same app/phone.
 3. **Self-hosted company service boundary.** Decide how teams will bring their own identity, TLS,
    tenant isolation, retention/deletion and storage. The current Python service intentionally remains
    a loopback development mock with no authentication; put production deployment/auth in a separate,
@@ -40,9 +90,9 @@ baselines and project context. Older changelog entries are historical, not uncom
 - **Close Android lint follow-ups.** Frame metrics now use a weak Activity reference and detach on
   destroy; the in-app stop chip detaches on destroy, exposes an accessibility click and uses string
   resources. The projection notification body opens controls while its action stops recording.
-  Validate TalkBack and rotation on physical devices; the active chip still intentionally holds its
-  View until stop/destroy and lint reports that static-field warning. Review remaining sample
-  metadata and dependency-freshness warnings without masking them with a baseline.
+  The stop chip now uses weak View references; its prior static-field lint warning is resolved.
+  Validate TalkBack and rotation on physical devices. Review remaining sample metadata, Compose
+  and dependency-freshness warnings without masking them with a baseline.
 - **Facade decomposition.** `AnalysisEngine`, recording lifecycle/window, journals and crash
   registration have been extracted. Observation, recording coordination, panel state, evidence
   services and activity bridging still overlap in the facade. Extract one boundary at a time with

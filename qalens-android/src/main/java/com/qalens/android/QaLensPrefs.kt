@@ -45,6 +45,12 @@ object QaLensPrefs {
     fun setBubblePos(context: Context, x: Float, y: Float) =
         prefs(context).edit().putFloat(KEY_BUBBLE_X, x).putFloat(KEY_BUBBLE_Y, y).apply()
 
+    // Physical normalized coordinates survive RTL switches and viewport changes.
+    fun overlayPosition(context: Context, key: String, default: Float): Float =
+        prefs(context).getFloat("position_v2_$key", default).takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: default
+    fun setOverlayPosition(context: Context, key: String, x: Float, y: Float) =
+        prefs(context).edit().putFloat("position_v2_${key}_x", x).putFloat("position_v2_${key}_y", y).apply()
+
     // ── Webhook (Control Room → AI-analysis backend) ───────────────────────
     private const val KEY_WEBHOOK_URL = "webhook_url"
     private const val KEY_WEBHOOK_HEADER_NAME = "webhook_header_name"

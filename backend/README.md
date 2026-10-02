@@ -4,6 +4,9 @@ This free, zero-dependency Python server lets you exercise the real upload paths
 for a hosted service. It stores sample `.sal` files, shows them on a local dashboard, and returns a
 deterministic mock verdict. It does not call an AI model.
 
+For the whole SDK/web/Python setup, read [ONBOARDING.md](../ONBOARDING.md). This backend is
+separate from the [desktop workbench](../tools/local-bridge/README.md).
+
 ## Try a complete send in one minute
 
 From the repository root:

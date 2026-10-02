@@ -186,6 +186,22 @@
   const ICON_PAUSE = '<svg width="17" height="17"><use href="#i-pause"/></svg>';
 
   // ── Loading ────────────────────────────────────────────────────────────────
+  if (new URLSearchParams(location.search).has("desktop")) {
+    document.querySelectorAll('a[href]').forEach(link => {
+      const destination = new URL(link.href, location.href);
+      if (destination.origin === location.origin && /\/index(?:-v2)?\.html$/.test(destination.pathname)) {
+        destination.searchParams.set("desktop", ""); link.href = destination.href;
+      }
+    });
+  }
+  // Same-origin desktop shell: load transferred archives through the existing reader.
+  window.addEventListener("message", (event) => {
+    if (!new URLSearchParams(location.search).has("desktop") || event.origin !== location.origin || event.source !== window.parent || window.parent === window) return;
+    if (event.data?.type === "qalens-recording" && event.data.bytes instanceof ArrayBuffer && event.data.bytes.byteLength <= 400 * 1024 * 1024) {
+      loadFile(new File([event.data.bytes], String(event.data.name || "recording.sal"), {type: "application/octet-stream"}));
+    }
+    if (event.data?.type === "qalens-visibility" && !event.data.visible) document.querySelectorAll("video").forEach(video => video.pause());
+  });
   async function loadFile(file) {
     try {
       // .appsal app configs get their own viewer (plain JSON, not a ZIP).
@@ -1476,7 +1492,8 @@
 
     // Backend hook (frontend): Mission Control → mock/real QaLens backend.
     els.setBackend.value = prefs.backend;
-    els.setBackend.onchange = () => { prefs.backend = els.setBackend.value.trim(); LS.set("backend", prefs.backend); toast(prefs.backend ? "Backend URL saved — use ⇪ Send to backend" : "Backend URL cleared"); };
+    els.setBackend.oninput = () => { prefs.backend = els.setBackend.value.trim(); LS.set("backend", prefs.backend); };
+    els.setBackend.onchange = () => toast(prefs.backend ? "Backend URL saved — use ⇪ Send to backend" : "Backend URL cleared");
     els.backendOpen.onclick = () => {
       const b = String(prefs.backend || "").trim();
       if (!b) { toast("Set a Backend URL first"); return; }

@@ -1,0 +1,11 @@
+{
+  "pipelines": [
+    {
+      "id": "component-summary",
+      "name": "Component summary + tag check",
+      "steps": [
+        {"argv": ["{python}", "summarize.py", "{component}", "{output}"], "timeoutSeconds": 15}
+      ]
+    }
+  ]
+}

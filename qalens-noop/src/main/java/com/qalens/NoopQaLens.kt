@@ -29,6 +29,10 @@ object QaLens {
         configState.value = QaLensConfig.Builder(configState.value).apply(block).build()
     }
 
+    fun startLocalBridge(token: String, port: Int = 8766) = Unit
+    fun stopLocalBridge() = Unit
+    val localBridgeStatus: StateFlow<String> = MutableStateFlow("Disabled in release/noop builds").asStateFlow()
+
     fun install(application: Application) = Unit
     fun setScreen(name: String, route: String? = null) = Unit
     fun setFeatureFlagProvider(provider: () -> Map<String, Boolean>) = Unit
@@ -108,6 +112,7 @@ object QaLens {
     fun takeScreenshot(share: Boolean = true) = Unit
     fun restartActivity() = Unit
     fun startRecording(video: Boolean = false) = Unit
+    fun saveRecentClip(seconds: Int = 20, label: String = "Bug clip") { }
     fun stopRecording() = Unit
     fun toggleRecording() = Unit
     fun refreshRecordings() = Unit

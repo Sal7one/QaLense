@@ -1,5 +1,6 @@
 # QaLens Integration Guide (for developers and their AI agents)
 
+Read [ONBOARDING.md](ONBOARDING.md) first for the product/tools overview and evaluation workflow.
 This file is written to be followed mechanically — every step is copy-pasteable and verifiable.
 QaLens is a **debug-only** QA evidence SDK for Android Jetpack Compose apps: floating QA panel,
 session recording to a portable `.sal` file, raw-SQL/data tooling, macros, webhook upload for AI
@@ -318,7 +319,9 @@ used** first. Verbs:
 
 - Compose-first: semantics inspection covers Compose UI; classic Views appear only as frames.
 - The timeline never fabricates events: no interceptor → no network rows; no Timber → no logs.
-- Frame recording is ~2fps (permission-free). HD video requires `allowUnmaskedVideo=true` plus
+- Frame recording is permission-free and samples according to configured duration (about once
+  per second for the default hour, with a 500 ms minimum interval). [Clip/media limits](docs/RECORDING_CLIPS.md)
+  describe retention and omissions. HD video requires `allowUnmaskedVideo=true` plus
   Android consent and has no per-node masks. Secure windows are refused by screenshot/frame capture.
 - `tap`/`type` need semantics: tag your interactive elements (`Modifier.qaTag`) or they fall back
   to text matching.
@@ -359,3 +362,41 @@ Apply the smallest useful integration, keep privacy defaults, run both builds an
 then verify one synthetic request/report/frame recording on a disposable device if available.
 State exactly what was wired and tested. For SDK development, start at [HANDOVER.md](HANDOVER.md)
 instead. The independent consumer fixture is the executable example for external dependency setup.
+
+
+## Local PC inspection and Compose control
+
+For explicit QA sessions, `QaLens.startLocalBridge(token, port = 8766)` exposes redacted visible
+semantics and tap/type/scroll handlers on device loopback. `QaLens.stopLocalBridge()` closes it;
+`QaLens.localBridgeStatus` reports readiness/failure. No-op builds never open a socket. It is off by
+default, uses a host-generated random token, stops when QaLens is disabled and requires another
+explicit start after re-enable. Keep the pairing UI and token out of reports using
+`qaHiddenFromReports()`; never persist/log the token.
+
+The [PC tool and complete protocol](tools/local-bridge/README.md) create an adb forward and provide a
+local browser tree/bounds inspector plus observed logs/network metadata/cached app-data snapshots.
+Exact tag queries reject duplicates; IDs are root-scoped and live-session only. Hidden subtrees and
+password values are excluded. Host privacy/allowlisting still govern ordinary text and snapshots.
+Actions report handler acceptance, not proof of a completed workflow. This is Compose automation
+inside your QA build, with no automatic capture or production service.
+
+The workbench also supports **Send to PC** beside Copy test tag: preview public component attributes,
+values and visible tree position, then explicitly save hashed JSON. Hidden/password/custom values
+follow the bridge's coverage rules. Device/package/activity profiles persist on the PC; pairing
+credentials stay in memory. Locally configured processors consume saved component documents from
+the GUI or `tools/local-bridge/process.py`. These exports are separate from `.sal` recording archives;
+see the PC guide for schema, privacy, queue budgets and processor contracts.
+
+In inspect/tag mode, use **two fingers to scroll the host** and one tap to select/copy. Drag the
+**Move inspector** handle to move the filters/detail dock. Bubble and dock coordinates are physical
+and clamped above system navigation/keyboard bounds in both LTR and RTL.
+
+### Long sessions and bug clips
+
+The default duration is now 60 minutes, configurable through `recordingMaxDurationMinutes` (1–180).
+`saveRecentClip(seconds = 20, label = "Checkout failed")` marks a retrospective interval without
+stopping; REC → ★ Clip also provides 10/20/60-second presets and a custom duration. Clips become
+separate `.sal` files after normal stop. See [recording clips](docs/RECORDING_CLIPS.md) for budgets,
+keyframe timing, opt-in video/privacy, evidence coverage and opt-in PC collection. Both active and
+no-op facades expose the API; the no-op does nothing. Saved archives now retain at most 30 files /
+1 GiB, and host backup exclusions still apply.

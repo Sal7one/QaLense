@@ -17,7 +17,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -107,7 +118,7 @@ internal fun QaLensOverlay() {
 
         if (!state.isPanelOpen && !state.isWatchMode) {
             QaLensBubble(
-                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
+                modifier = Modifier,
                 inspectMode = state.isInspectMode,
                 warningCount = state.warnings.size,
                 colors = colors,
@@ -172,13 +183,14 @@ private fun InspectCanvas(
     }
     val context = LocalContext.current
     val config by QaLens.config.collectAsState()
+    val bridgeTransfer by QaLensBridgeComponents.status.collectAsState()
+    val bridgeStatus by QaLensLocalBridge.status.collectAsState()
 
     Box(
         Modifier
             .fillMaxSize()
             .background(colors.canvasWash)
-            // Only consume confirmed taps (no movement); drags pass through to the
-            // underlying app so the user can scroll the page while in inspect mode.
+            // Single taps inspect. QaLensOverlayHost explicitly forwards two-finger drags.
             .pointerInput(visibleNodes) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = true)
@@ -222,78 +234,93 @@ private fun InspectCanvas(
             }
         }
 
-        Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 12.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            selectedNode?.let { node ->
-                Surface(
-                    color = colors.panel,
-                    contentColor = colors.fg,
-                    shape = RoundedCornerShape(QaLensDimens.rMd),
-                    shadowElevation = 8.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(
-                            config.redact(node.label),
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            "${node.role ?: "Component"} · ${node.widthDp.toInt()}×${node.heightDp.toInt()}dp" +
-                                (node.testTag?.let { " · ${config.redact(it)}" } ?: ""),
-                            color = colors.fg2,
-                            fontSize = 11.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (node.warnings.isNotEmpty()) {
-                            Text(
-                                node.warnings.take(2).joinToString(" · ") { it.title },
-                                color = colors.warn,
-                                fontSize = 11.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        node.testTag?.let { tag ->
-                            Text(
-                                "Copy test tag",
-                                color = colors.accent,
-                                fontSize = 12.sp,
-                                modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
-                                    .clickable(role = Role.Button) {
-                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                                            as android.content.ClipboardManager
-                                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("QaLens test tag", tag))
+        MovableOverlay("inspector", Offset(0.5f, 0.8f), Modifier.widthIn(max = 320.dp).fillMaxWidth()) { drag ->
+            Column(Modifier.background(colors.panel, RoundedCornerShape(QaLensDimens.rMd)),
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("━━  Move inspector · two fingers scroll app", color = colors.fg2, fontSize = 11.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = QaLensDimens.touchMin)
+                        .semantics { contentDescription = "Move inspector" }.then(drag).padding(vertical = 12.dp))
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    selectedNode?.let { node ->
+                        Surface(
+                            color = colors.panel,
+                            contentColor = colors.fg,
+                            shape = RoundedCornerShape(QaLensDimens.rMd),
+                            shadowElevation = 8.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(
+                                    config.redact(node.label),
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    "${node.role ?: "Component"} · ${node.widthDp.toInt()}×${node.heightDp.toInt()}dp" +
+                                        (node.testTag?.let { " · ${config.redact(it)}" } ?: ""),
+                                    color = colors.fg2,
+                                    fontSize = 11.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (node.warnings.isNotEmpty()) {
+                                    Text(
+                                        node.warnings.take(2).joinToString(" · ") { it.title },
+                                        color = colors.warn,
+                                        fontSize = 11.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    node.testTag?.let { tag ->
+                                        Text(
+                                            "Copy test tag", color = colors.accent, fontSize = 12.sp,
+                                            modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
+                                                .clickable(role = Role.Button) {
+                                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                                        as android.content.ClipboardManager
+                                                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("QaLens test tag", tag))
+                                                }
+                                                .padding(vertical = 10.dp)
+                                        )
                                     }
-                                    .padding(vertical = 10.dp)
+                                    Text(
+                                        "Send to PC",
+                                        color = if (bridgeStatus.startsWith("Listening")) colors.accent else colors.fg2,
+                                        fontSize = 12.sp,
+                                        modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
+                                            .clickable(role = Role.Button) { QaLensLocalBridge.sendComponent(node.id) }
+                                            .padding(vertical = 10.dp)
+                                    )
+                                }
+                                if (bridgeTransfer.isNotBlank()) Text(bridgeTransfer, color = colors.fg2, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().background(colors.panel, RoundedCornerShape(QaLensDimens.rMd)).padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        InspectFilter.entries.forEach { option ->
+                            Text(
+                                option.label,
+                                color = if (filter == option) colors.accent else colors.fg2,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                modifier = Modifier.weight(1f)
+                                    .heightIn(min = QaLensDimens.touchMin)
+                                    .background(if (filter == option) colors.accentWash else Color.Transparent,
+                                        RoundedCornerShape(QaLensDimens.rSm))
+                                    .clickable(role = Role.Button) { filter = option; onSelect(null) }
+                                    .padding(horizontal = 2.dp, vertical = 12.dp)
                             )
                         }
                     }
-                }
-            }
-            Row(
-                Modifier.fillMaxWidth().background(colors.panel, RoundedCornerShape(QaLensDimens.rMd)).padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                InspectFilter.entries.forEach { option ->
-                    Text(
-                        option.label,
-                        color = if (filter == option) colors.accent else colors.fg2,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f)
-                            .heightIn(min = QaLensDimens.touchMin)
-                            .background(if (filter == option) colors.accentWash else Color.Transparent,
-                                RoundedCornerShape(QaLensDimens.rSm))
-                            .clickable(role = Role.Button) { filter = option; onSelect(null) }
-                            .padding(horizontal = 2.dp, vertical = 12.dp)
-                    )
                 }
             }
         }
@@ -304,7 +331,7 @@ private fun InspectCanvas(
  * Tag mode canvas — inspect's sibling for automation engineers: every visible component with a
  * test tag gets a green outline and its tag drawn right on it; interactive components WITHOUT a
  * tag get a red outline + dot (they'll be unreachable from UI tests). Tap any tagged component to
- * copy its tag. Drags pass through so the app stays scrollable.
+ * copy its tag. Two-finger drags scroll the host through QaLensOverlayHost.
  */
 @Composable
 private fun TagCanvas(nodes: List<InspectNode>, colors: QaLensOverlayColors) {
@@ -323,7 +350,7 @@ private fun TagCanvas(nodes: List<InspectNode>, colors: QaLensOverlayColors) {
         Modifier
             .fillMaxSize()
             .background(colors.canvasWash)
-            // Consume only confirmed taps (like InspectCanvas); drags pass through to the app.
+            // Consume confirmed taps; the overlay host forwards two-finger drags.
             .pointerInput(tagged) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -371,7 +398,7 @@ private fun TagCanvas(nodes: List<InspectNode>, colors: QaLensOverlayColors) {
                 fontSize = 10.sp,
                 maxLines = 1,
                 modifier = Modifier
-                    .offset { IntOffset(node.bounds.left, (node.bounds.top - 36).coerceAtLeast(8)) }
+                    .absoluteOffset { IntOffset(node.bounds.left, (node.bounds.top - 36).coerceAtLeast(8)) }
                     .background(colors.panel3, MaterialTheme.shapes.extraSmall)
                     .padding(horizontal = 5.dp, vertical = 2.dp)
             )
@@ -404,11 +431,44 @@ private fun TagCanvas(nodes: List<InspectNode>, colors: QaLensOverlayColors) {
     }
 }
 
-// The bubble leaves the composition whenever the panel/HUD is open, so its drag offset must live
-// OUTSIDE the composable (a plain `remember` snapped it back to the corner on every panel
-// open/close). File-level snapshot state survives recomposition; prefs survive process death.
-private var bubbleOffset by mutableStateOf(Offset.Zero)
-private var bubbleRestored = false
+/** Physical positions are relative to the usable viewport, never layout-direction offsets.
+ * Both size and system/IME insets participate in clamping. Only the handle receives dock drags.
+ */
+@Composable
+private fun MovableOverlay(
+    key: String,
+    initial: Offset,
+    itemModifier: Modifier,
+    content: @Composable (Modifier) -> Unit
+) {
+    val context = LocalContext.current
+    var fraction by remember(key) { mutableStateOf(Offset(
+        QaLensPrefs.overlayPosition(context, "${key}_x", initial.x),
+        QaLensPrefs.overlayPosition(context, "${key}_y", initial.y)
+    )) }
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
+    var item by remember { mutableStateOf(IntSize.Zero) }
+    val spaceX = (viewport.width - item.width).coerceAtLeast(0).toFloat()
+    val spaceY = (viewport.height - item.height).coerceAtLeast(0).toFloat()
+    val drag = Modifier.pointerInput(spaceX, spaceY) {
+        detectDragGestures(onDragEnd = {
+            QaLensPrefs.setOverlayPosition(context, key, fraction.x, fraction.y)
+        }) { change, amount ->
+            change.consume()
+            fraction = Offset(
+                if (spaceX > 0) (fraction.x + amount.x / spaceX).coerceIn(0f, 1f) else fraction.x,
+                if (spaceY > 0) (fraction.y + amount.y / spaceY).coerceIn(0f, 1f) else fraction.y
+            )
+        }
+    }
+    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(8.dp)
+        .onSizeChanged { viewport = it }) {
+        val height = with(LocalDensity.current) { viewport.height.toDp() }
+        Box(itemModifier.align(androidx.compose.ui.AbsoluteAlignment.TopLeft)
+            .absoluteOffset { IntOffset((fraction.x * spaceX).roundToInt(), (fraction.y * spaceY).roundToInt()) }
+            .heightIn(max = height.coerceAtLeast(1.dp)).onSizeChanged { item = it }) { content(drag) }
+    }
+}
 
 @Composable
 private fun QaLensBubble(
@@ -419,44 +479,17 @@ private fun QaLensBubble(
     onTap: () -> Unit,
     onLongPress: () -> Unit
 ) {
-    val context = LocalView.current.context
-    LaunchedEffect(Unit) {
-        if (!bubbleRestored) {
-            bubbleRestored = true
-            bubbleOffset = Offset(QaLensPrefs.bubbleX(context), QaLensPrefs.bubbleY(context))
-        }
-    }
     val label = if (inspectMode) "INS" else "QA"
     val color = if (inspectMode) colors.accent else colors.panel
-
-    Box(
-        modifier = modifier
-            .offset { IntOffset(bubbleOffset.x.roundToInt(), bubbleOffset.y.roundToInt()) }
-            .size(QaLensDimens.bubble)
+    MovableOverlay("bubble", Offset(1f, 0f), modifier.size(QaLensDimens.bubble)) { drag ->
+      Box(Modifier.size(QaLensDimens.bubble)
             .background(color, CircleShape)
-            // Keep the crisp ring: a softened one measured worse against the cream host and
-            // read as a smudge rather than a deliberate edge. The ink disc plus this ring
-            // already clears contrast on both light and dark hosts.
             .border(QaLensDimens.bubbleBorder, Color.White.copy(alpha = 0.9f), CircleShape)
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragEnd = { QaLensPrefs.setBubblePos(context, bubbleOffset.x, bubbleOffset.y) }
-                ) { change, dragAmount ->
-                    change.consume()
-                    bubbleOffset += dragAmount
-                }
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { onTap() },
-                    onLongPress = { onLongPress() }
-                )
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = if (warningCount > 0) "$label\n$warningCount" else label,
-            color = colors.fg
-        )
+            .semantics { contentDescription = "QaLens bubble" }
+            .then(drag)
+            .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }, onLongPress = { onLongPress() }) },
+          contentAlignment = Alignment.Center) {
+          Text(if (warningCount > 0) "$label\n$warningCount" else label, color = colors.fg)
+      }
     }
 }

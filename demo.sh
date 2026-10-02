@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# QaLens demo — one command to see and test EVERY feature, with or without Android.
+# QaLens demo — quick synthetic replay, upload and Android walkthrough, with or without Android.
 #
 #   ./demo.sh            quick: mock backend + web player (Mission Control) in 10s
 #   ./demo.sh android    build + install the sample app and script the full QA flow
 #   ./demo.sh curl       drive every hook (mobile webhook, chunks, frontend ingest)
-#   ./demo.sh test       run every test suite (node, python, gradle) as CI would
+#   ./demo.sh test       run convenience checks (see CONTRIBUTING.md for the full matrix)
 #   ./demo.sh kill       stop the local servers
 #
-# Zero-dependency: python3 (stdlib only) + node for the web player/tests.
+# Dependencies: python3 (stdlib only) and a browser; node for CLI/tests.
 # ═══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -69,10 +69,10 @@ cheat_sheet() {
   echo "  Integration guide (Kotlin) ... http://127.0.0.1:$WEB_PORT/web/integration.html"
   echo "  Web player (Mission Control v2) http://127.0.0.1:$WEB_PORT/web/index-v2.html?sample&t=24.6   ← the demo .sal ON the failing transfer"
   echo "  Web player → ⚙ Settings → Backend URL = http://127.0.0.1:$BACKEND_PORT  → then ⇪ Send to backend"
-  echo "  Android (emulator) .......... adb reverse tcp:8000 tcp:8000"
+  echo "  Android (emulator) .......... adb reverse tcp:$BACKEND_PORT tcp:$BACKEND_PORT"
   echo "  Android webhook URL .......... http://127.0.0.1:$BACKEND_PORT/webhook"
   echo "  curl drive every hook ........ ./demo.sh curl"
-  echo "  run every test suite ......... ./demo.sh test"
+  echo "  run convenience checks ....... ./demo.sh test"
   echo "  stop local servers ........... ./demo.sh kill"
   say ""
 }
@@ -116,7 +116,7 @@ cmd_curl() {
 }
 
 cmd_test() {
-  say "QaLens — running every test suite (CI parity)"
+  say "QaLens — running convenience regression checks"
   echo
   say "1/4 web .sal reader regression (node):"
   node "$ROOT/web/test/read.test.js" | tail -2
@@ -124,9 +124,12 @@ cmd_test() {
   say "2/4 mock backend end-to-end (python):"
   python3 "$ROOT/backend/tests/test_backend.py" 2>&1 | grep -E "^(Ran|OK|FAILED)"
   echo
+  python3 "$ROOT/tools/local-bridge/test_server.py"
+  python3 "$ROOT/tools/local-bridge/test_workbench.py"
+  python3 "$ROOT/tools/local-bridge/test_desktop.py"
   say "3/4 kotlin unit tests + release parity (gradle):"
   GRADLE_BIN="${QALENS_GRADLE:-$ROOT/gradlew}"
-  (cd "$ROOT" && JAVA_HOME="${JAVA_HOME:-/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home}" "$GRADLE_BIN" :qalens-core:test :qalens-compose:testDebugUnitTest :qalens-replay:testDebugUnitTest :qalens-noop:testDebugUnitTest :qalens-replay:compileDebugKotlin :sample-app:compileDebugKotlin :sample-app:compileReleaseKotlin :sample-app:verifyReleaseIsolation --console=plain 2>&1 | tail -6)
+  (cd "$ROOT" && "$GRADLE_BIN" :qalens-core:test :qalens-compose:testDebugUnitTest :qalens-replay:testDebugUnitTest :qalens-noop:testDebugUnitTest :qalens-replay:compileDebugKotlin :sample-app:compileDebugKotlin :sample-app:compileReleaseKotlin :sample-app:verifyReleaseIsolation --console=plain 2>&1 | tail -6)
   echo
   say "4/4 CLI smoke (sal_report as a CI gate):"
   rc=0
@@ -140,17 +143,16 @@ cmd_test() {
 cmd_android() {
   say "QaLens — full Android demo (sample app + Control Room + webhook)"
   command -v adb >/dev/null 2>&1 || { echo "adb not found — install Android platform-tools first"; exit 1; }
-  GRADLE_BIN="$HOME/.gradle/wrapper/dists/gradle-9.1.0-bin/9agqghryom9wkf8r80qlhnts3/gradle-9.1.0/bin/gradle"
-  if [ ! -x "$GRADLE_BIN" ]; then GRADLE_BIN="$ROOT/gradlew"; fi
+  GRADLE_BIN="${QALENS_GRADLE:-$ROOT/gradlew}"
   info "building the sample app (debug)"
-  (cd "$ROOT" && JAVA_HOME="${JAVA_HOME:-/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home}" "$GRADLE_BIN" :sample-app:assembleDebug --console=plain 2>&1 | tail -4)
+  (cd "$ROOT" && "$GRADLE_BIN" :sample-app:assembleDebug --console=plain 2>&1 | tail -4)
   APK=$(ls "$ROOT"/sample-app/build/outputs/apk/debug/*.apk | head -1)
   ok "APK: $APK"
   info "installing on the connected device/emulator"
   adb install -r "$APK"
-  info "wiring the device to the local mock backend (port 8000)"
+  info "wiring the device to the local mock backend (port $BACKEND_PORT)"
   backend_up
-  adb reverse tcp:8000 tcp:8000 || info "adb reverse failed — use your LAN IP instead"
+  adb reverse "tcp:$BACKEND_PORT" "tcp:$BACKEND_PORT" || info "adb reverse failed — check the selected device and USB connection"
   info "launching the sample app"
   adb shell am start -n com.qalens.sample/com.qalens.sample.MainActivity
   sleep 3
@@ -159,7 +161,7 @@ cmd_android() {
   echo "  adb shell am start -a android.intent.action.VIEW -d qalenssample://account/2 com.qalens.sample   # open Account #2"
   echo "  # in the app: Transfer → 1500 → Confirm Transfer → watch it fail (POST /transfer 500)"
   echo "  adb shell am start -n com.qalens.sample/com.qalens.QaLensControlActivity              # open the Control Room"
-  echo "  # Control Room → Webhook → http://127.0.0.1:8000/webhook → Test endpoint → ✓"
+  echo "  # Control Room → Webhook → http://127.0.0.1:$BACKEND_PORT/webhook → Test endpoint → ✓"
   echo "  # tap the QA bubble (or shake) → Overview: score dropped, Likely Owner = Backend/API (HIGH)"
   echo "  # Bug Bundle → Copy Jira Bug → paste anywhere"
   echo "  # Record Session → reproduce the transfer → stop → ⇪ webhook → verdict on the dashboard"

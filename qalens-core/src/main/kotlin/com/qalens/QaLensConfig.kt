@@ -56,7 +56,11 @@ data class QaLensConfig(
     /** MediaProjection cannot apply per-node masks. Explicit host opt-in to unmasked full-display video. */
     val allowUnmaskedVideo: Boolean = false,
     /** Screenshots stay in private app cache unless the host explicitly enables gallery copies. */
-    val saveScreenshotsToGallery: Boolean = false
+    val saveScreenshotsToGallery: Boolean = false,
+    /** Session safety limit, 1–180 minutes. Media and evidence budgets remain bounded. */
+    val recordingMaxDurationMinutes: Int = 60,
+    /** Presets for retrospective clips; custom 1–300 second marks are also supported. */
+    val recordingClipPresetsSeconds: List<Int> = listOf(10, 20, 60)
 ) {
     class Builder(seed: QaLensConfig = QaLensConfig()) {
         var enabled: Boolean = seed.enabled
@@ -83,6 +87,8 @@ data class QaLensConfig(
         var networkFromChucker: Boolean = seed.networkFromChucker
         var allowUnmaskedVideo: Boolean = seed.allowUnmaskedVideo
         var saveScreenshotsToGallery: Boolean = seed.saveScreenshotsToGallery
+        var recordingMaxDurationMinutes: Int = seed.recordingMaxDurationMinutes
+        var recordingClipPresetsSeconds: List<Int> = seed.recordingClipPresetsSeconds
 
         /** Add a custom redaction rule on top of the defaults. */
         fun addRedaction(pattern: String, replacement: String = "[REDACTED]") {
@@ -113,7 +119,9 @@ data class QaLensConfig(
             captureLogs = captureLogs,
             networkFromChucker = networkFromChucker,
             allowUnmaskedVideo = allowUnmaskedVideo,
-            saveScreenshotsToGallery = saveScreenshotsToGallery
+            saveScreenshotsToGallery = saveScreenshotsToGallery,
+            recordingMaxDurationMinutes = recordingMaxDurationMinutes.coerceIn(1, 180),
+            recordingClipPresetsSeconds = recordingClipPresetsSeconds.filter { it in 1..300 }.distinct().take(6).ifEmpty { listOf(10, 20, 60) }
         )
     }
 

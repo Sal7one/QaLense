@@ -97,7 +97,7 @@ object QaLens {
         val allowedVideo = configState.value.allowUnmaskedVideo
         configState.update { current -> QaLensConfig.Builder(current).apply(block).build() }
         val nowEnabled = configState.value.enabled
-        if (!nowEnabled) captureEpoch++
+        if (!nowEnabled) { captureEpoch++; QaLensLocalBridge.stop() }
         onMain {
             if (allowedVideo && !configState.value.allowUnmaskedVideo) {
                 pendingRecordingVideo = null
@@ -376,6 +376,13 @@ object QaLens {
                 .onFailure { log("DataSourceObserver.onError failed: ${it.message}") }
         }
     }
+
+    /** Explicitly expose redacted live semantics/actions on device loopback for adb forwarding.
+     * Use a freshly generated token. Nothing starts automatically or survives disable/process exit.
+     */
+    fun startLocalBridge(token: String, port: Int = 8766) = QaLensLocalBridge.start(token, port)
+    fun stopLocalBridge() = QaLensLocalBridge.stop()
+    val localBridgeStatus: StateFlow<String> = QaLensLocalBridge.status
 
     fun install(application: Application) {
         appRef = WeakReference(application)
@@ -711,6 +718,9 @@ object QaLens {
         closePanel() // get the panel out of the recording; stop via the notification
         QaLensSessionRecorder.start(activity, video)
     }
+
+    /** Mark the last 1–300 seconds without stopping. Saved as a separate .sal after session stop. */
+    fun saveRecentClip(seconds: Int = 20, label: String = "Bug clip") = onMain { QaLensSessionRecorder.markClip(seconds, label) }
 
     /** Stop recording, package the `.sal`, and open the share sheet. */
     fun stopRecording() = onMain { QaLensSessionRecorder.stop() }

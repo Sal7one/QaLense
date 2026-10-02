@@ -2,6 +2,65 @@
 
 ## Unreleased — post-0.9.0
 
+### Product onboarding and documentation cleanup — 2026-10-02
+- Add one onboarding guide for SDK/web/desktop/backend evaluation, data hooks, recording/clips,
+  pairing, persistence, component processors, privacy, troubleshooting and team integration advice.
+- Replace superseded handover verification history with the current dated baseline; retain older
+  history in Git. Shorten the demo, link the guide from entry points and correct stale architecture,
+  storage and resolved lint notes. Keep next.md as the only backlog.
+- Use the Gradle wrapper/configured toolchain in contributor and demo flows, respect the selected
+  backend port, and describe demo checks as a convenience subset rather than full CI/device coverage.
+- Keep source/private capture data separate and ignore local log output consistently.
+
+### Desktop launcher and retrospective bug clips — 2026-10-02
+- Embed the existing modern/classic web clients directly in the Python GUI, with onboarding choices,
+  sticky Back/Start, browser history and viewport-aware replay. Keep one source for reader/viewers.
+- Add common connection-guarded adb actions, optional installed scrcpy and bounded Downloads push/pull.
+  Discover finished recordings; explicitly copy/open or opt into new-session/clip collection on this
+  connection. Stream privately, deduplicate by SHA-256 and reset automatic collection on failures/switches.
+- Add `saveRecentClip` in active/no-op APIs and presets/custom intervals beside REC. Continue capture
+  while marking; save independent `.sal` clips after stop with recent-buffer evidence and aligned
+  keyframe video. Preserve master keep-earliest journals and disclose coverage/budget losses.
+- Replace the five-minute stop with a configured duration (default hour), duration-aware JPEG/video
+  sampling/bitrate and media/clip/history limits. Move recorder setup/stop and cleanup off main;
+  check encoder alignment/ranges, fall back sizes and reject videos without readable samples.
+- Verify API 36 real consent, HD master/clip replay, late evidence after log overflow, >5-minute
+  continuity, GUI collection/file round trips and existing safety/integration/load checks. Full-hour,
+  physical-phone encoder/TalkBack and actual scrcpy checks remain open; see the current handover.
+
+### PC component workbench — 2026-10-02
+- Add Send to PC beside Copy test tag, with asynchronous bounded memory previews, acknowledgement,
+  overflow accounting and stop/disable cleanup. Capture public semantics attributes, values, bounds
+  and visible ancestry/sibling context; omit hidden/password/custom values and protect spoofed keys.
+- Expand the browser GUI with component attributes/viewport preview, explicit JSON save/import/export,
+  a saved library and SHA-256 identity over stable content. Changed values/positions create new files;
+  timestamps/live IDs do not. Profiles remember phones/packages/activities without pairing credentials.
+- Add GUI adb discovery/package suggestions/owned forwarding and explicit no-reset launch. Import
+  selected Appium-style profile fields, report ignored driver/reset options and version mismatches.
+  Browser commands against a switched device require a new snapshot.
+- Add trusted local argv pipelines with saved inputs, background execution, timeouts, failure results,
+  cancellation and bounded output inspection. Include a summary processor and a browser-free CLI.
+- Cover protocol/workspace/profile/hash/pipeline behavior with Python regressions and real API 36
+  phone transfers, private/custom-key exclusions, queue overflow/ack/restart and existing gestures.
+  The full recording/integration/load runner passes; physical phones/Windows remain unverified.
+
+### Local PC bridge and inspector movement — 2026-10-02
+- Add explicit `startLocalBridge` / `stopLocalBridge` and readiness state, mirrored by the release
+  no-op. The authenticated device listener binds loopback, stops on disable, bounds requests and
+  main dispatch, and rejects queued actions after cancellation. Socket/JSON/redaction work runs off main.
+- Add a Python standard-library PC server with owned adb-forward cleanup and a browser tree/bounds
+  inspector. Read visible, root-scoped parent relationships/test tags, select nodes and invoke public
+  Compose tap/type/scroll actions. Ambiguous tags fail explicitly; hidden subtrees and password values
+  are excluded. Recent bounded observations include network metadata and cached host-owned data sources.
+- Expose a manual pairing control in the debug sample Settings. Pairing stays in process memory and
+  is hidden from reports; no bridge, browser polling or recording starts automatically.
+- Forward two-finger inspect/tag drags to the host as centroid-based single-finger drags. Cancel the
+  pending inspect tap, end when a finger lifts and suppress the remaining finger's accidental click.
+- Replace mirrored/unbounded bubble offsets with physical normalized positions and add a draggable
+  inspector dock. Clamp both against system/IME safe bounds and preserve positions across size changes.
+- Add protocol/proxy tests and real-device semantics/privacy/lifecycle/timeout plus LTR/RTL gesture
+  checks. See `tools/local-bridge/README.md` for operation, API limits and coverage boundaries.
+
 ### Overlay responsiveness under continuous logging — 2026-10-01
 - Batch log and network dashboard updates every 100 ms with bounded pending queues, instead of
   posting a main-thread task and copying history for each observation. Keep recording admission

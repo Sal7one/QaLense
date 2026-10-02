@@ -5,4 +5,14 @@
     <string name="qalens_recording_notification_title">QaLens · Recording screen</string>
     <string name="qalens_recording_notification_text">Open QaLens recording controls</string>
     <string name="qalens_stop_recording">Stop recording</string>
+    <string name="qalens_clip_button">★ Clip</string>
+    <string name="qalens_clip_description">Save recent bug clip</string>
+    <string name="qalens_clip_last_seconds">Last %1$ds</string>
+    <string name="qalens_clip_custom">Custom duration…</string>
+    <string name="qalens_clip_hint">Seconds (1–300)</string>
+    <string name="qalens_clip_title">Save last… seconds</string>
+    <string name="qalens_clip_mark">Mark clip</string>
+    <string name="qalens_cancel">Cancel</string>
+    <string name="qalens_clip_marked">Last %1$ds marked · clip saves when recording stops</string>
+    <string name="qalens_clip_open_app">Open the host app to choose a custom duration</string>
 </resources>

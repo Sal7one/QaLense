@@ -42,7 +42,7 @@ almost no contrast, so the overlay would vanish at exactly the moment it is need
 
 ### Why the configuration, not `isSystemInDarkTheme()`
 
-The overlay is attached as a decor-level `ComposeView` by `QaLensActivityInstaller`, so it
+The overlay uses a decor-attached `QaLensOverlayHost` containing a `ComposeView`, so it
 sits *outside* the host's Material theme and cannot read `MaterialTheme.colorScheme`. The
 configuration night mask is the honest signal available at that layer, and it is what the
 host app itself follows when it flips themes. `schemeForConfiguration` is split out so the
@@ -131,3 +131,17 @@ Not yet migrated, in priority order:
 
 Until those land, the inspector, Control Room and recording chip still use their own colors and
 sizing. Do not claim the entire QaLens UI is host-adaptive.
+
+
+## Physical movement and scrolling
+
+The bubble and inspector dock use an absolute top-left coordinate space inside `safeDrawing` insets,
+with normalized persisted positions. Physical drag distances have the same sign in LTR and RTL;
+size/IME/system-bar changes recompute the available travel. A 48 dp **Move inspector** handle moves
+the filter/detail dock. Detail content can scroll inside its height budget. The legacy top-end-relative
+bubble offsets are superseded by new position preferences.
+
+A second finger switches inspect/tag input to a host drag at the two-finger centroid. The parent View
+cancels Compose's pending tap, sends a valid DOWN/MOVE/UP sequence to the host content View and
+suppresses residual fingers. Single taps keep selecting/copying; panels/HUD/recording never enable
+this route. See the device regression and the PC bridge guide for tested limits.

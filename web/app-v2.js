@@ -614,6 +614,22 @@
     (store.S2.frames || []).forEach((f) => { if (f.url) URL.revokeObjectURL(f.url); });
     if (store.S2.videoUrl) URL.revokeObjectURL(store.S2.videoUrl);
   }
+  if (new URLSearchParams(location.search).has("desktop")) {
+    document.querySelectorAll('a[href]').forEach(link => {
+      const destination = new URL(link.href, location.href);
+      if (destination.origin === location.origin && /\/index(?:-v2)?\.html$/.test(destination.pathname)) {
+        destination.searchParams.set("desktop", ""); link.href = destination.href;
+      }
+    });
+  }
+  // Same-origin desktop shell: load transferred archives through the existing reader.
+  window.addEventListener("message", (event) => {
+    if (!new URLSearchParams(location.search).has("desktop") || event.origin !== location.origin || event.source !== window.parent || window.parent === window) return;
+    if (event.data?.type === "qalens-recording" && event.data.bytes instanceof ArrayBuffer && event.data.bytes.byteLength <= 400 * 1024 * 1024) {
+      loadFile(new File([event.data.bytes], String(event.data.name || "recording.sal"), {type: "application/octet-stream"}));
+    }
+    if (event.data?.type === "qalens-visibility" && !event.data.visible) document.querySelectorAll("video").forEach(video => video.pause());
+  });
   async function loadFile(file) {
     try {
       toast("Reading " + file.name + "…", 1500);
@@ -1007,7 +1023,8 @@
     els.setSpeed.onchange = () => { store.speed = Number(els.setSpeed.value) || 1; prefs.speed = store.speed; LS.set("speed", store.speed); applySpeed(); };
     els.setAutoplay.onchange = () => { prefs.autoplay = els.setAutoplay.checked; LS.set("autoplay", prefs.autoplay); };
     els.setFollow.onchange = () => { prefs.follow = els.setFollow.checked; LS.set("follow", prefs.follow); els.followToggle.checked = prefs.follow; renderTrack(); };
-    els.setBackend.onchange = () => { prefs.backend = els.setBackend.value.trim(); LS.set("backend", prefs.backend); toast(prefs.backend ? "Backend URL saved — use ⇪ Send to backend" : "Backend URL cleared"); };
+    els.setBackend.oninput = () => { prefs.backend = els.setBackend.value.trim(); LS.set("backend", prefs.backend); };
+    els.setBackend.onchange = () => toast(prefs.backend ? "Backend URL saved — use ⇪ Send to backend" : "Backend URL cleared");
     els.backendOpen.onclick = () => { const b = String(prefs.backend || "").trim(); if (!b) { toast("Set a Backend URL first"); return; } window.open(b, "_blank", "noopener"); };
     document.querySelectorAll("[data-toggle]").forEach((h) => h.onclick = () => {
       const card = h.closest("[data-card]");

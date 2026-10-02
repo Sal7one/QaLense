@@ -1,7 +1,7 @@
 name: Verify SDK
 on:
   push:
-    branches: [main, dev]
+    branches: [master, main, dev]
   pull_request:
 permissions:
   contents: read
@@ -33,5 +33,11 @@ jobs:
         run: gradle -p integration-tests/consumer assembleDebug assembleRelease verifyReleaseIsolation
       - name: Web reader and CLI regression tests
         run: node web/test/read.test.js
+      - name: Local PC bridge regression tests
+        run: |
+          python3 tools/local-bridge/test_server.py
+          python3 tools/local-bridge/test_workbench.py
+          python3 tools/local-bridge/test_desktop.py
+          node --check tools/local-bridge/app.js
       - name: Backend regression tests
         run: python3 backend/tests/test_backend.py

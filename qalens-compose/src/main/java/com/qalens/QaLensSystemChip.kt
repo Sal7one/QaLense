@@ -16,6 +16,10 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import android.widget.LinearLayout
+import android.widget.PopupMenu
+import android.widget.EditText
+import android.app.AlertDialog
 import com.qalens.compose.R
 import java.lang.ref.WeakReference
 
@@ -34,7 +38,10 @@ import java.lang.ref.WeakReference
  */
 internal object QaLensSystemChip {
 
-    private var chip: TextView? = null
+    private var chipRef: WeakReference<TextView>? = null
+    private val chip: TextView? get() = chipRef?.get()
+    private var chipWindowRef: WeakReference<View>? = null
+    private val chipWindow: View? get() = chipWindowRef?.get()
     private var windowManager: WindowManager? = null
     private var inAppActivity: WeakReference<Activity>? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -88,6 +95,7 @@ internal object QaLensSystemChip {
         }
     }
 
+    @SuppressLint("RtlHardcoded") // Window x/drag deltas are physical screen coordinates in both locales.
     private fun attach(context: Context, wm: WindowManager, type: Int, activity: Activity?) {
         val density = context.resources.displayMetrics.density
 
@@ -101,6 +109,7 @@ internal object QaLensSystemChip {
             text = context.getString(R.string.qalens_recording_elapsed, 0, 0)
             contentDescription = context.getString(R.string.qalens_stop_recording_elapsed, 0, 0)
             isClickable = true
+            minHeight = (48 * density).toInt()
             setTextColor(Color.WHITE)
             textSize = 13f
             typeface = Typeface.create(Typeface.DEFAULT_BOLD, Typeface.BOLD)
@@ -114,6 +123,39 @@ internal object QaLensSystemChip {
             elevation = 8 * density
         }
 
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(view)
+            addView(TextView(context).apply {
+                text = context.getString(R.string.qalens_clip_button); contentDescription = context.getString(R.string.qalens_clip_description); textSize = 14f
+                setTextColor(Color.WHITE); setPadding((16 * density).toInt(), (12 * density).toInt(), (16 * density).toInt(), (12 * density).toInt())
+                minHeight = (48 * density).toInt(); isClickable = true
+                accessibilityDelegate = object : View.AccessibilityDelegate() {
+                    override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
+                        super.onInitializeAccessibilityNodeInfo(host, info); info.className = android.widget.Button::class.java.name
+                    }
+                }
+                background = GradientDrawable().apply { cornerRadius = 24 * density; setColor(Color.rgb(45, 65, 90)) }
+                setOnClickListener { anchor ->
+                    runCatching { PopupMenu(context, anchor).apply {
+                        val presets = QaLens.config.value.recordingClipPresetsSeconds.filter { it in 1..300 }.distinct().take(6).ifEmpty { listOf(10, 20, 60) }
+                        presets.forEach { seconds -> menu.add(context.getString(R.string.qalens_clip_last_seconds, seconds)).setOnMenuItemClickListener { QaLens.saveRecentClip(seconds); true } }
+                        menu.add(context.getString(R.string.qalens_clip_custom)).setOnMenuItemClickListener {
+                            val host = QaLens.currentActivity?.takeIf { QaLensActivityInstaller.isResumed(it) && !it.isFinishing }
+                            if (host != null) {
+                                val input = EditText(host).apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER; setText(30.toString()); hint = host.getString(R.string.qalens_clip_hint) }
+                                runCatching { AlertDialog.Builder(host).setTitle(R.string.qalens_clip_title).setView(input)
+                                    .setPositiveButton(R.string.qalens_clip_mark) { _, _ -> QaLens.saveRecentClip(input.text.toString().toIntOrNull() ?: 0) }
+                                    .setNegativeButton(R.string.qalens_cancel, null).show() }
+                                    .onFailure { QaLens.pushError(ErrorKind.RECORDING, "Open the host app to choose a custom clip duration.") }
+                            } else android.widget.Toast.makeText(context, context.getString(R.string.qalens_clip_open_app), android.widget.Toast.LENGTH_SHORT).show()
+                            true
+                        }
+                        show()
+                    } }.onFailure { QaLens.pushError(ErrorKind.RECORDING, "Clip menu unavailable: ${it.message}") }
+                }
+            })
+        }
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -122,7 +164,7 @@ internal object QaLensSystemChip {
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
+            gravity = Gravity.TOP or Gravity.LEFT
             x = (16 * density).toInt()
             y = (64 * density).toInt()
             activity?.let { token = it.window.attributes.token }
@@ -145,9 +187,14 @@ internal object QaLensSystemChip {
                         val dx = e.rawX - downX; val dy = e.rawY - downY
                         if (moved || dx * dx + dy * dy > 24 * 24 * density * density / 4) {
                             moved = true
-                            params.x = startX + dx.toInt()
-                            params.y = startY + dy.toInt()
-                            runCatching { wm.updateViewLayout(v, params) }
+                            val decor = activity?.window?.decorView ?: QaLens.currentActivity?.window?.decorView ?: container
+                            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(decor)?.getInsets(
+                                androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout() or androidx.core.view.WindowInsetsCompat.Type.ime())
+                            val left = insets?.left ?: 0; val top = insets?.top ?: (24 * density).toInt()
+                            val right = insets?.right ?: 0; val bottom = insets?.bottom ?: (48 * density).toInt()
+                            params.x = (startX + dx.toInt()).coerceIn(left, maxOf(left, context.resources.displayMetrics.widthPixels - right - container.width))
+                            params.y = (startY + dy.toInt()).coerceIn(top, maxOf(top, context.resources.displayMetrics.heightPixels - bottom - container.height))
+                            runCatching { wm.updateViewLayout(container, params) }
                         }
                     }
                     MotionEvent.ACTION_UP -> if (!moved) v.performClick()
@@ -156,12 +203,13 @@ internal object QaLensSystemChip {
             }
         })
 
-        runCatching { wm.addView(view, params) }
+        runCatching { wm.addView(container, params) }
             .onSuccess {
-                chip = view
+                chipRef = WeakReference(view)
+                chipWindowRef = WeakReference(container)
                 windowManager = wm
                 inAppActivity = activity?.let { WeakReference(it) }
-                startMs = System.currentTimeMillis()
+                startMs = QaLensSessionRecorder.captureStartedAt
                 handler.removeCallbacks(timeTick)
                 handler.post(timeTick)
             }
@@ -170,8 +218,9 @@ internal object QaLensSystemChip {
 
     fun hide() {
         handler.removeCallbacks(timeTick)
-        val view = chip ?: return
-        chip = null
+        val view = chipWindow ?: return
+        chipRef = null
+        chipWindowRef = null
         runCatching { windowManager?.removeViewImmediate(view) }
         windowManager = null
         inAppActivity = null
