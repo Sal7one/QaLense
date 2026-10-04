@@ -24,10 +24,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.Button
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,7 +36,6 @@ import com.qalens.BookmarkSeverity
 import com.qalens.QaLens
 import com.qalens.qaName
 import com.qalens.qaTag
-import com.qalens.qaHiddenFromReports
 import android.os.Handler
 import android.os.Looper
 import kotlinx.coroutines.CoroutineScope
@@ -50,8 +45,6 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(darkTheme: Boolean, onToggleDark: () -> Unit, onProfileClick: () -> Unit) {
-    val bridgeStatus by QaLens.localBridgeStatus.collectAsState()
-    val token = if (BuildConfig.DEBUG) SampleBridgePairing.token else ""
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 40.dp)
@@ -66,19 +59,6 @@ fun SettingsScreen(darkTheme: Boolean, onToggleDark: () -> Unit, onProfileClick:
                     .qaTag("settings.title")
                     .qaName("Settings Title")
             )
-        }
-
-        if (BuildConfig.DEBUG) item {
-            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("PC inspector · local adb bridge", fontWeight = FontWeight.Bold)
-                Text(bridgeStatus)
-                Text("Explicit control of this QA app. Pair using the token below; stop when finished.")
-                SelectionContainer { Text(token, Modifier.qaHiddenFromReports()) }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { QaLens.startLocalBridge(token) }, modifier = Modifier.qaTag("bridge.start")) { Text("Start bridge") }
-                    Button(onClick = { QaLens.stopLocalBridge() }, modifier = Modifier.qaTag("bridge.stop")) { Text("Stop") }
-                }
-            }
         }
 
         // ── Profile tile ─────────────────────────────────────────────────
@@ -438,14 +418,5 @@ fun ProfileScreen(onBack: () -> Unit) {
                 }
             }
         }
-    }
-}
-
-
-// Process memory only; rotation/navigation must not display a new token for an existing listener.
-private object SampleBridgePairing {
-    val token: String by lazy {
-        ByteArray(24).also { java.security.SecureRandom().nextBytes(it) }
-            .joinToString("") { "%02x".format(it) }
     }
 }

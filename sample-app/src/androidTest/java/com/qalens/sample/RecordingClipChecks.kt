@@ -94,7 +94,7 @@ internal class RecordingClipChecks(private val test: Instrumentation) {
             test.runOnMainSync { if (QaLens.state.value.isRecording) QaLens.stopRecording(); QaLens.configure { allowUnmaskedVideo = false } }
         }
     }
-    private fun markFromUi() {
+    internal fun markFromUi() {
         val automation = test.uiAutomation
         val info = automation.serviceInfo
         val flags = info.flags
@@ -130,7 +130,7 @@ internal class RecordingClipChecks(private val test: Instrumentation) {
         } finally { info.flags = flags; automation.serviceInfo = info }
     }
 
-    private fun verifyVideo(zip: ZipFile) {
+    internal fun verifyVideo(zip: ZipFile) {
         val entry = zip.getEntry("video.mp4") ?: error("Video fell back to frames; HD path is not fixed")
         val file = File(test.targetContext.cacheDir, "qalens-video-check.mp4")
         try {

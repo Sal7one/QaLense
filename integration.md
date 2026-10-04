@@ -104,6 +104,12 @@ Wrap your root composable (better semantics + `testTagsAsResourceId` for UI test
 setContent { QaLensRoot { App() } }
 ```
 
+If you removed AndroidX Startup, `QaLensRoot` establishes the application context and tracks the
+wrapped Activity's resume/pause lifecycle. `QaLens.configure` sets options; it does not install
+application-wide hooks. For hooks and overlays across all host Activities, explicitly call
+`QaLens.install(this)` in `Application.onCreate()`. The Control Room also installs those hooks
+when you explicitly start recording from it. Keep the same no-op dependency split in production.
+
 ## Step 4 — Screens & navigation (L2)
 
 Navigation Compose: use `QaLensNavHost` with its supported parameters and optional
@@ -366,12 +372,20 @@ instead. The independent consumer fixture is the executable example for external
 
 ## Local PC inspection and Compose control
 
-For explicit QA sessions, `QaLens.startLocalBridge(token, port = 8766)` exposes redacted visible
+Every active SDK integration includes **PC inspector** in **Control Room → Desktop connection**,
+the tester overlay's **More tools**, and the full overlay's **Tools** tab. Choose a device port
+(default 8766), tap **Start PC inspector**, and **Copy pairing token** into the desktop connection
+form. No host Settings screen or sample-app dependency is required. **New pairing token** revokes
+the old connection; **Stop PC inspector** closes the listener. Tokens are hidden until explicitly
+shown, kept in process memory, excluded from reports and copied as sensitive clipboard data on
+Android 13+. A user-requested clipboard copy can outlive the pairing.
+
+For custom host controls, `QaLens.startLocalBridge(token, port = 8766)` still exposes redacted visible
 semantics and tap/type/scroll handlers on device loopback. `QaLens.stopLocalBridge()` closes it;
-`QaLens.localBridgeStatus` reports readiness/failure. No-op builds never open a socket. It is off by
-default, uses a host-generated random token, stops when QaLens is disabled and requires another
-explicit start after re-enable. Keep the pairing UI and token out of reports using
-`qaHiddenFromReports()`; never persist/log the token.
+`QaLens.localBridgeStatus` reports readiness/failure. Keep custom token UI out of reports with
+`qaHiddenFromReports()` and never persist/log it. SDK and custom controls share the same listener;
+starting either replaces the previous pairing. It is off by default, stops on disable and requires
+an explicit start after re-enable. No-op builds provide no listener or pairing UI.
 
 The [PC tool and complete protocol](tools/local-bridge/README.md) create an adb forward and provide a
 local browser tree/bounds inspector plus observed logs/network metadata/cached app-data snapshots.

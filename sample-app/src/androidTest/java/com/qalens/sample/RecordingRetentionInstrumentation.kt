@@ -43,6 +43,11 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var longSession = false
     private var bridgeOnly = false
     private var overlayLoadOnly = false
+    private var controlOnly = false
+    private var controlVideoOnly = false
+    private var manualRootOnly = false
+    private var pcUiOnly = false
+    private var desktopTransferToken: String? = null
     override fun onCreate(arguments: Bundle?) {
         videoDenyOnly = arguments?.getString("videoDenyOnly") == "true"
         clipsOnly = arguments?.getString("clipsOnly") == "true"
@@ -50,6 +55,11 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         longSession = arguments?.getString("longSession") == "true"
         bridgeOnly = arguments?.getString("bridgeOnly") == "true"
         overlayLoadOnly = arguments?.getString("overlayLoadOnly") == "true"
+        controlOnly = arguments?.getString("controlOnly") == "true"
+        controlVideoOnly = arguments?.getString("controlVideoOnly") == "true"
+        manualRootOnly = arguments?.getString("manualRootOnly") == "true"
+        pcUiOnly = arguments?.getString("pcUiOnly") == "true"
+        desktopTransferToken = arguments?.getString("desktopTransferToken")
         super.onCreate(arguments)
         start()
     }
@@ -57,6 +67,21 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     override fun onStart() {
         val result = Bundle()
         try {
+            desktopTransferToken?.let { token ->
+                DesktopTransferChecks(this).run(token)
+                result.putString("stream", "\nOK: Real desktop transfer copied the completed master/clip while Control Room was foreground and revoked pairing after rotation.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (pcUiOnly) {
+                PcInspectorUiChecks(this).run(manualRootOnly)
+                result.putString("stream", "\nOK: SDK PC inspector pairs from the overlay, shares/rotates tokens in Control Room, stops from full overlay and stays stopped after disable/re-enable.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (controlOnly || controlVideoOnly) {
+                RecordingControlChecks(this).run(controlVideoOnly, manualRootOnly)
+                result.putString("stream", "\nOK: Control Room recording buttons start app capture, clips keep capture running, and master/clip archives contain media (video=$controlVideoOnly, manualRoot=$manualRootOnly).\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             if (videoDenyOnly) {
                 RecordingClipChecks(this).denyVideo()
                 result.putString("stream", "\nOK: Real video consent denial leaves no archive, clears recording/saving and allows subsequent frame capture.\n")

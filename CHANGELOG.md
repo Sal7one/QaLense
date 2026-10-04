@@ -2,6 +2,28 @@
 
 ## Unreleased — post-0.9.0
 
+### Host lifecycle, SDK pairing and resilient PC transfers — 2026-10-04
+- Let explicit `QaLensRoot` integrations establish application context and scoped Activity lifecycle
+  callbacks when Startup installation is absent. This fixes foreground-host discovery for Send to PC
+  and recording controls without requiring sample-app setup.
+- Make the delayed clip acknowledgement retain a nullable-safe application context and guard its
+  actual main-thread execution. Cover the reported old line-642 null-context path while recording.
+- Preflight Control Room recording actions, establish lifecycle hooks before returning to the host,
+  clear failed/expired requests and display disabled/privacy/launcher errors in the recording card.
+- Wait for the consent Activity to resume before launching HD services, keep it visible until
+  foreground promotion, start the encoder worker afterward and stop services without a background
+  start. Report launch/promotion/encoder errors distinctly from denied permission. The consuming
+  app's exact foreground exception still needs its trace; emulator success cannot identify it.
+- Move PC inspector pairing into shared SDK Control Room/overlay controls: editable port, hidden
+  token, sensitive clipboard marking, token rotation and Stop. Remove sample-only pairing UI.
+  Captured inbox/ack and cached observations remain available with Control Room foreground;
+  live tree reads/actions still require the host screen to be resumed.
+- Keep automatic PC recording collection enabled through busy UI and transient discovery/copy
+  failures, with bounded retries and deduplication. Revoke on device changes or authentication
+  failures, and guard in-flight enable/disable/connection races. Component Receive also survives
+  temporary failures. Run the transfer state-machine regressions in CI and add an opt-in real
+  Android/adb/Python transfer check for outage recovery, paused-host copies and revoked tokens.
+
 ### Recording controls and capture memory — 2026-10-04
 - Fix overlay recording controls/clip popups using an application context for visual APIs. Use a
   display/window context on API 30+ and SDK-owned native widget styles; preserve the host's StrictMode

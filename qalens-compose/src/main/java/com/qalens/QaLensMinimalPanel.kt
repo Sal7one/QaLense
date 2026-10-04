@@ -256,6 +256,9 @@ internal fun QaLensMinimalPanel(
                 }
             }
 
+            Spacer(Modifier.height(14.dp))
+            QaLensPcInspectorControls(colors)
+
             if (macros.isNotEmpty()) {
                 Spacer(Modifier.height(14.dp))
                 Text("RECENT MACROS", color = colors.fg2, fontSize = 10.sp, fontWeight = FontWeight.Bold)

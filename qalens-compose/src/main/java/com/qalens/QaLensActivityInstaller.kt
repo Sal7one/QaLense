@@ -39,6 +39,9 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     private const val NOTIFICATION_PERMISSION_REQUEST = 0x4153
 
     private var installed = false
+    private var callbacksRegistered = false
+    internal val isInstalled: Boolean get() = installed
+    private val rootActivities = java.util.WeakHashMap<Activity, Int>()
     private var notificationPermissionAsked = false
 
     // Live host-activity count → detect when the app is fully gone (vs. just rotating/backgrounded)
@@ -128,8 +131,40 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     fun install(application: Application) {
         if (installed) return
         installed = true
+        registerCallbacks(application)
+    }
+
+    private fun registerCallbacks(application: Application) {
+        if (callbacksRegistered) return
+        callbacksRegistered = true
         application.registerActivityLifecycleCallbacks(this)
     }
+
+    /** Explicit roots opt in only their Activity when AndroidX Startup is absent/disabled. */
+    fun registerRoot(activity: Activity) {
+        QaLens.rememberApplication(activity.application)
+        rootActivities[activity] = (rootActivities[activity] ?: 0) + 1
+        registerCallbacks(activity.application)
+        onActivityCreated(activity, null) // Root composition may occur after the real callback.
+    }
+
+    fun resumeRoot(activity: Activity) {
+        if (!isResumed(activity)) onActivityResumed(activity)
+    }
+
+    fun unregisterRoot(activity: Activity) {
+        val count = rootActivities[activity] ?: return
+        if (count > 1) { rootActivities[activity] = count - 1; return }
+        if (!installed) {
+            onActivityPaused(activity)
+            detachOverlay(activity)
+            onActivityDestroyed(activity)
+        }
+        rootActivities.remove(activity)
+    }
+
+    private fun isManaged(activity: Activity): Boolean =
+        !isInternal(activity) && (installed || rootActivities.containsKey(activity))
 
     /** QaLens-owned screens (Control Room, Player, consent trampoline) never get the overlay. */
     private fun isInternal(activity: Activity): Boolean = when (activity.javaClass.name) {
@@ -185,12 +220,13 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
         ComposeSemanticsReader.rawNodes(activity.window.decorView, strict = true)
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
-        if (!isInternal(activity)) { liveActivities++; activities += activity }
+        if (isManaged(activity) && activities.add(activity)) liveActivities++
     }
     override fun onActivityStarted(activity: Activity) = Unit
 
     override fun onActivityResumed(activity: Activity) {
-        if (isInternal(activity)) return
+        if (!isManaged(activity)) return
+        onActivityCreated(activity, null) // Installation can happen while a host task already exists.
         resumed += activity
         QaLens.trackActivity(activity)
         // Master run-condition (`QaLens.configure { enabled = false }`): fully inert — no overlay,
@@ -217,7 +253,7 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     }
 
     override fun onActivityPaused(activity: Activity) {
-        if (isInternal(activity)) return
+        if (!isManaged(activity)) return
         resumed -= activity
         stopLayout(activity)
         QaLens.onActivityPaused(activity)
@@ -235,10 +271,9 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
      * the app is swiped away). Re-shown automatically on the next launch.
      */
     override fun onActivityDestroyed(activity: Activity) {
-        if (isInternal(activity)) return
+        if (!isManaged(activity) || !activities.remove(activity)) return
         QaLensFrameMetrics.detach(activity)
         QaLensSystemChip.detachFrom(activity)
-        activities -= activity
         resumed -= activity
         synchronized(extraRoots) { extraRoots.entries.removeAll { it.value.owner.get() === activity } }
         liveActivities = (liveActivities - 1).coerceAtLeast(0)

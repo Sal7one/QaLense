@@ -23,6 +23,7 @@ python3 tools/local-bridge/test_server.py
 python3 tools/local-bridge/test_workbench.py
 python3 tools/local-bridge/test_desktop.py
 node --check tools/local-bridge/app.js
+node tools/local-bridge/test_recording_transfer.js
 ```
 
 The consumer fixture resolves normal `com.qalens:*` coordinates through `includeBuild`; it catches
@@ -76,6 +77,31 @@ against current system/IME insets; run with gesture and three-button navigation.
 Use [recording clips](docs/RECORDING_CLIPS.md) for preset/custom clips, longer sessions and real
 HD consent approval/denial modes. HD checks require the OS dialog to be handled promptly on the
 disposable device. Physical-device and full-hour endurance remain open.
+
+The SDK pairing controls have a separate UI regression, including a host using only `QaLensRoot`
+without Startup installation. It starts pairing from More tools, sends a component, reads the inbox
+with Control Room foreground, rotates the token, then stops from the full overlay:
+
+```sh
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e pcUiOnly true -e manualRootOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: SDK PC inspector pairs from overlay`. The focused Control Room recording tests in
+[recording clips](docs/RECORDING_CLIPS.md) cover both recording buttons and the old null-context
+clip callback. These focused modes are additional to the full runner.
+
+For the complete Android → adb → Python → shared transfer-controller path, install the same
+APKs and run the opt-in check on a disposable emulator (Node 18+ and Python 3):
+
+```sh
+node tools/local-bridge/test_device_transfer.js emulator-SERIAL
+```
+
+It owns a temporary PC server/storage and adb forward, simulates an interrupted forward, and
+verifies automatic copy of a newly completed master/clip with Control Room foreground, hashes,
+private file permissions, deduplication and revoked pairing. It is a transport/controller check;
+use the actual browser to verify checkbox rendering and navigation.
 
 ## Review expectations
 

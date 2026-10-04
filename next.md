@@ -3,6 +3,28 @@
 Updated 2026-10-04. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Completed 2026-10-04: host lifecycle and PC transfer reliability
+
+- [x] Reproduce Control Room's silent recording failure without Startup; establish scoped lifecycle
+  and application context from `QaLensRoot`, bootstrap explicit Control Room recording actions,
+  preflight privacy/enabled/launcher failures and expire unconsumed requests.
+- [x] Guard delayed clip acknowledgements against null global context and stale sessions; exercise
+  the old null-context path while capture continues, and decode HD master/UI clips from Control Room.
+- [x] Keep HD consent visible until resumed service launch/foreground promotion, defer worker setup
+  until promotion and report actual startup failures. The consuming app's exact foreground-service
+  exception remains unconfirmed without its trace/device build.
+- [x] Put PC pairing in shared SDK Control Room and both overlays, remove sample-only controls,
+  and verify Send to PC, token rotation/privacy/stop with manual root installation. Receive already
+  captured components and list completed recordings while Control Room is in front.
+- [x] Queue auto-transfer enable during busy operations, retain it through transient failures with
+  bounded retries, and reject stale connection/enable/disable responses. Add executable regressions
+  to CI and keep component Receive enabled after temporary errors.
+- [x] Verify real Android → adb → Python → shared transfer-controller copies, temporary forward
+  outage recovery, private hashed files, deduplication and revoked authentication with an opt-in
+  disposable-emulator harness.
+- Live desktop browser testing for this patch is pending while the Mac is locked. Earlier GUI
+  results are a dated baseline, not verification of the new checkbox flow.
+
 ## Completed 2026-10-02: desktop launcher and retrospective clips
 
 - [x] Onboarding choices and Back/browser-history navigation; embed both existing `web/` viewers
@@ -55,7 +77,8 @@ baselines and project context. Older changelog entries are historical, not uncom
 
 - **Confirm the reported HD/Last 10s crash in the consuming app.** Incorrect visual-context use
   in recording overlays/popups is reproduced and corrected without disabling host StrictMode.
-  Recording bitmap allocation is bounded before capture. HD now exercises the actual clip controls,
+  Recording bitmap allocation is bounded before capture. Null-context clip acknowledgement and
+  consent/foreground-service handoff paths are hardened. HD now exercises the actual clip controls,
   not just API marks. Still obtain the app/device crash trace and verify the consuming build includes
   these changes; sample/emulator success cannot establish that this was its cause.
 

@@ -112,6 +112,7 @@ class QaLensControlActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        QaLens.rememberApplication(application)
         setContent { ControlRoom(notifGranted, drawOverGranted, configVersion, importSummary) }
     }
 
@@ -141,14 +142,26 @@ private fun hostLaunchIntent(context: Context): Intent? {
 }
 
 /** Arm a recording, then jump into the host app — it starts on the app's first resumed screen. */
-private fun armAndJump(context: Context, video: Boolean) {
+private fun armAndJump(context: Context, video: Boolean): String? {
+    if (!QaLens.config.value.enabled) return "QaLens is disabled in this app. Ask your developer to enable it before recording."
+    if (video && !QaLens.config.value.allowUnmaskedVideo) {
+        return "HD recording is disabled by this app’s privacy settings. Use frame recording or ask your developer to enable unmasked video."
+    }
     val launch = hostLaunchIntent(context)
     if (launch == null) {
-        QaLens.log("Control Room: no host launcher activity found")
-        return
+        return "No host app launcher was found. Open the app and start recording from its overlay."
+    }
+    // Control Room may be the first SDK screen, with Startup removed by the consuming app.
+    if (!QaLensActivityInstaller.isInstalled) {
+        val application = context.applicationContext as? android.app.Application
+            ?: return "App initialization is unavailable. Open the app and try again."
+        QaLens.install(application)
     }
     QaLens.armRecording(video)
-    context.startActivity(launch)
+    return runCatching { context.startActivity(launch); null }.getOrElse {
+        QaLens.consumePendingRecording()
+        "Could not open the app. Open it manually and start recording from its overlay."
+    }
 }
 
 private fun openInPlayer(context: Context, info: RecordingInfo): Boolean {
@@ -183,6 +196,7 @@ private fun ControlRoom(
     // Two-tap delete: first tap arms ("Confirm?"), second deletes. Path of the armed recording,
     // or "*" for clear-all. Tapping anything else disarms.
     var armedDelete by remember { mutableStateOf<String?>(null) }
+    var recordingError by remember { mutableStateOf<String?>(null) }
 
     Column(
         Modifier.fillMaxSize().background(Bg)
@@ -230,10 +244,11 @@ private fun ControlRoom(
                     color = TxtMuted, fontSize = 11.sp
                 )
                 Spacer(Modifier.height(8.dp))
-                BigButton("●  Record Session (frames, no permission)", Green) { armAndJump(context, video = false) }
+                BigButton("●  Record Session (frames, no permission)", Green) { recordingError = armAndJump(context, video = false) }
                 Spacer(Modifier.height(6.dp))
-                BigButton("●  Record HD Video (MediaProjection)", Accent) { armAndJump(context, video = true) }
+                BigButton("●  Record HD Video (MediaProjection)", Accent) { recordingError = armAndJump(context, video = true) }
             }
+            recordingError?.let { Text(it, color = Red, fontSize = 12.sp) }
             Spacer(Modifier.height(8.dp))
             Text(
                 if (drawOverGranted)
@@ -242,6 +257,10 @@ private fun ControlRoom(
                     "Stop control: in-app REC chip + notification + shake. Grant “Draw over apps” below for a floating chip that survives navigation.",
                 color = TxtMuted, fontSize = 10.sp
             )
+        }
+
+        ControlCard("Desktop connection") {
+            QaLensPcInspectorControls(QaLensOverlayColors.lightHost)
         }
 
         // ── Rescue ──
@@ -312,7 +331,7 @@ private fun ControlRoom(
         // ── Recordings ──
         ControlCard("Saved Recordings (${state.recordings.size})") {
             Text(
-                "${RecordingInfo.humanSize(state.recordingsBytes)} on device · newest 5 kept automatically",
+                "${RecordingInfo.humanSize(state.recordingsBytes)} on device · up to 30 kept within 1 GiB",
                 color = TxtMuted, fontSize = 11.sp
             )
             Spacer(Modifier.height(8.dp))

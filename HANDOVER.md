@@ -37,7 +37,7 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 | Optional Android tools | `qalens-navigation-compose/`, `qalens-replay/` |
 | Production API mirror | `qalens-noop/`, `NoopParityCheck`; independent `integration-tests/consumer/` |
 | Browser/CLI | `web/app-v2.js`, `web/app.js`, shared `web/sal.js`, `web/tools/sal_report.js` |
-| Desktop/automation | `tools/local-bridge/server.py`, `workbench.py`, `desktop.py`, `process.py` |
+| Desktop/automation | `tools/local-bridge/server.py`, `workbench.py`, `desktop.py`, `process.py`, `recording-transfer.js` |
 | Upload test service | `backend/server.py`, `backend/tests/test_backend.py` |
 | Executed device fixtures | `sample-app/src/androidTest/.../RecordingRetentionInstrumentation.kt` and focused checks |
 
@@ -45,6 +45,45 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Host lifecycle, pairing and transfer regression — 2026-10-04
+
+The user integrates with Application configuration and `QaLensRoot`. Control Room's old buttons
+silently returned to the host without starting capture when Startup/Application installation was
+absent; the new manual-root test reproduced that failure against the old SDK. Explicit roots now
+establish application context and scoped lifecycle callbacks. Control Room recording actions
+install callbacks before launching, preflight failure conditions and expire pending requests.
+The old `QaLensSessionRecorder.kt:642` passed a nullable global context to Toast in a deferred
+main callback; retaining a safe application context and guarding the posted work fixes that path.
+
+PC pairing is now one SDK component shared by Control Room, minimal More tools and full Tools.
+The sample-only implementation was removed. Tokens are hidden by default, stay in memory, and
+are excluded from reports; rotation/Stop/disable revoke the old pairing. Already captured component
+inbox/ack and cached observations require a valid bridge session rather than a foreground host.
+Live semantics/actions keep their resumed-host guard. The manual-root PC UI test passes Send to PC,
+paused-host inbox/recording discovery, token rotation/privacy, full-overlay Stop and disable/re-enable.
+
+HD startup waits for lifecycle RESUMED, keeps the consent helper visible until foreground promotion,
+and starts the encoder worker afterward. Startup errors retain their type/reason; service stop avoids
+background starts. The manual-root HD Control Room test passes real approval, preset/custom marks,
+continued capture and Android decoding of every master/clip. The HD clip/strict visual-context test
+with floating-overlay permission also passes on the new service handoff; denial resets capture
+without saving an archive and permits subsequent frame recording. Its initial test failure was a bad
+manifest assertion (`videoFile` versus `video`), corrected before accepting the result. The consuming
+app's exact foreground-service exception has not been reproduced or identified.
+
+The shared desktop transfer controller queues enable during busy UI, keeps temporary failures enabled
+with bounded retries, and rejects stale connection/disable responses. Six Node scenarios pass and
+are added to CI. Python bridge/workbench/desktop tests (18), shared reader/CLI and backend tests (23)
+pass. Gradle checks pass: core/Compose/replay/no-op (177/31/5/2), all module/sample lint (zero errors),
+release isolation and independent consumer debug/release/isolation. Unchanged tests may be cached.
+The full API 36 device runner passes (including the existing log-flood/OSS/privacy/bridge cases).
+An additional end-to-end test uses the actual Android bridge, owned adb forward, Python server and
+GUI's shared transfer controller. It passes queued busy enable, an interrupted/restored forward,
+automatic master/clip copying with Control Room foreground, private SHA-256 files, deduplication
+and revoked-token shutdown. Temporary servers/storage/forwards are removed by the check.
+The Mac is locked, so this patch's live desktop browser check is pending; do not claim the dated
+2026-10-02 GUI runs verify the new checkbox rendering/navigation.
 
 ### Recording controls — 2026-10-04
 
@@ -142,7 +181,8 @@ claim is made for crash/power-loss recovery of unsaved journals.
   exported values, bounds, package/viewport and visible tree position. Fixed adb tasks/Downloads
   transfers require the current connection nonce. Optional scrcpy is an owned external process.
 - Finished recording copy is explicit; automatic copy is off by default, takes a baseline and
-  resets on connection changes/errors/restarts. SHA-256 archive files are private and deduplicated.
+  resets on connection changes, revoked authentication and restarts. Temporary discovery/copy errors
+  keep the choice enabled with bounded retries. SHA-256 archive files are private and deduplicated.
   The PC transfer limit is 400 MiB; mock backend uploads remain limited to 64 MiB.
 - Component pipelines are trusted local argv programs, not sandboxed code. They require saved
   input, run serially off HTTP handlers, have timeouts/no retries and cancel on shutdown. Recording

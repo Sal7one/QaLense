@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.ResultReceiver
 import androidx.core.app.ServiceCompat
 import com.qalens.compose.R
 import androidx.core.content.ContextCompat
@@ -34,8 +35,9 @@ import java.io.File
  */
 class QaLensProjectionService : Service() {
 
-    private val captureThread = HandlerThread("qalens-video").apply { start() }
-    private val captureHandler = Handler(captureThread.looper)
+    private val captureThread = HandlerThread("qalens-video")
+    // Do not wait for a worker looper while Android is waiting for foreground promotion.
+    private val captureHandler by lazy { captureThread.start(); Handler(captureThread.looper) }
     private var starting = false
     private var projection: MediaProjection? = null
     private var recorder: MediaRecorder? = null
@@ -49,8 +51,15 @@ class QaLensProjectionService : Service() {
             captureHandler.post { stopRecording() }
             return START_NOT_STICKY
         }
+        val path = intent?.getStringExtra(EXTRA_VIDEO_PATH)
+        @Suppress("DEPRECATION")
+        val ready: ResultReceiver? = if (Build.VERSION.SDK_INT >= 33)
+            intent?.getParcelableExtra(EXTRA_FOREGROUND_RESULT, ResultReceiver::class.java)
+        else intent?.getParcelableExtra(EXTRA_FOREGROUND_RESULT)
         try { startForegroundCompat() } catch (failure: Exception) {
-            QaLensSessionRecorder.onVideoConsentDenied(intent?.getStringExtra(EXTRA_VIDEO_PATH))
+            ready?.send(FOREGROUND_FAILED, null)
+            QaLensSessionRecorder.onVideoConsentDenied(path,
+                "HD foreground service could not start (${failure.javaClass.simpleName}): ${failure.message}. Use frame recording.")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -60,15 +69,20 @@ class QaLensProjectionService : Service() {
         val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             intent?.getParcelableExtra(EXTRA_DATA, Intent::class.java)
         else intent?.getParcelableExtra(EXTRA_DATA)
-        val path = intent?.getStringExtra(EXTRA_VIDEO_PATH)
 
         if (resultCode == 0 || data == null || path == null) {
+            ready?.send(FOREGROUND_FAILED, null)
             QaLensSessionRecorder.onVideoConsentDenied(path)
             stopSelf()
             return START_NOT_STICKY
         }
 
-        if (!QaLensSessionRecorder.isAwaitingVideo(path)) { stopSelf(); return START_NOT_STICKY }
+        if (!QaLensSessionRecorder.isAwaitingVideo(path) || stopped) {
+            ready?.send(FOREGROUND_FAILED, null)
+            QaLensSessionRecorder.onVideoConsentDenied(path, "HD recording was cancelled before its service became ready. Try again or use frame recording.")
+            stopSelf(); return START_NOT_STICKY
+        }
+        ready?.send(FOREGROUND_READY, null)
         if (starting) return START_NOT_STICKY
         starting = true
         captureHandler.post { runCatching {
@@ -77,8 +91,7 @@ class QaLensProjectionService : Service() {
         }
             .onFailure {
                 QaLens.log("Video recording failed to start: ${it.message}")
-                QaLens.pushError(ErrorKind.RECORDING, "HD video could not start: ${it.message}. Use frame recording.")
-                QaLensSessionRecorder.onVideoConsentDenied(path)
+                QaLensSessionRecorder.onVideoConsentDenied(path, "HD video could not start: ${it.message}. Use frame recording.")
                 stopRecording()
             } }
         return START_NOT_STICKY
@@ -142,7 +155,7 @@ class QaLensProjectionService : Service() {
         QaLensSessionRecorder.onVideoStarted(output.absolutePath)
     }
 
-    private var stopped = false
+    @Volatile private var stopped = false
 
     private fun stopRecording() {
         if (stopped) return
@@ -178,7 +191,7 @@ class QaLensProjectionService : Service() {
         super.onDestroy()
         // A5: service torn down while the projection is still active (system reclaim / task removal)
         // — stop and hand the result back to the recorder so isRecording flips false.
-        captureHandler.post { stopRecording(); captureThread.quitSafely() }
+        if (captureThread.isAlive) captureHandler.post { stopRecording(); captureThread.quitSafely() }
     }
 
     private fun startForegroundCompat() {
@@ -230,19 +243,28 @@ class QaLensProjectionService : Service() {
         const val EXTRA_DATA = "qalens.data"
         const val EXTRA_VIDEO_PATH = "qalens.video_path"
         const val ACTION_STOP = "com.qalens.action.STOP_PROJECTION"
+        private const val EXTRA_FOREGROUND_RESULT = "qalens.foreground_result"
+        internal const val FOREGROUND_READY = 1
+        internal const val FOREGROUND_FAILED = 0
 
         fun start(context: Context, resultCode: Int, data: Intent, videoPath: String) {
+            start(context, resultCode, data, videoPath, null)
+        }
+
+        internal fun start(context: Context, resultCode: Int, data: Intent, videoPath: String, ready: ResultReceiver?) {
             val intent = Intent(context, QaLensProjectionService::class.java).apply {
                 putExtra(EXTRA_RESULT_CODE, resultCode)
                 putExtra(EXTRA_DATA, data)
                 putExtra(EXTRA_VIDEO_PATH, videoPath)
+                putExtra(EXTRA_FOREGROUND_RESULT, ready)
             }
             ContextCompat.startForegroundService(context, intent)
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, QaLensProjectionService::class.java).setAction(ACTION_STOP)
-            context.startService(intent)
+            // A background app can stop its service without trying to start another service.
+            // onDestroy queues encoder finalization on the capture worker.
+            context.stopService(Intent(context, QaLensProjectionService::class.java))
         }
     }
 }

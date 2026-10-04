@@ -303,7 +303,7 @@ internal object QaLensSessionRecorder {
         }
     }
 
-    fun onVideoConsentDenied(path: String?) {
+    fun onVideoConsentDenied(path: String?, failureReason: String? = null) {
         handler.post {
             if (path == null || lifecycle.phase != RecordingLifecycle.Phase.AWAITING_CONSENT || videoFile?.absolutePath != path) return@post
             lifecycle.cancel()
@@ -315,7 +315,8 @@ internal object QaLensSessionRecorder {
             QaLensSystemChip.hide()
             restoreOverlay()
             QaLens.setRecording(false)
-            QaLens.log("Screen recording permission denied — recording cancelled.")
+            if (failureReason == null) QaLens.log("Screen recording permission denied — recording cancelled.")
+            else QaLens.pushError(ErrorKind.RECORDING, failureReason)
             sessionDir?.let { discarded -> writer.execute { discarded.deleteRecursively() } }
             sessionDir = null
         }
@@ -614,6 +615,9 @@ internal object QaLensSessionRecorder {
         val state = QaLens.state.value
         val root = sessionDir ?: return
         val id = lifecycle.sessionId
+        // A manual QaLensRoot integration may never have called QaLens.install. Retain only the
+        // application context, not an Activity, across this deferred UI acknowledgement.
+        val feedbackContext = activityRef?.get()?.applicationContext ?: QaLens.appContext
         val ordinal = ++clipCount
         writer.execute {
             try {
@@ -639,7 +643,15 @@ internal object QaLensSessionRecorder {
                 clipEvidenceBytes += estimated; clipMediaBytes += media
                 synchronized(clips) { clips += Clip(window, safeLabel, dir, captured,
                     captured.applyTo(state), frames, omittedFrames) }
-                handler.post { android.widget.Toast.makeText(QaLens.appContext, QaLens.appContext?.getString(com.qalens.compose.R.string.qalens_clip_marked, seconds) ?: "Clip marked", android.widget.Toast.LENGTH_SHORT).show() }
+                handler.post {
+                    if (id == lifecycle.sessionId && sessionDir == root && QaLens.config.value.enabled) {
+                        feedbackContext?.let { context -> runCatching {
+                            android.widget.Toast.makeText(context,
+                                context.getString(com.qalens.compose.R.string.qalens_clip_marked, seconds),
+                                android.widget.Toast.LENGTH_SHORT).show()
+                        } }
+                    }
+                }
             } catch (failure: Exception) {
                 clipError("Could not mark clip: ${failure.message}")
             }
@@ -648,7 +660,10 @@ internal object QaLensSessionRecorder {
 
     private fun clipError(message: String) {
         QaLens.pushError(ErrorKind.RECORDING, message)
-        handler.post { QaLens.appContext?.let { android.widget.Toast.makeText(it, message, android.widget.Toast.LENGTH_LONG).show() } }
+        val context = activityRef?.get()?.applicationContext ?: QaLens.appContext
+        handler.post { context?.let { runCatching {
+            android.widget.Toast.makeText(it, message, android.widget.Toast.LENGTH_LONG).show()
+        } } }
     }
 
     private fun fileCrc32(file: File): String {

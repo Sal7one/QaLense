@@ -8,14 +8,14 @@ async function api(path, command) {
   if (command) headers['Content-Type'] = 'application/json';
   const response = await fetch(`/api/${path}`, {method: command ? 'POST' : 'GET', headers, body: command ? JSON.stringify(command) : undefined, cache: 'no-store'});
   const result = await response.json();
-  if (!response.ok || result.ok === false) throw Error(result.error || `HTTP ${response.status}`);
+  if (!response.ok || result.ok === false) { const error = Error(result.error || `HTTP ${response.status}`); error.status = response.status; throw error; }
   return result;
 }
 async function perform(work) {
   if (busy) return;
   busy = true; document.querySelectorAll('button:not([data-tab]):not(#back)').forEach(b => { b.disabled = true; });
   try { await work(); } catch (error) { status(error.message); }
-  finally { busy = false; document.querySelectorAll('button').forEach(b => { b.disabled = false; }); componentButtons(); $('back').disabled = location.hash === '#home'; }
+  finally { busy = false; document.querySelectorAll('button').forEach(b => { b.disabled = false; }); componentButtons(); $('back').disabled = location.hash === '#home'; void recordingTransfer.poll(); }
 }
 const pageNames = {home: 'Start', inspect: 'Inspector', devices: 'Devices & apps', library: 'Saved components', automation: 'Automation', recordings: 'Recordings', replay: 'Replay viewer'};
 function tab(id, push = true) {
@@ -122,7 +122,7 @@ function renderPreviews() {
 async function loadWorkbench() {
   workbench = await api('workbench');
   const connection = workbench.connection;
-  if (recordingConnection && recordingConnection !== workbench.connectionId) resetRecordingTransfer();
+  recordingTransfer.checkConnection(workbench.connectionId, workbench.connected);
   document.querySelector('[data-adb="mirror"]').title = workbench.scrcpyAvailable ? 'Start installed scrcpy' : 'Install scrcpy to enable this tool';
   $('connection').textContent = workbench.connected ? connection ? `${connection.serial} · Android ${connection.actualPlatformVersion} · ${connection.package}` : 'Terminal-paired bridge' : 'Not connected';
   $('storage').textContent = `Local storage: ${workbench.dataDir}`;
@@ -216,18 +216,26 @@ $('run').onclick = () => perform(async () => {
   const result = await api('run', {hash: component.hash, pipeline: $('pipeline').value}); await loadWorkbench(); status(`Pipeline ${result.job.pipeline} started. Refresh results to check completion.`);
 });
 setInterval(async () => {
-  if (!$('receive').checked || document.hidden || busy || polling) return;
+  if (!$('receive').checked || document.hidden || busy || polling || recordingTransfer.inflight) return;
   polling = true;
   try {
     const inbox = await api('inbox'); previews = inbox.documents; renderPreviews();
     if (inbox.received && previews.length) { showComponent(previews.at(-1)); status(`Received from phone · review attributes, then Save. PC preview omissions: ${inbox.omittedPreviews || 0}.${inbox.dropped ? ` ${inbox.dropped} older phone previews were dropped by the queue budget.` : ''}`); }
-  } catch (error) { $('receive').checked = false; status(`${error.message} Receive paused; reconnect and enable it to retry.`); }
+  } catch (error) {
+    if ([401, 403, 409].includes(error.status)) { $('receive').checked = false; status(`${error.message} Reconnect and enable Receive again.`); }
+    else status(`${error.message} Receive remains enabled and will check again.`);
+  }
   finally { polling = false; }
 }, 2500);
 perform(async () => { session = (await api('bootstrap')).session; await loadWorkbench(); await loadPreviews(); await saved(); status('Ready. Choose what you want to do. Recordings transfer only when you choose.'); });
 
-let recordingConnection = '', knownRecordings = new Set(), recordingPolling = false;
-function resetRecordingTransfer() { $('auto-recordings').checked = false; recordingConnection = ''; knownRecordings.clear(); $('phone-recordings').replaceChildren(); }
+const recordingTransfer = new QaLensRecordingTransfer({
+  busy: () => busy || polling || document.hidden,
+  connection: async () => { await loadWorkbench(); return {id: workbench.connectionId, connected: workbench.connected}; },
+  list: id => phoneRecordings(id), copy: (name, id) => copyRecording(name, id),
+  changed: transfer => { $('auto-recordings').checked = transfer.enabled; }, status
+});
+function resetRecordingTransfer() { recordingTransfer.disable(); $('phone-recordings').replaceChildren(); }
 async function localRecordings() {
   const result = await api('recordings/local'); $('pc-recordings').replaceChildren();
   if (!result.items.length) $('pc-recordings').textContent = 'No recordings copied yet.';
@@ -250,14 +258,13 @@ async function openRecording(id) {
 async function copyRecording(name, connectionId = workbench.connectionId) {
   status(`Copying ${name} to PC…`);
   const result = await api('recordings/receive', {name, connectionId});
-  knownRecordings.add(name);
+  recordingTransfer.noteCopied(name, connectionId);
   status(`${result.duplicate ? 'Already saved' : 'Saved to PC'} · ${name} · ${(result.size / 1048576).toFixed(1)} MiB`);
   await localRecordings(); return result;
 }
-async function phoneRecordings(auto = false) {
-  const connectionId = workbench.connectionId;
+async function phoneRecordings(connectionId = workbench.connectionId) {
   const result = await api('recordings/device');
-  if (result.connectionId !== connectionId || workbench.connectionId !== connectionId) throw Error('Device changed during recording discovery; refresh before copying');
+  if (result.connectionId !== connectionId || workbench.connectionId !== connectionId) { const error = Error('Device changed during recording discovery; refresh before copying'); error.status = 409; throw error; }
   $('recording-state').textContent = result.recording ? 'Phone is recording. Bug clips save after the session stops.' : result.saving ? 'Phone is saving; waiting for completed files.' : 'Phone is ready. Completed archives appear below.';
   $('phone-recordings').replaceChildren();
   for (const entry of result.items) {
@@ -265,29 +272,15 @@ async function phoneRecordings(auto = false) {
     const label = documentElement('span', ''); label.textContent = `${entry.name} · ${(entry.size / 1048576).toFixed(1)} MiB`; line.append(label);
     button('Copy to PC', () => perform(() => copyRecording(entry.name, connectionId)), line);
   }
-  if (auto) for (const entry of result.items) if (!knownRecordings.has(entry.name)) await copyRecording(entry.name, connectionId);
   return result;
 }
 $('auto-recordings').onchange = () => {
-  if (busy || recordingPolling) { resetRecordingTransfer(); status('Wait for the current operation, then enable recording transfer.'); return; }
-  perform(async () => {
-  if (!$('auto-recordings').checked) { recordingConnection = ''; return; }
-  try {
-    await loadWorkbench(); if (!workbench.connected) throw Error('Connect a phone first');
-    const current = await phoneRecordings(); knownRecordings = new Set(current.items.map(entry => entry.name));
-    recordingConnection = workbench.connectionId; status('Automatic transfer enabled for new recordings on this connection. Existing recordings require Copy.');
-  } catch (error) { resetRecordingTransfer(); throw error; }
-});
+  if ($('auto-recordings').checked) void recordingTransfer.enable();
+  else recordingTransfer.disable('Automatic transfer disabled. An already-started copy may finish.');
 };
 $('refresh-recordings').onclick = () => perform(() => phoneRecordings());
 $('refresh-local-recordings').onclick = () => perform(localRecordings);
-setInterval(async () => {
-  if (!$('auto-recordings').checked || !recordingConnection || busy || recordingPolling || document.hidden) return;
-  recordingPolling = true;
-  try { await loadWorkbench(); if ($('auto-recordings').checked) await phoneRecordings(true); }
-  catch (error) { resetRecordingTransfer(); status(`${error.message} Recording transfer paused; choose it again to retry.`); }
-  finally { recordingPolling = false; }
-}, 5000);
+setInterval(() => { void recordingTransfer.poll(); }, 5000);
 for (const button of document.querySelectorAll('[data-adb]')) button.onclick = () => perform(async () => {
   const result = await api('adb', {action: button.dataset.adb, connectionId: workbench.connectionId}); status(result.notice);
 });

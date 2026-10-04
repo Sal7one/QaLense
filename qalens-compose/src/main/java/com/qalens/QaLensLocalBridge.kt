@@ -21,6 +21,9 @@ internal object QaLensLocalBridge {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableStatus = MutableStateFlow("Stopped")
     val status = mutableStatus.asStateFlow()
+    data class Pairing(val token: String, val port: Int)
+    private val mutablePairing = MutableStateFlow<Pairing?>(null)
+    val pairing = mutablePairing.asStateFlow()
     @Volatile private var epoch = 0L
     private var listener: ServerSocket? = null
     private var client: Socket? = null
@@ -32,6 +35,7 @@ internal object QaLensLocalBridge {
         runCatching { client?.close() }; client = null
         runCatching { listener?.close() }; listener = null
         mutableStatus.value = "Stopped"
+        mutablePairing.value = null
         QaLensBridgeComponents.clear()
     }
 
@@ -40,11 +44,13 @@ internal object QaLensLocalBridge {
         require(port in 1024..65535) { "Bridge port must be 1024–65535" }
         stop()
         if (!QaLens.config.value.enabled) return
+        mutablePairing.value = Pairing(token, port)
         val generation = epoch
         mutableStatus.value = "Starting"
         job = scope.launch {
             try {
                 ServerSocket().use { server ->
+                    server.reuseAddress = true
                     server.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 1)
                     synchronized(this@QaLensLocalBridge) {
                         if (generation != epoch) return@launch
@@ -73,12 +79,21 @@ internal object QaLensLocalBridge {
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
                 synchronized(this@QaLensLocalBridge) {
-                    if (generation == epoch) mutableStatus.value = "Failed to listen on port $port; stop and retry"
+                    if (generation == epoch) {
+                        mutableStatus.value = "Failed to listen on port $port; choose another port or retry"
+                        mutablePairing.value = null
+                    }
                 }
             } finally {
                 synchronized(this@QaLensLocalBridge) { if (generation == epoch) listener = null }
             }
         }
+    }
+
+    fun startPairing(port: Int) {
+        val token = ByteArray(24).also { java.security.SecureRandom().nextBytes(it) }
+            .joinToString("") { "%02x".format(it) }
+        start(token, port)
     }
 
     private suspend fun serve(socket: Socket, token: String, generation: Long, transferring: () -> Unit) {
@@ -115,16 +130,20 @@ internal object QaLensLocalBridge {
                 request.method == "GET" && request.path == "/v1/snapshot" -> snapshot(generation)
                 request.method == "GET" && request.path == "/v1/events" -> observations(generation)
                 request.method == "GET" && request.path == "/v1/components/inbox" -> {
-                    onHost(generation) { true }
-                    QaLensBridgeComponents.inbox()
+                    synchronized(this@QaLensLocalBridge) {
+                        requireSession(generation)
+                        QaLensBridgeComponents.inbox()
+                    }
                 }
                 request.method == "POST" && request.path == "/v1/components/ack" -> {
                     val input = readJson(request.body)
                     val ids = input.optJSONArray("ids") ?: throw QaLensBridgeFailure(400, "Supply transfer ids")
                     if (ids.length() > 10 || (0 until ids.length()).any { ids.opt(it) !is String || ids.getString(it).length > 128 })
                         throw QaLensBridgeFailure(400, "Supply at most ten string transfer ids <=128 characters")
-                    onHost(generation) { true }
-                    QaLensBridgeComponents.acknowledge((0 until ids.length()).map { ids.getString(it) })
+                    synchronized(this@QaLensLocalBridge) {
+                        requireSession(generation)
+                        QaLensBridgeComponents.acknowledge((0 until ids.length()).map { ids.getString(it) })
+                    }
                     mapOf("ok" to true)
                 }
                 request.method == "POST" && request.path == "/v1/component" -> component(readJson(request.body), generation)
@@ -157,12 +176,16 @@ internal object QaLensLocalBridge {
     private fun readJson(body: String): JSONObject = try { JSONObject(body) }
         catch (_: Exception) { throw QaLensBridgeFailure(400, "Invalid JSON") }
 
+    private fun requireSession(generation: Long) {
+        if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
+    }
+
     private suspend fun <T> onHost(generation: Long, block: (android.app.Activity) -> T): T =
         withTimeoutOrNull(1_500) {
             withContext(Dispatchers.Main.immediate) {
                 if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
                 val activity = QaLens.currentActivity?.takeIf { QaLensActivityInstaller.isResumed(it) && !it.isFinishing }
-                    ?: throw QaLensBridgeFailure(503, "No foreground host Activity")
+                    ?: throw QaLensBridgeFailure(503, "Return to the app before reading or controlling its live Compose tree")
                 block(activity)
             }
         } ?: throw QaLensBridgeFailure(504, "Host is busy; command cancelled before dispatch if still queued")
@@ -209,7 +232,7 @@ internal object QaLensLocalBridge {
 
     fun sendComponent(id: String) {
         val generation = epoch
-        if (!status.value.startsWith("Listening")) { QaLensBridgeComponents.report("Start the bridge in your QA app first"); return }
+        if (!status.value.startsWith("Listening")) { QaLensBridgeComponents.report("Start PC inspector in Control Room or overlay More tools first"); return }
         QaLensBridgeComponents.report("Reading component…")
         scope.launch {
             try {
@@ -285,7 +308,7 @@ internal object QaLensLocalBridge {
     }
 
     private suspend fun observations(generation: Long): Map<String, Any?> {
-        onHost(generation) { true } // Require a live session, without recomputing reports/providers.
+        requireSession(generation) // Cached evidence can be read while Control Room is in front.
         val state = QaLens.state.value
         return sanitize(mapOf<String, Any?>("ok" to true, "coverage" to "Bounded dashboard observations, not a complete recording",
             "events" to state.events.takeLast(100).map { mapOf<String, Any?>("time" to it.timestampMillis, "type" to it.type.name, "tag" to it.tag, "message" to it.message) },

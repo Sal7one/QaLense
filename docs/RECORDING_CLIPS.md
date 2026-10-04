@@ -85,7 +85,8 @@ Open replay passes the file to the existing reader in the embedded modern/classi
 Automatic copy is off by default. Enabling it takes the current phone library as its baseline and
 copies only subsequently finished archives, including clips. Existing archives require Copy.
 The preference is connection-scoped, memory-only, disabled on a device switch/disconnect, and
-paused on transfer errors. It does not delete phone archives or retry failed commands silently.
+kept enabled through temporary discovery/copy errors with bounded retry delays. Authentication
+revocation stops it and requires pairing again. It does not delete phone archives or retry host actions.
 Do not leave a capture computer connected to a customer's app without their capture agreement.
 
 ## Verification
@@ -104,6 +105,12 @@ adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -r -e videoOnly true \
 # Deny the OS dialog promptly; verifies reset/no archive and a following frame capture:
 adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -r -e videoDenyOnly true \
   com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+# Actual Control Room buttons with Startup/Application.install removed (QaLensRoot only):
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -r -e controlOnly true -e manualRootOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+# Approve the OS consent; test the same Control Room HD button and decode master/UI clips:
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -r -e controlVideoOnly true -e manualRootOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
 ```
 
 Require their `OK:` result; adb exit zero is insufficient. Both frame and HD checks click preset/custom
@@ -112,3 +119,11 @@ termination; run with overlay permission both enabled and disabled. The tests ov
 retain a recent failure, exclude post-mark logs and keep capture running. Video verifies all master/UI/API
 clips have readable H.264 tracks beginning at a sync frame and decodes a real frame from each. Physical
 phones, complete-hour endurance, rotation/encoder vendor matrices and TalkBack remain unverified.
+
+The Control Room cases also check visible disabled/video-opt-in failures and mark clips with the
+global application reference cleared. `manualRootOnly` removes auto installation only in the
+disposable test process. HD consent handoff waits for lifecycle resume and foreground-service
+acknowledgement before closing the helper Activity; errors preserve the exception type rather
+than reporting every startup failure as consent denial. A reported foreground-service crash in
+another app still needs its first exception line to distinguish launch restrictions, permissions
+and Android's asynchronous promotion timeout.

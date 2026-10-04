@@ -122,6 +122,10 @@ roots are discovered; register separate Compose Dialog/Popup roots with `qaInspe
 shown in the integration guide. Private application state and arbitrary native/WebView controls
 are not available through Compose semantics.
 
+If Startup was removed, the wrapper now tracks its own Activity and supplies the application
+context. Call `QaLens.install(this)` from `Application.onCreate()` for application-wide hooks.
+`QaLens.configure` only configures options. Control Room installs hooks on an explicit record action.
+
 ## Connect useful evidence sources
 
 Start with a small set of hooks and prove each one with a request/write and a short recording.
@@ -220,12 +224,15 @@ python3 tools/local-bridge/server.py --gui
 Choose Replay evidence, Connect a phone, Inspect components or Collect recordings. Back and Start
 navigate between workspaces. Both modern/classic players are embedded; leaving replay pauses video.
 For phone tools you also need adb, an authorized device/emulator and the active QaLens QA build.
+After pulling an SDK/desktop update, rebuild the QA app and restart the Python server before testing.
 
-1. Run `adb devices` and identify the intended device. In sample **More → Settings → PC inspector**,
-   choose **Start bridge**. Host apps expose their own QA-only `startLocalBridge(token)` control.
+1. Run `adb devices` and identify the intended device. In **QaLens Control → Desktop connection**
+   or the overlay's **More tools → PC inspector**, choose **Start PC inspector**, then **Copy pairing
+   token**. This is part of the SDK in every consuming QA app; no custom app Settings are required.
 2. In desktop **Devices & apps**, scan devices, select the serial, enter the actual Android package
    and current token, then **Connect this profile**. Launch is a separate action and preserves app data.
-3. Save a profile to remember serial/package/activity/port. Tokens remain in memory; a restart needs
+3. Save a profile to remember serial/package/activity/port. **New pairing token** revokes the previous
+   pairing, and **Stop PC inspector** closes it. Tokens remain in memory; a restart needs
    pairing again. Appium-style import maps selected profile fields only; it does not start an Appium driver.
 4. In **Inspector**, refresh the tree, choose a component, highlight it or request tap/type/scroll.
    Refresh afterward to verify the effect. Exact tags must be unique; live IDs expire as the UI changes.
@@ -247,7 +254,8 @@ same-name file, and pull writes under PC `transfers/`. The desktop does not inst
 In **Recordings**, check completed phone archives, **Copy to PC**, then **Open replay**. Automatic
 copy is off by default. Polling runs while the desktop page is visible, so keep it open for collection.
 Enabling takes the existing phone library as a baseline and copies new
-completed files, including clips after stop. It resets on device switches, disconnects or failures.
+completed files, including clips after stop. Temporary discovery/copy failures keep it enabled and
+retry with a bounded delay. Device switches, disconnects and revoked pairing stop it.
 Copy does not delete phone recordings. Default PC storage is `~/.qalens/bridge`; `--data-dir`
 selects another directory. Profiles, saved components, recordings and processor outputs persist.
 Previews, pairing and automatic-copy choices do not survive a restart. A recording transfer allows

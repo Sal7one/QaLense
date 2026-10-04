@@ -1059,6 +1059,7 @@ private fun ToolsTab(state: QaLensUiState, context: Context) {
         // ── Quick actions (all exports are redaction-aware) ─────────────
         Text("Quick Actions", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         PanelButton("🛠  Open Control Room", tint = PanelAccent) { openControlRoom(context) }
+        QaLensPcInspectorControls(qaLensColorsFor(context))
         PanelButton("📷  Share Screenshot") { QaLens.takeScreenshot() }
         PanelButton("Copy Jira Bug") { copyAsync("QaLens Jira Bug") { QaLens.buildJiraReport() } }
         PanelButton("Copy Full QA Report") { copyAsync("QaLens Full Report") { QaLens.buildFullReport() } }

@@ -79,7 +79,7 @@ class Handler(BaseHTTPRequestHandler):
             name = parsed.path.removeprefix("/web/")
             if name not in WEB_ASSETS: return self.reply(404, {"ok": False, "error": "Unknown viewer asset"})
             return self.reply(200, (WEB_ROOT / name).read_bytes(), mimetypes.guess_type(name)[0] or "application/octet-stream")
-        assets = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8")}
+        assets = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/recording-transfer.js": ("recording-transfer.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8")}
         if self.command == "GET" and self.path in assets:
             name, mime = assets[self.path]
             return self.reply(200, Path(__file__).with_name(name).read_bytes(), mime)

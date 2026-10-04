@@ -39,5 +39,6 @@ jobs:
           python3 tools/local-bridge/test_workbench.py
           python3 tools/local-bridge/test_desktop.py
           node --check tools/local-bridge/app.js
+          node tools/local-bridge/test_recording_transfer.js
       - name: Backend regression tests
         run: python3 backend/tests/test_backend.py

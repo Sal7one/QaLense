@@ -16,8 +16,14 @@ An accepted semantics action is not proof of the resulting app state: refresh/as
 ## Start and pair
 
 Prerequisites: Python 3.9+, adb, an authorized USB/emulator device, an active QaLens QA build.
-In the sample open **More → Settings → PC inspector → Start bridge**. Its random token is held in
-process memory and hidden from QaLens reports. For a host app, expose a QA-only pairing control:
+In any active SDK app, open **QaLens Control → Desktop connection → PC inspector** or the overlay's
+**More tools → PC inspector** (full overlay: **Tools**). Choose the device port, tap **Start PC inspector**
+and **Copy pairing token**. The same SDK controls show status, rotate the token and stop pairing;
+there is no sample-app Settings dependency. Tokens stay in process memory, are hidden until explicitly
+shown and are excluded from reports. Stop/disable clears pairing; re-enable does not restart it.
+An explicit clipboard copy uses Android 13+ sensitive metadata and can outlive the pairing.
+
+Custom host controls remain optional:
 
 ```kotlin
 // Generate once per pairing; display privately to the authorized tester, never log/save it.
@@ -197,6 +203,7 @@ python3 tools/local-bridge/test_server.py
 python3 tools/local-bridge/test_workbench.py
 python3 tools/local-bridge/test_desktop.py
 node --check tools/local-bridge/app.js
+node tools/local-bridge/test_recording_transfer.js
 # Build/install sample debug + androidTest APKs as in CONTRIBUTING.md, then:
 adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e bridgeOnly true \
   com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
@@ -207,6 +214,29 @@ phone button transfers, queue overflow/ack/restart, main timeout cancellation, d
 LTR/RTL gestures. Python checks cover hashing/dedup/restart, profiles/no-reset, local API controls,
 connection freshness and real pipeline success/failure/timeout/shutdown/output paths. Physical
 phones, TalkBack, other Compose versions and Windows processor cleanup remain unverified.
+
+The SDK pairing UI also has a focused regression (with Startup installation removed):
+
+```sh
+adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e pcUiOnly true -e manualRootOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+It exercises SDK overlay/Control Room pairing, Send to PC, token rotation, paused-host inbox and
+recording discovery, shutdown and disable/re-enable. Live tree reads/actions require the host app
+screen in front; receiving already captured attributes and copying completed recordings do not.
+
+The optional end-to-end transfer check requires installed sample/test APKs, Node 18+ and Python 3:
+
+```sh
+node tools/local-bridge/test_device_transfer.js emulator-SERIAL
+```
+
+Use a disposable emulator. The check owns its temporary server/storage/forward and generates a
+one-run token; it never uses a saved customer profile. It verifies busy enable, an adb outage and
+recovery, automatic master/clip copies with Control Room foreground, file hashes/private permissions,
+deduplication and authentication revocation. It tests the same controller the GUI uses, without a
+browser; browser checkbox/layout/navigation need a separate live check.
 
 ## Desktop launcher, replay and phone tasks
 

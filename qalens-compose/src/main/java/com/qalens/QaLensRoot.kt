@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -15,6 +16,9 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -34,6 +38,7 @@ fun QaLensRoot(
         content()
     } else {
         val view = LocalView.current
+        val lifecycleOwner = LocalLifecycleOwner.current
 
         LaunchedEffect(screenName, route) {
             if (screenName != null || route != null) {
@@ -45,8 +50,22 @@ fun QaLensRoot(
         // QaLensRoot only ensures it's attached (idempotent — guarded by view tag), so the overlay also
         // works when auto-install is disabled. It deliberately does NOT render its own QaLensOverlay():
         // doing so alongside the installer's overlay would double every bubble, panel, and watch HUD.
-        LaunchedEffect(view) {
-            view.context.findActivity()?.let { QaLens.attachOverlay(it) }
+        DisposableEffect(view, lifecycleOwner) {
+            val activity = view.context.findActivity()
+            if (activity == null) onDispose { } else {
+                QaLensActivityInstaller.registerRoot(activity)
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_RESUME) QaLensActivityInstaller.resumeRoot(activity)
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    QaLensActivityInstaller.resumeRoot(activity)
+                }
+                onDispose {
+                    lifecycleOwner.lifecycle.removeObserver(observer)
+                    QaLensActivityInstaller.unregisterRoot(activity)
+                }
+            }
         }
 
         Box(

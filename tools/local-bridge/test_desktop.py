@@ -36,6 +36,9 @@ class DesktopTests(unittest.TestCase):
         self.assertIn("text/css", headers["Content-Type"])
         self.assertIn(b":root{", css)
         self.assertNotIn(b"<html", css)
+        code, script, _ = self.request("/recording-transfer.js")
+        self.assertEqual(code, 200)
+        self.assertEqual(script, Path(__file__).with_name("recording-transfer.js").read_bytes())
         for name in ["index-v2.html", "sal.js", "app-v2.js", "app.js"]:
             code, data, headers = self.request("/web/" + name + "?desktop")
             self.assertEqual(code, 200)

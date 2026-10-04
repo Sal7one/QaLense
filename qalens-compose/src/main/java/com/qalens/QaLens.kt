@@ -76,11 +76,13 @@ object QaLens {
 
     /** App context for paths/notifications/services when no activity is alive (e.g. mid-recording). */
     internal val appContext: Context? get() = appRef?.get()
+    internal fun rememberApplication(application: Application) { appRef = WeakReference(application) }
     internal val currentActivity: Activity? get() = currentActivityRef?.get()
 
     /** Recording mode armed from the Control Room: started on the next host-app activity resume. */
     internal var pendingRecordingVideo: Boolean? = null
         private set
+    private var pendingRecordingTimeout: Runnable? = null
 
     val state: StateFlow<QaLensUiState> = uiStateMutable.asStateFlow()
     val config: StateFlow<QaLensConfig> = configState.asStateFlow()
@@ -100,12 +102,12 @@ object QaLens {
         if (!nowEnabled) { captureEpoch++; QaLensLocalBridge.stop() }
         onMain {
             if (allowedVideo && !configState.value.allowUnmaskedVideo) {
-                pendingRecordingVideo = null
+                consumePendingRecording()
                 QaLensSessionRecorder.stop(share = false)
             }
             if (!nowEnabled) {
                 clearPendingEvents()
-                pendingRecordingVideo = null
+                consumePendingRecording()
                 QaLensMacros.cancel()
                 QaLensWebhook.stop()
                 QaLensSessionRecorder.stop(share = false)
@@ -385,7 +387,7 @@ object QaLens {
     val localBridgeStatus: StateFlow<String> = QaLensLocalBridge.status
 
     fun install(application: Application) {
-        appRef = WeakReference(application)
+        rememberApplication(application)
         // Restore persisted QA preferences so overlay setups survive process death.
         uiStateMutable.update {
             it.copy(
@@ -522,6 +524,7 @@ object QaLens {
      * and refreshes the notification. Wired to the Control Room and the notification panic action.
      */
     fun panicRestore() {
+        consumePendingRecording()
         QaLensSessionRecorder.cancel()
         uiStateMutable.update {
             it.copy(
@@ -557,8 +560,19 @@ object QaLens {
      * Arm a recording from the Control Room: it starts automatically on the next host-app activity
      * resume, so the recording captures the app — not the Control Room itself.
      */
-    internal fun armRecording(video: Boolean) { pendingRecordingVideo = video }
-    internal fun consumePendingRecording(): Boolean? = pendingRecordingVideo.also { pendingRecordingVideo = null }
+    internal fun armRecording(video: Boolean) {
+        consumePendingRecording()
+        pendingRecordingVideo = video
+        pendingRecordingTimeout = Runnable {
+            if (consumePendingRecording() != null) pushError(ErrorKind.RECORDING,
+                "Recording did not start: no host screen resumed. Return to Control Room and try again.")
+        }.also { mainHandler.postDelayed(it, 10_000) }
+    }
+    internal fun consumePendingRecording(): Boolean? {
+        pendingRecordingTimeout?.let(mainHandler::removeCallbacks)
+        pendingRecordingTimeout = null
+        return pendingRecordingVideo.also { pendingRecordingVideo = null }
+    }
 
     /**
      * Watch mode — a translucent, non-interactive live overlay. QA uses the real app (touches pass
@@ -866,6 +880,7 @@ object QaLens {
 
     internal fun attachOverlay(activity: Activity) {
         if (!configState.value.enabled) return
+        rememberApplication(activity.application)
         currentActivityRef = WeakReference(activity)
         updateDeviceAndScreen(activity)
         QaLensActivityInstaller.attachOverlay(activity)
