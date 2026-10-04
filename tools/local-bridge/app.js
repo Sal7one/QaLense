@@ -259,7 +259,9 @@ setInterval(async () => {
 perform(async () => { session = (await api('bootstrap')).session; await loadWorkbench(); await loadPreviews(); await saved(); await discover(); await localRecordings(); await maybeAutoConnect(); if (workbench.connected && location.hash === '#landing') await refresh(); });
 
 const recordingTransfer = new QaLensRecordingTransfer({
-  busy: () => busy || polling || document.hidden,
+  // The inbox's 2.5s timer also precedes every 5s transfer tick. Transfer owns its own
+  // in-flight guard; a bounded inbox read must not prevent every archive-discovery tick.
+  busy: () => busy || document.hidden,
   connection: async () => { await loadWorkbench(); return {id: workbench.connectionId, connected: workbench.connected}; },
   list: id => phoneRecordings(id), copy: (name, id) => copyRecording(name, id),
   changed: transfer => { $('auto-recordings').checked = transfer.enabled; }, status
@@ -378,7 +380,10 @@ async function requestConnection(profile) {
 }
 
 setInterval(async () => {
-  if (!session || !workbench?.connection || connectPolling || busy || polling || recordingTransfer.inflight || document.hidden) return;
+  // Receive shares this timer cadence. Skipping while it is polling can starve the health
+  // check forever, so an owned forward never repairs. Health checks are bounded reads;
+  // keep them independent of inbox/archive reads and guard their connection generation below.
+  if (!session || !workbench?.connection || connectPolling || busy || document.hidden) return;
   connectPolling = true;
   try {
     const previous = workbench.phase, id = workbench.connectionId;

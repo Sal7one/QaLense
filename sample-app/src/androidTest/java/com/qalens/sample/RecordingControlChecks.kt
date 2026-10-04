@@ -46,7 +46,7 @@ internal class RecordingControlChecks(private val test: Instrumentation) {
         await(60_000, "Control Room capture did not save") { !QaLens.state.value.isSavingRecording }
         val files = root.listFiles()?.filter { it.extension == "sal" && it.name !in before }.orEmpty()
         check(files.count { it.name.startsWith("session_") } == 1)
-        check(files.count { it.name.startsWith("clip_") } == 2)
+        check(files.count { it.name.startsWith("clip_") } == 4)
         files.forEach { file -> ZipFile(file).use { zip ->
             val bytes = zip.getInputStream(zip.getEntry("manifest.json")).use { it.readBytes() }
             val manifest = JSONObject(GZIPInputStream(bytes.inputStream()).bufferedReader().use { it.readText() })
@@ -77,6 +77,14 @@ internal class RecordingControlChecks(private val test: Instrumentation) {
         check(files.count { it.name.startsWith("session_") } == 1 && files.count { it.name.startsWith("clip_") } == 1)
         // Return through the real share sheet; background Activity launch restrictions otherwise
         // make a synthetic Application.startActivity unreliable on current Android versions.
+        // Saving state clears before the chooser's window is presented. A premature Back can
+        // instead finish MainActivity or race the following Control Room launch.
+        await(10_000, "Share sheet did not appear after manual root recording") {
+            if (Build.VERSION.SDK_INT >= 33) test.uiAutomation.clearCache()
+            test.uiAutomation.rootInActiveWindow?.packageName?.toString()?.let {
+                it != test.targetContext.packageName && ("intentresolver" in it || it == "android")
+            } == true
+        }
         check(test.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
         await(5000, "Manual root did not resume after sharing") {
             QaLens::class.java.getDeclaredField("currentActivityRef").apply { isAccessible = true }

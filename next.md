@@ -16,10 +16,11 @@ baselines and project context. Older changelog entries are historical, not uncom
 - [x] Exercise actual phone approval, screen PNG, attributes/save/dedup, forward repair, paused-host
   Send/recording copies and revocation through Android/adb/Python; run 26 Python regressions and
   SDK/sample/consumer build/lint/isolation checks.
-- [ ] Verify the redesigned Landing in the live browser: token-free Connect/phone approval, mirror
-  click selection, all detail tabs, auto connect/reconnect, Receive/collection, navigation/replay and
-  narrow layout. Mac relocked during work; user was asked to unlock. Earlier GUI checks above cover
-  the previous transfer UI, not this redesign. Physical phones/OEM receiver behavior also remain open.
+- [x] Verify redesigned Landing in the live browser: Connect/phone approval, mirror rectangle
+  selection, four detail tabs, SDK Send, remembered-app restart/fresh approval, auto reconnect,
+  Receive/collection, recording replay/Back and wide/narrow layouts. Fix inbox polling starving
+  connection health and recording discovery; add real-app timer wiring regression to CI.
+- Physical phones/OEM receiver behavior, TalkBack and real scrcpy remain open.
 
 ## Completed 2026-10-04: host lifecycle and PC transfer reliability
 
@@ -114,6 +115,10 @@ baselines and project context. Older changelog entries are historical, not uncom
    checked on the emulator; the quick-actions accessibility tree now has button roles and a named
    Close control. Still run TalkBack and the complete flow on physical phones. Fix any focus, size,
    dismissal or stale-state problem found.
+   The 2026-10-04 [Android matrix](docs/ANDROID_VERIFICATION.md) adds successful macros, all 12
+   diagnostic tabs, configuration/profiles/upload, replay/system Back, Panic and actual quick
+   Record/REC Stop at 150% font. The diagnostics header and fullscreen Back bugs found there are
+   fixed; physical-phone/TalkBack validation stays open.
 2. **Physical-device capture and recovery matrix.** Exercise video opt-in, consent denial/late
    consent, OS projection stop, rotation, backgrounding, interrupted save and disk-full handling.
    Test password/redaction-matched/custom content and multiple windows, plus the API 23 screenshot

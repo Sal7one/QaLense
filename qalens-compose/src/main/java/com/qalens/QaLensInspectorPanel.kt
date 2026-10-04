@@ -9,6 +9,8 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.LazyColumn
@@ -58,6 +60,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -169,13 +174,14 @@ internal fun QaLensInspectorPanel(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(8.dp).background(PanelAccent, CircleShape))
                     Spacer(Modifier.width(6.dp))
                     // Tap the title to dock the panel to the bottom (and back) — frees the opposite
                     // edge so you can reach app UI that was behind the panel.
                     Text("QaLens", color = PanelText, fontWeight = FontWeight.Bold, fontSize = 15.sp,
-                        modifier = Modifier.clickable { QaLens.toggleDock() })
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).clickable { QaLens.toggleDock() })
                     Spacer(Modifier.width(4.dp))
                     Text(if (state.dockBottom) "↑" else "↓", color = PanelMuted, fontSize = 12.sp,
                         modifier = Modifier.clickable { QaLens.toggleDock() })
@@ -189,28 +195,34 @@ internal fun QaLensInspectorPanel(
                 }
                 Text(
                     "${state.screen.displayName} · ${state.nodes.size}n · ${state.warnings.size}⚠",
-                    color = PanelMuted, fontSize = 11.sp
+                    color = PanelMuted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                PanelButton("📷", onClick = { QaLens.takeScreenshot() })
-                PanelButton("⟳", onClick = onRefresh)
-                PanelButton(
-                    label = if (state.isInspectMode) "Ins●" else "Ins",
-                    tint  = if (state.isInspectMode) PanelWarn else PanelMuted,
-                    onClick = onToggleInspect
-                )
-                PanelButton(
-                    label = if (state.isTagMode) "Tag●" else "Tag",
-                    tint  = if (state.isTagMode) PanelGreen else PanelMuted,
-                    onClick = {
-                        val turningOn = !state.isTagMode
-                        QaLens.toggleTagMode()
-                        if (turningOn) QaLens.closePanel()   // the canvas is behind the panel
-                    }
-                )
-                PanelButton("✕", onClick = onClose)
-            }
+            PanelButton("✕", accessibilityLabel = "Close diagnostics", onClick = onClose)
+        }
+        // The title and toolbar compete for width at large font scales. Keep Close beside
+        // the title, and allow the tools to scroll independently on narrow host windows.
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            .semantics { contentDescription = "Diagnostic tools" },
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            PanelButton("📷", accessibilityLabel = "Share annotated screenshot", onClick = { QaLens.takeScreenshot() })
+            PanelButton("⟳", accessibilityLabel = "Refresh diagnostics", onClick = onRefresh)
+            PanelButton(
+                label = if (state.isInspectMode) "Ins●" else "Ins",
+                tint  = if (state.isInspectMode) PanelWarn else PanelMuted,
+                accessibilityLabel = "Toggle element inspection",
+                onClick = onToggleInspect
+            )
+            PanelButton(
+                label = if (state.isTagMode) "Tag●" else "Tag",
+                tint  = if (state.isTagMode) PanelGreen else PanelMuted,
+                accessibilityLabel = "Show automation tags",
+                onClick = {
+                    val turningOn = !state.isTagMode
+                    QaLens.toggleTagMode()
+                    if (turningOn) QaLens.closePanel()   // the canvas is behind the panel
+                }
+            )
         }
 
         Spacer(Modifier.height(8.dp))
@@ -304,7 +316,8 @@ internal fun QaLensInspectorPanel(
 
         // ── Tab strip ────────────────────────────────────────────────────
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup()
+                .semantics { contentDescription = "Diagnostic tabs" },
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             InspectorTab.entries.forEach { item ->
@@ -315,7 +328,7 @@ internal fun QaLensInspectorPanel(
                     fontSize = 12.sp,
                     fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
                     modifier = Modifier
-                        .clickable { select(item) }
+                        .selectable(selected = active, role = Role.Tab) { select(item) }
                         .background(
                             if (active) PanelAccent.copy(alpha = 0.14f) else Color.Transparent,
                             CircleShape
@@ -1559,11 +1572,12 @@ private fun formatDate(millis: Long): String =
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 @Composable
-private fun PanelButton(label: String, tint: Color = PanelMuted, onClick: () -> Unit) {
+private fun PanelButton(label: String, tint: Color = PanelMuted, accessibilityLabel: String? = null, onClick: () -> Unit) {
     Text(
         text = label, color = tint, fontSize = 13.sp, fontWeight = FontWeight.Medium,
         modifier = Modifier
-            .clickable(onClick = onClick)
+            .semantics { accessibilityLabel?.let { contentDescription = it } }
+            .clickable(role = Role.Button, onClick = onClick)
             .background(
                 if (tint == PanelMuted) Color.White.copy(alpha = 0.07f) else tint.copy(alpha = 0.12f),
                 MaterialTheme.shapes.small

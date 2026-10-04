@@ -230,6 +230,7 @@ class Workbench:
             self.remove_owned_forward()
             self.connection = None
             self.phase = "disconnected"; self.approved = False; self.pair_deadline = 0
+            self.connection_notice = "Disconnected. Choose your app and Connect."
             self.desktop.stop_preview()
             self.connection_id = secrets.token_hex(16)
 

@@ -2,6 +2,25 @@
 
 ## Unreleased — post-0.9.0
 
+### Android feature verification and tester UI — 2026-10-04
+- Make system Back exit fullscreen Android replay and return to its controls.
+- Keep the diagnostic title/Close reachable at large font sizes; move tools into their own
+  scrollable row, name icon buttons and expose selected diagnostic tabs to accessibility.
+- Add positive tester workflow instrumentation for screenshots/bug marks, actual Record/REC Stop,
+  all diagnostic panes, Watch, successful macros, configuration, real profile upload, replay and
+  Panic. Verify at 360 × 640 dp, 150% font and three-button navigation.
+- Exercise all 10/20/60s presets and custom duration in frame/HD tests, and actual notification Stop
+  with HD in the background. Add opt-in test-only handling of the real English OS consent dialog.
+- Record the executed Android feature/build/OSS/PC/privacy matrix and remaining device/host limits
+  in `docs/ANDROID_VERIFICATION.md`; update contributor commands and current handover.
+- Fix desktop Receive polling starving connection health and automatic recording discovery at
+  aligned timer intervals. Keep bounded reads independent and preserve generation/in-flight guards.
+  Add an actual-app wiring regression to CI; verify owned-forward recovery with Receive/collection
+  enabled, actual SDK Send, private master/clip copies, remembered-app fresh approval and replay/Back.
+- Clear the connection hint on Disconnect so it cannot claim the phone is still connected.
+- Configure CI Android setup to install `platform-tools` explicitly; the old default requested the
+  retired `tools` package and failed before compilation.
+
 ### Landing workspace and phone-approved connection — 2026-10-04
 - Bring screen preview, live semantics tree and selected-element attributes into Landing; load
   attributes on selection, add focused detail tabs and consolidate secondary tools/navigation.
@@ -13,7 +32,8 @@
   explicit memory-only whole-phone screen PNG preview (up to 1 fps); keep scrcpy optional.
 - Pass 26 Python regressions, shared transfer-controller checks, SDK/sample/consumer builds/lint/
   isolation and real Android/adb/Python approval, screen, attributes, repair, paused-host transfer and
-  token revocation. Final redesigned browser layout/click interaction is pending while Mac is locked.
+  token revocation. Later live checks pass redesigned browser selection/detail tabs, connection
+  restart/recovery, recording collection, replay/Back and 1440px/390px layouts.
 
 ### Host lifecycle, SDK pairing and resilient PC transfers — 2026-10-04
 - Let explicit `QaLensRoot` integrations establish application context and scoped Activity lifecycle

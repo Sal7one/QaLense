@@ -72,6 +72,7 @@ internal fun QaLensMinimalPanel(
             .background(colors.panel, RoundedCornerShape(QaLensDimens.sheetRadius))
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
+            .semantics { contentDescription = "Quick actions sheet" }
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(

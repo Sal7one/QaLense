@@ -46,6 +46,11 @@ class ConnectionTests(unittest.TestCase):
         with patch("workbench.urlopen", return_value=self.approved_response()):
             state = self.bench.check_connection(self.server)
         self.assertTrue(state["connected"]); self.assertEqual(state["phase"], "connected")
+        self.bench.disconnect(self.server)
+        state = self.bench.connection_state(self.server)
+        self.assertFalse(state["connected"])
+        self.assertEqual(state["phase"], "disconnected")
+        self.assertIn("Disconnected.", state["notice"])
     def test_expiry_cancels_pending_phone_request_and_forgets_credentials(self):
         self.bench.pair(self.server, PROFILE); token = self.server.token
         self.bench.pair_deadline = 0

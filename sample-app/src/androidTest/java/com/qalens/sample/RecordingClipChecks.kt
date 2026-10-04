@@ -15,6 +15,40 @@ import java.util.zip.ZipFile
 
 /** Synthetic evidence only. Video mode needs the real OS consent dialog to be approved externally. */
 internal class RecordingClipChecks(private val test: Instrumentation) {
+    fun backgroundVideoStop() {
+        test.startActivitySync(Intent(test.targetContext, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        val root = File(test.targetContext.filesDir, "qalens/recordings")
+        val before = root.listFiles()?.map { it.name }?.toSet().orEmpty()
+        test.runOnMainSync { QaLens.configure { enabled = true; allowUnmaskedVideo = true }; QaLens.startRecording(true) }
+        try {
+            await(90_000, "Approve OS consent for background HD check") { QaLens.state.value.isRecording }
+            Thread.sleep(2500)
+            check(test.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+            Thread.sleep(1200)
+            check(QaLens.state.value.isRecording) { "Backgrounding unexpectedly stopped HD" }
+            val notifications = test.targetContext.getSystemService(android.app.NotificationManager::class.java)
+            val notification = notifications.activeNotifications.firstOrNull {
+                it.notification.extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() == "QaLens · Recording screen"
+            }?.notification ?: error("HD foreground notification missing")
+            val stop = notification.actions?.firstOrNull { it.title.toString() == "Stop recording" }
+                ?: error("HD notification has no Stop action")
+            stop.actionIntent.send() // The real notification action, with the host in background.
+            await(60_000, "Background notification Stop stranded capture/saving") {
+                !QaLens.state.value.isRecording && !QaLens.state.value.isSavingRecording &&
+                    root.listFiles()?.any { it.extension == "sal" && it.name !in before } == true
+            }
+            root.listFiles()!!.single { it.extension == "sal" && it.name !in before }.let {
+                ZipFile(it).use(::verifyVideo)
+            }
+            check(notifications.activeNotifications.none {
+                it.notification.extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() == "QaLens · Recording screen"
+            }) { "HD notification survived completed stop" }
+        } finally {
+            test.runOnMainSync { if (QaLens.state.value.isRecording) QaLens.stopRecording(); QaLens.configure { allowUnmaskedVideo = false } }
+        }
+    }
+
     fun denyVideo() {
         test.startActivitySync(Intent(test.targetContext, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
@@ -68,7 +102,7 @@ internal class RecordingClipChecks(private val test: Instrumentation) {
             val clip = clipFiles.single { file -> ZipFile(file).use { JSONObject(text(it, "analysis.json")).getJSONObject("clip").getString("label") == "Synthetic late bug" } }
             if (!longSession) {
                 val uiClips = clipFiles.filter { it != clip }.map { file -> ZipFile(file).use { JSONObject(text(it, "analysis.json")).getJSONObject("clip").getInt("requestedSeconds") } }
-                check(uiClips.sorted() == listOf(10, 45)) { "Preset/custom menu did not export the chosen intervals: $uiClips" }
+                check(uiClips.sorted() == listOf(10, 20, 45, 60)) { "Preset/custom menu did not export the chosen intervals: $uiClips" }
             }
             ZipFile(clip).use { zip ->
                 val logs = JSONArray(text(zip, "logs.json"))
@@ -115,9 +149,11 @@ internal class RecordingClipChecks(private val test: Instrumentation) {
             check(node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
         }
         try {
-            click("Save recent bug clip"); click("Last 10s")
-            Thread.sleep(300)
-            check(QaLens.state.value.isRecording)
+            for (preset in listOf("Last 10s", "Last 20s", "Last 60s")) {
+                click("Save recent bug clip"); click(preset)
+                Thread.sleep(300)
+                check(QaLens.state.value.isRecording)
+            }
             click("Save recent bug clip"); click("Custom duration…")
             await(10_000, "Custom duration input missing") { find { it.className?.toString() == "android.widget.EditText" } != null }
             val input = checkNotNull(find { it.className?.toString() == "android.widget.EditText" })

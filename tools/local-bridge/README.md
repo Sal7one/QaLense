@@ -215,6 +215,7 @@ python3 tools/local-bridge/test_connection.py
 python3 tools/local-bridge/test_desktop.py
 node --check tools/local-bridge/app.js
 node tools/local-bridge/test_recording_transfer.js
+node tools/local-bridge/test_polling.js
 # Build/install sample debug + androidTest APKs as in CONTRIBUTING.md, then:
 adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e bridgeOnly true \
   com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation

@@ -46,6 +46,35 @@ assuming a named class or public signature is unchanged.
 
 ## Latest local verification
 
+### Android feature audit — 2026-10-04
+
+The [executed Android matrix](docs/ANDROID_VERIFICATION.md) records the current acceptance cases
+and limits. The full API 36 runner, manual-root Control Room frame/HD and SDK PC controls, phone
+approval, real PC transport, >5-minute frame capture, HD background notification Stop and real
+consent denial pass. Actual 10/20/60s and custom 45s clip controls export while the master continues;
+each HD master/clip is Android-decoded. Strict visual-context and 12,000-log overflow cases pass.
+The full runner observed 3,138 background iterations and a worst main heartbeat of 6 ms; this
+synthetic measurement cannot establish that the user's consuming-app ANR is resolved.
+
+New positive tester coverage presses Screenshot/Mark/Record/REC Stop, opens all 12 diagnostic tabs,
+stops Watch, runs successful tagged macro interactions/capture, round-trips configuration, checks
+a real profile-attributed upload and Android replay, then discards capture through Panic.
+It passes at 360 × 640 dp, 150% font and three-button navigation alongside the inspector gesture,
+RTL and safe-inset cases. Replay's fullscreen Back behavior failed before the new Back handler;
+large text exposed a cramped diagnostics header. The header now separates scrollable tools from
+the title/Close and exposes spoken button labels and selected tab semantics.
+
+Final local checks pass: 215 unit tests (177/31/5/2), five module/sample lint checks with zero errors,
+sample debug/test/release and release isolation, independent consumer debug/release/isolation,
+26 Python desktop/bridge tests, 23 backend tests, shared reader/CLI and six transfer-controller
+scenarios. Some unchanged Gradle checks are cached. Focused tests now have `workflowOnly` and
+`videoRecoveryOnly` modes, plus an explicit test-only English-emulator consent driver; see
+[CONTRIBUTING.md](CONTRIBUTING.md). Physical devices, TalkBack, API 23, full-hour capture, rotation,
+OS projection revocation and the actual consuming app remain unverified.
+The prior remote run at `27821a7` failed in Android setup before any build because the action
+requested the retired `tools` package. CI now explicitly requests `platform-tools`; inspect the
+latest run before claiming remote verification.
+
 ### Landing desktop and phone approval — 2026-10-04
 
 The desktop now starts on Landing with screen preview, semantics tree and automatic selected-element
@@ -76,9 +105,15 @@ Deny/cancel/expiry, authenticated host reads and disable/re-enable with Startup 
 Android/adb/Python check passes generated-credential approval, tree/attributes/save/dedup, real screen
 PNG, owned-forward repair without a new session, paused-host SDK Send and master/clip copies, then
 revoked authentication cleanup. Temporary servers/storage/forwards are removed.
-The Mac relocked during this redesign; final Landing layout, browser click-to-select/auto-connect
-rendering and responsive visual QA are pending. Do not infer those checks from the transport tests
-or the earlier GUI run. Physical-device/OEM, TalkBack and high-FPS scrcpy remain unverified.
+The redesigned Landing now passes live Codex-browser checks: Connect and actual phone approval,
+live preview rectangle selection, all four detail tabs, private JSON save/dedup, SDK Highlight and
+Send received on Landing, a remembered-app desktop restart requiring fresh approval, recording
+library/embedded clip replay/Back and 1440px/390px layouts. Narrow layout has no page overflow.
+Receive and collection initially starved health/transfer ticks at the same timer cadence. Independent
+bounded reads fix this; a new actual-app wiring regression fails against the old code and runs in CI.
+With Receive and collection enabled, forced owned-forward loss now repairs and a new master/10s
+clip copies automatically into private SHA-256 files. Preview/collection remain off on restart;
+Disconnect clears remembered auto connect. Physical-device/OEM, TalkBack and scrcpy remain unverified.
 
 ### Host lifecycle, pairing and transfer regression — 2026-10-04
 
@@ -257,7 +292,8 @@ Serialize Gradle processes sharing this checkout. Earlier work used atomic
 
 At this handover baseline, `dev` also contains `90d669f` (recording visual contexts/budgets) and
 `7059e29` (manual-root lifecycle/shared pairing/transfer recovery), plus the Landing/phone-approval
-work described above. Earlier bridge/component/clip commits follow the `dea9048` master merge. Check remote state before pushing or
+work at `27821a7` and Android/browser audit fixes described above. Earlier bridge/component/clip
+commits follow the `dea9048` master merge. Check remote state before pushing or
 merging; this handover does not authorize merging a branch. Default coordinates are
 `com.qalens:<module>:0.9.0` with a `-PqalensVersion` override. `qalensDist` builds a local Maven
 repository; `scripts/release_internal.sh --verify` packages/checks it. Public artifact publication
@@ -274,6 +310,7 @@ and an authenticated company backend are separate work.
 | [OSS integrations](docs/OSS_INTEGRATIONS.md) | Supported library contracts and version limits |
 | [Architecture](docs/ARCHITECTURE.md) | Module and observation/analysis/capture/lifecycle boundaries |
 | [Recording clips](docs/RECORDING_CLIPS.md), [retention](docs/RECORDING_RETENTION.md) | Timing, journal/media budgets and omissions |
+| [Android verification](docs/ANDROID_VERIFICATION.md) | Dated executed feature matrix and validation limits |
 | [SAL format](docs/SAL_FORMAT.md) | Writer/reader schema, compression/checksums and compatibility |
 | [Desktop](tools/local-bridge/README.md), [web](web/README.md), [backend](backend/README.md) | Each tool's detailed operating/API/storage contract |
 | [Client fixes](docs/CLIENT_SAFETY_FIXES.md), [overlay design](docs/OVERLAY_DESIGN.md) | Dated migration decisions and remaining UI token coverage |

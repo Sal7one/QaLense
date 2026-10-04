@@ -19,6 +19,9 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          # The action's default includes the retired SDK `tools` package.
+          packages: 'platform-tools'
       - run: sdkmanager 'platforms;android-35' 'build-tools;34.0.0'
       - uses: gradle/actions/setup-gradle@v6
         with:
@@ -41,5 +44,6 @@ jobs:
           python3 tools/local-bridge/test_desktop.py
           node --check tools/local-bridge/app.js
           node tools/local-bridge/test_recording_transfer.js
+          node tools/local-bridge/test_polling.js
       - name: Backend regression tests
         run: python3 backend/tests/test_backend.py

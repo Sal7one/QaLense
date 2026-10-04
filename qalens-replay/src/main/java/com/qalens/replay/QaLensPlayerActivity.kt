@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -174,6 +175,7 @@ private fun PlayerScreen(session: PlayerSession, onClose: () -> Unit) {
     var playhead by remember { mutableStateOf(session.startMs) }
     var playing by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
+    BackHandler(enabled = fullscreen) { fullscreen = false }
     var track by remember { mutableStateOf(if (session.summary != null) Track.SUMMARY else Track.TIMELINE) }
     val context = LocalContext.current
 

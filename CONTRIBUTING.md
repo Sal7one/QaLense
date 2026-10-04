@@ -25,6 +25,7 @@ python3 tools/local-bridge/test_connection.py
 python3 tools/local-bridge/test_desktop.py
 node --check tools/local-bridge/app.js
 node tools/local-bridge/test_recording_transfer.js
+node tools/local-bridge/test_polling.js
 ```
 
 The consumer fixture resolves normal `com.qalens:*` coordinates through `includeBuild`; it catches
@@ -78,6 +79,35 @@ against current system/IME insets; run with gesture and three-button navigation.
 Use [recording clips](docs/RECORDING_CLIPS.md) for preset/custom clips, longer sessions and real
 HD consent approval/denial modes. HD checks require the OS dialog to be handled promptly on the
 disposable device. Physical-device and full-hour endurance remain open.
+
+The positive tester workflow covers quick screenshots/bug marks, actual Record/REC Stop,
+all diagnostic tabs, Watch,
+successful macro typing/tapping/assertions/capture, `.appsal` round trips, a real profile-attributed
+loopback upload, Android player controls and panic discard:
+
+```sh
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e workflowOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: Quick screenshot/bug mark`. A failure preserves its synthetic sample screen in the
+target app's private cache as `qalens-test-failure.png`; do not commit generated captures.
+
+Focused HD modes accept `-e projectionConsent approve` or `-e projectionConsent deny` to click
+the real **English sample emulator** OS dialog. This is opt-in Android-test code, absent from the
+SDK, and does not bypass production consent. Omit it and handle the dialog manually on other
+devices. For example, exercise background capture and the actual notification Stop action:
+
+```sh
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e videoRecoveryOnly true \
+  -e projectionConsent approve \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: HD stays active in background`; the output must contain a decodable video and the
+foreground recording notification must disappear. Repeat clip checks with draw-over-apps allowed
+and denied, and inspector checks with three-button navigation and large fonts. Focused modes run
+sequentially on a device, separately from the full runner.
 
 The SDK pairing controls have a separate UI regression, including a host using only `QaLensRoot`
 without Startup installation. It starts pairing from More tools, sends a component, reads the inbox

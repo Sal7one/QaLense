@@ -48,6 +48,9 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var manualRootOnly = false
     private var pcPairingOnly = false
     private var pcUiOnly = false
+    private var workflowOnly = false
+    private var videoRecoveryOnly = false
+    private var projectionConsent: String? = null
     private var desktopTransferToken: String? = null
     private var desktopPhoneApproval = false
     override fun onCreate(arguments: Bundle?) {
@@ -62,6 +65,9 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         manualRootOnly = arguments?.getString("manualRootOnly") == "true"
         pcPairingOnly = arguments?.getString("pcPairingOnly") == "true"
         pcUiOnly = arguments?.getString("pcUiOnly") == "true"
+        workflowOnly = arguments?.getString("workflowOnly") == "true"
+        videoRecoveryOnly = arguments?.getString("videoRecoveryOnly") == "true"
+        projectionConsent = arguments?.getString("projectionConsent")
         desktopTransferToken = arguments?.getString("desktopTransferToken")
         desktopPhoneApproval = arguments?.getString("desktopPhoneApproval") == "true"
         super.onCreate(arguments)
@@ -70,7 +76,22 @@ class RecordingRetentionInstrumentation : Instrumentation() {
 
     override fun onStart() {
         val result = Bundle()
+        var consent: java.util.concurrent.FutureTask<Unit>? = null
         try {
+            if (controlVideoOnly || videoOnly || videoDenyOnly || videoRecoveryOnly) {
+                consent = ProjectionConsentChecks.start(this, projectionConsent)
+            } else require(projectionConsent == null) { "projectionConsent requires a focused video mode" }
+            if (videoRecoveryOnly) {
+                RecordingClipChecks(this).backgroundVideoStop()
+                consent?.get(1, java.util.concurrent.TimeUnit.SECONDS)
+                result.putString("stream", "\nOK: HD stays active in background; its real notification Stop finalizes a decodable video and removes the foreground notification.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (workflowOnly) {
+                TesterWorkflowChecks(this).run()
+                result.putString("stream", "\nOK: Quick screenshot/bug mark, successful macro interactions/capture, private config round trip, profile-attributed upload, Android replay controls and panic discard pass.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             desktopTransferToken?.let { token ->
                 DesktopTransferChecks(this).run(token, desktopPhoneApproval)
                 result.putString("stream", "\nOK: Real desktop transfer copied the completed master/clip while Control Room was foreground and revoked pairing after rotation.\n")
@@ -88,16 +109,19 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             }
             if (controlOnly || controlVideoOnly) {
                 RecordingControlChecks(this).run(controlVideoOnly, manualRootOnly)
+                consent?.get(1, java.util.concurrent.TimeUnit.SECONDS)
                 result.putString("stream", "\nOK: Control Room recording buttons start app capture, clips keep capture running, and master/clip archives contain media (video=$controlVideoOnly, manualRoot=$manualRootOnly).\n")
                 finish(android.app.Activity.RESULT_OK, result); return
             }
             if (videoDenyOnly) {
                 RecordingClipChecks(this).denyVideo()
+                consent?.get(1, java.util.concurrent.TimeUnit.SECONDS)
                 result.putString("stream", "\nOK: Real video consent denial leaves no archive, clears recording/saving and allows subsequent frame capture.\n")
                 finish(android.app.Activity.RESULT_OK, result); return
             }
             if (clipsOnly || videoOnly) {
                 RecordingClipChecks(this).run(videoOnly, longSession)
+                consent?.get(1, java.util.concurrent.TimeUnit.SECONDS)
                 result.putString("stream", "\nOK: Retrospective clip preserved recent evidence, excluded post-mark logs, kept master capture running and exported compatible media (video=$videoOnly, long=$longSession).\n")
                 finish(android.app.Activity.RESULT_OK, result); return
             }
@@ -149,6 +173,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         } catch (failure: Throwable) {
             result.putString("stream", "\nFAIL: ${failure.stackTraceToString()}\n")
             finish(android.app.Activity.RESULT_CANCELED, result)
+        } finally {
+            consent?.cancel(true)
         }
     }
 
@@ -431,7 +457,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             fun tabStrip(): android.view.accessibility.AccessibilityNodeInfo? {
                 if (android.os.Build.VERSION.SDK_INT >= 33) uiAutomation.clearCache()
                 fun find(node: android.view.accessibility.AccessibilityNodeInfo): android.view.accessibility.AccessibilityNodeInfo? {
-                    if (node.className?.toString() == "android.widget.HorizontalScrollView" && node.isScrollable) return node
+                    if (node.contentDescription?.toString() == "Diagnostic tabs" && node.isScrollable) return node
                     repeat(node.childCount) { index -> node.getChild(index)?.let { find(it)?.let { found -> return found } } }
                     return null
                 }
