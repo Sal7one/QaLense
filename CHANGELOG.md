@@ -2,6 +2,22 @@
 
 ## Unreleased — post-0.9.0
 
+### Linked QA inspection and selectors — 2026-10-05
+- Link live selection between the Android inspector and desktop Landing. Phone selections load
+  attributes/selectors automatically; browser tree/preview selection highlights the phone without
+  tapping the app. Preserve optional captured Send/Receive, explicit actions and phone approval.
+- Add searchable tags/text/roles/actions, tag/action filters in SDK More tools/Tools/inspector and
+  Automation Tags, plus browser role filtering. Keep selectors collapsible in the movable dock.
+- Generate scoped-tag, content/role and visible-position QaLens XPath with match counts; add browser
+  builder, live matching and explicit redacted XML/selector JSON exports. Bound the evaluator;
+  reject unsupported/ambiguous/truncated/stale targets and keep work off main after semantics copy.
+- Guard stale device/selection replies and serialize rapid highlights, skipping superseded choices.
+  Restore selection after browser refresh and clear desktop selection when the phone clears it.
+- Resolve preview clicks once from fresh bounds instead of selecting again as the event bubbles.
+- Fix the search field's accessible edit label and reveal results when checking a generated selector.
+  Verify standard XPath equivalence/privacy, actual overlay search/copy and live phone/browser
+  round trips; add browser wiring regressions to CI and update onboarding/protocol documentation.
+
 ### Android feature verification and tester UI — 2026-10-04
 - Make system Back exit fullscreen Android replay and return to its controls.
 - Keep the diagnostic title/Close reachable at large font sizes; move tools into their own

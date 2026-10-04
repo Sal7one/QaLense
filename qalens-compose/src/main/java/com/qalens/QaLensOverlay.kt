@@ -175,12 +175,14 @@ private fun InspectCanvas(
     colors: QaLensOverlayColors
 ) {
     var filter by remember { mutableStateOf(InspectFilter.ACTIONS) }
-    val visibleNodes = when (filter) {
+    val filteredNodes = when (filter) {
         InspectFilter.ALL -> nodes
         InspectFilter.ACTIONS -> nodes.filter { it.isClickable || it.isFocusable }
         InspectFilter.TAGGED -> nodes.filter { it.testTag != null }
         InspectFilter.ISSUES -> nodes.filter { it.warnings.isNotEmpty() }
     }
+    val visibleNodes = if (selectedNode != null && filteredNodes.none { it.id == selectedNode.id }) filteredNodes + selectedNode else filteredNodes
+    var showSelectors by remember(selectedNode?.id) { mutableStateOf(false) }
     val context = LocalContext.current
     val config by QaLens.config.collectAsState()
     val bridgeTransfer by QaLensBridgeComponents.status.collectAsState()
@@ -241,7 +243,8 @@ private fun InspectCanvas(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().heightIn(min = QaLensDimens.touchMin)
                         .semantics { contentDescription = "Move inspector" }.then(drag).padding(vertical = 12.dp))
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    QaLensSelectorLauncher(colors)
                     selectedNode?.let { node ->
                         Surface(
                             color = colors.panel,
@@ -297,6 +300,9 @@ private fun InspectCanvas(
                                     )
                                 }
                                 if (bridgeTransfer.isNotBlank()) Text(bridgeTransfer, color = colors.fg2, fontSize = 11.sp)
+                                Text(if (showSelectors) "Hide selectors" else "Actions & XPath selectors", color = colors.accent, fontSize = 12.sp,
+                                    modifier = Modifier.heightIn(min = 44.dp).clickable(role = Role.Button) { showSelectors = !showSelectors }.padding(vertical = 10.dp))
+                                if (showSelectors) QaLensSelectorDetails(node.id, colors)
                             }
                         }
                     }

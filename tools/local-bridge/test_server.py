@@ -52,6 +52,13 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(self.call("/api/command", b"[]", headers)[0], 400)
         self.assertEqual(self.call("/api/command", b"x" * 16385, headers)[0], 413)
         self.assertEqual(self.call("/api/command", b"{}", {"Authorization": f"Bearer {TOKEN}"})[0], 415)
+    def test_selector_routes_preserve_auth_and_device_errors(self):
+        headers = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+        code, data, _ = self.call("/api/selection", headers=headers)
+        self.assertEqual(code, 200); self.assertEqual(json.loads(data)["path"], "/v1/selection")
+        for route in ("selectors", "query"):
+            self.assertEqual(self.call("/api/" + route, b'{"xpath":"//node"}', headers)[0], 409)
+            self.assertEqual(self.call("/api/" + route, b"{}")[0], 401)
     def test_disconnect_is_actionable_and_not_retried(self):
         port = self.server.device_port; self.server.device_port = 1
         try: self.assertEqual(self.call("/api/snapshot", headers={"Authorization": f"Bearer {TOKEN}"})[0], 502)

@@ -1,6 +1,6 @@
 # QaLens engineering handover
 
-Updated 2026-10-04. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
+Updated 2026-10-05. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
 the user/integrator overview; [next.md](next.md) is the only current backlog;
 [CONTRIBUTING.md](CONTRIBUTING.md) owns portable build/device commands. This handover records
 the current engineering baseline, including the recording-control fixes below. Git and CHANGELOG retain earlier history.
@@ -45,6 +45,43 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Two-way inspection and selectors — 2026-10-05
+
+The current scope is smooth QA inspection between Android and the browser, without new Robot
+integration, a recorder or broad Appium/native/WebView replacement. Landing links selections by
+default: a browser tree/preview choice highlights the SDK inspector without invoking a host action;
+a phone inspector/search choice loads browser attributes and selectors without Send to PC. A cheap
+cached-ID read runs every 1.5s only on visible Landing. Changed selections read a fresh tree; manual
+Refresh handles same-element content changes. Rapid highlights are serialized and superseded queued
+choices skipped. Clearing phone selection clears the live desktop selection; generation/connection
+guards reject old responses. Captured Send/Receive remains independent and optional.
+
+Android More tools/Tools/inspector and Automation Tags share searchable redacted semantics with
+tag/action filters. The inspector exposes supported actions and copyable selectors. Browser search
+also filters roles; Selectors adds tag/ancestor-tag/content/position suggestions, match counts,
+builder, live query results and explicit XML/JSON exports. The pure core engine is shared with the
+SDK; Python only forwards the protocol. XPath addresses exported QaLens XML, not Appium XML;
+the evaluator supports bounded node paths/positions/attribute equality/and/quoted concat literals.
+It rejects arbitrary functions, ambiguity, truncated trees and tree changes before XPath dispatch.
+See [desktop guide](tools/local-bridge/README.md#search-and-selectors) for schema/budgets. Password/
+hidden values remain excluded; redaction/matching/XML run off main. Updated privacy settings
+invalidate a pending selector export. Existing public facade/no-op and `.sal` formats are unchanged.
+
+Local checks pass: 221 unit tests (183/31/5/2), five module/sample lint checks with zero errors,
+sample debug/test/release and isolation, independent composite consumer debug/release/isolation,
+27 Python tests and all browser wiring/transfer/polling regressions. Core selectors are compared
+against a standard XML XPath engine, including quotes, unicode, XML specials, invalid host strings,
+scoped duplicate tags, roots and protected values. The API 36 bridge test passes XML/query privacy,
+duplicate rejection, inspect-only selection and existing gestures. Actual overlay search selects a
+host element and copies XPath. Live Android/adb/Python/Codex-browser checks pass phone→browser,
+browser→phone, page refresh restoration, search/action filtering, clipboard and live query builder.
+The wider tester workflow also passes. Actual preview clicks select once; a new bubbling regression
+prevents duplicate dispatch. Live 1440px/390px layouts have no page overflow with selector tools.
+The search field's decoration lost its accessible edit label; an explicit label fixes that. Query
+checks now reveal the results panel. Browser-download completion in Codex remains unconfirmed;
+XML generation/standard evaluation and API responses are verified. Physical phones, TalkBack,
+other Compose versions and the reported consuming-app capture crash remain outside these checks.
 
 ### Android feature audit — 2026-10-04
 

@@ -53,6 +53,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var projectionConsent: String? = null
     private var desktopTransferToken: String? = null
     private var desktopPhoneApproval = false
+    private var selectorsOnly = false
+    private var desktopSelectors = false
     override fun onCreate(arguments: Bundle?) {
         videoDenyOnly = arguments?.getString("videoDenyOnly") == "true"
         clipsOnly = arguments?.getString("clipsOnly") == "true"
@@ -70,6 +72,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         projectionConsent = arguments?.getString("projectionConsent")
         desktopTransferToken = arguments?.getString("desktopTransferToken")
         desktopPhoneApproval = arguments?.getString("desktopPhoneApproval") == "true"
+        selectorsOnly = arguments?.getString("selectorsOnly") == "true"
+        desktopSelectors = arguments?.getString("desktopSelectors") == "true"
         super.onCreate(arguments)
         start()
     }
@@ -78,6 +82,11 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         val result = Bundle()
         var consent: java.util.concurrent.FutureTask<Unit>? = null
         try {
+            if (selectorsOnly || desktopSelectors) {
+                SelectorUiChecks(this).run(desktopSelectors)
+                result.putString("stream", "\nOK: Overlay tag search selects the host component and copies validated QaLens XPath; linked browser checkpoints pass when enabled.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             if (controlVideoOnly || videoOnly || videoDenyOnly || videoRecoveryOnly) {
                 consent = ProjectionConsentChecks.start(this, projectionConsent)
             } else require(projectionConsent == null) { "projectionConsent requires a focused video mode" }

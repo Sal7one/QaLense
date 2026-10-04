@@ -88,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
         bench = self.server.workbench
         if bench and self.command == "GET" and self.path == "/api/bootstrap":
             return self.reply(200, {"ok": True, "session": bench.session})
-        endpoints = {("GET", "/api/recordings/device"): "/v1/recordings", ("GET", "/api/snapshot"): "/v1/snapshot", ("GET", "/api/events"): "/v1/events", ("POST", "/api/command"): "/v1/command", ("POST", "/api/component"): "/v1/component", ("GET", "/api/inbox"): "/v1/components/inbox"}
+        endpoints = {("GET", "/api/recordings/device"): "/v1/recordings", ("GET", "/api/snapshot"): "/v1/snapshot", ("GET", "/api/selection"): "/v1/selection", ("POST", "/api/selectors"): "/v1/selectors", ("POST", "/api/query"): "/v1/query", ("GET", "/api/events"): "/v1/events", ("POST", "/api/command"): "/v1/command", ("POST", "/api/component"): "/v1/component", ("GET", "/api/inbox"): "/v1/components/inbox"}
         route = endpoints.get((self.command, self.path))
         binary = parsed.path == "/api/recordings/file"
         if not route and not (bench and (self.path in WORKBENCH_ROUTES or binary)):
@@ -154,7 +154,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not desktop and not hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode()):
                     return self.reply(401, {"ok": False, "error": "Device pairing changed; connect again"})
                 code, payload = self.proxy(route, body, self.command)
-                if code == 200 and bench and self.path in {"/api/snapshot", "/api/recordings/device"}: payload["connectionId"] = bench.connection_id
+                if code == 200 and bench and self.path in {"/api/snapshot", "/api/selection", "/api/selectors", "/api/query", "/api/recordings/device"}: payload["connectionId"] = bench.connection_id
                 if code == 200 and bench and self.path == "/api/component":
                     payload = {"ok": True, "document": bench.preview(payload)}
                 elif code == 200 and bench and self.path == "/api/inbox":

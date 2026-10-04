@@ -381,7 +381,7 @@ internal fun QaLensInspectorPanel(
                     InspectorTab.NAV           -> NavTab(state)
                     InspectorTab.INSPECT       -> ScrollContent { InspectTab(state, onSelectNode) }
                     InspectorTab.ACCESS        -> ScrollContent { WarningsTab(state) }
-                    InspectorTab.TAGS          -> ScrollContent { TestTagsTab(state, context) }
+                    InspectorTab.TAGS          -> TestTagsTab(state, context)
                     InspectorTab.DEVICE        -> ScrollContent { DeviceTab(state) }
                     InspectorTab.LOGS          -> LogsTab(state, context)
                     InspectorTab.NETWORK       -> NetworkTab(state)
@@ -546,7 +546,10 @@ private fun NavEventRow(event: QaEvent, isFirst: Boolean) {
 private fun InspectTab(state: QaLensUiState, onSelectNode: (InspectNode?) -> Unit) {
     val selected = state.selectedNode
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (selected != null) NodeCard(selected, selected = true, onClick = {})
+        if (selected != null) {
+            NodeCard(selected, selected = true, onClick = {})
+            QaLensSelectorDetails(selected.id, qaLensColorsFor(LocalContext.current))
+        }
         else Text("Turn on Inspect, then tap a highlighted component.", color = PanelMuted, fontSize = 12.sp)
 
         val displayNodes = state.nodes.take(60)
@@ -601,22 +604,25 @@ private fun WarningsTab(state: QaLensUiState) {
 
 @Composable
 private fun TestTagsTab(state: QaLensUiState, context: Context) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         PanelButton("👁  Show Tags On Screen", tint = PanelGreen) {
             QaLens.setTagMode(true)
             QaLens.closePanel()
         }
         Text(
-            "Draws every visible tag on its component (green). Interactive components with NO tag show red — they're unreachable from UI tests. Tap a tag to copy it.",
+            "Show tags on the app, or search elements by tag, text, role and supported action below.",
             color = PanelMuted, fontSize = 11.sp
         )
         PanelButton("Copy ${state.testTags.size} Tags") {
             copy(context, "QaLens Test Tags", state.testTags.joinToString("\n"))
         }
-        if (state.testTags.isEmpty()) Text("No visible test tags.", color = PanelMuted, fontSize = 12.sp)
-        state.testTags.forEach { tag ->
-            Text("• $tag", color = PanelText, fontSize = 12.sp,
-                modifier = Modifier.clickable { copy(context, "Tag", tag) })
+        Box(Modifier.weight(1f)) {
+            QaLensSelectorBrowser(qaLensColorsFor(context)) { id ->
+                QaLens.refreshInspection()
+                QaLens.state.value.nodes.firstOrNull { it.id == id }?.let {
+                    QaLens.setWatchMode(false); QaLens.setInspectMode(true); QaLens.previewNode(it); QaLens.closePanel()
+                }
+            }
         }
     }
 }
@@ -1071,6 +1077,7 @@ private fun ToolsTab(state: QaLensUiState, context: Context) {
 
         // ── Quick actions (all exports are redaction-aware) ─────────────
         Text("Quick Actions", color = PanelText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        QaLensSelectorLauncher(qaLensColorsFor(context))
         PanelButton("🛠  Open Control Room", tint = PanelAccent) { openControlRoom(context) }
         QaLensPcInspectorControls(qaLensColorsFor(context))
         PanelButton("📷  Share Screenshot") { QaLens.takeScreenshot() }

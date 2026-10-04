@@ -26,6 +26,7 @@ python3 tools/local-bridge/test_desktop.py
 node --check tools/local-bridge/app.js
 node tools/local-bridge/test_recording_transfer.js
 node tools/local-bridge/test_polling.js
+node tools/local-bridge/test_selectors.js
 ```
 
 The consumer fixture resolves normal `com.qalens:*` coordinates through `includeBuild`; it catches
@@ -75,6 +76,24 @@ against current system/IME insets; run with gesture and three-button navigation.
 [PC bridge guide](tools/local-bridge/README.md) describes pairing and adb-forward ownership.
 
 ## Focused device checks
+
+Overlay selector search/copy uses actual accessible controls:
+
+```sh
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e selectorsOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: Overlay tag search selects the host component and copies validated QaLens XPath`.
+`bridgeOnly` also checks selector/XML privacy, unique/duplicate XPath, unsupported expressions and
+inspection-only selection. For a manual live browser check, `-e desktopSelectors true` keeps the
+synthetic sample available through explicit checkpoints in private `files/qalens-selector-test`:
+`ready` → browser Connect; write `approve` to `signal` for the test fixture to press real phone
+approval; `paired` → write `select-phone`; `phone-selected` → inspect automatic browser details,
+choose another tag there, write that tag to `expected-tag` and `check-pc` to `signal`; `pc-selected`
+→ write `done`. Each wait expires after three minutes; failure/finish revokes the bridge and cleans
+checkpoints. These controls belong to the disposable test APK, never a consuming app. Browser
+search/filter/Copy XPath/Check matches and preview are checked separately through their real UI.
 
 Use [recording clips](docs/RECORDING_CLIPS.md) for preset/custom clips, longer sessions and real
 HD consent approval/denial modes. HD checks require the OS dialog to be handled promptly on the

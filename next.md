@@ -1,7 +1,23 @@
 # Current backlog
 
-Updated 2026-10-04. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
+Updated 2026-10-05. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
+
+## Completed 2026-10-05: linked QA inspection and selectors
+
+- [x] Link Android inspector/search and browser selections in both directions without requiring
+  Send to PC or triggering a host tap. Refresh changed-selection bounds/actions, restore browser
+  selection after refresh and reject stale reads/device switches/superseded queued highlights.
+- [x] Search tags/text/roles/actions in the overlay and browser; add action/tag filters plus browser
+  role filtering. Keep advanced controls under More tools/Tools and collapsible inspector details.
+- [x] Share a bounded core selector engine: unique/scoped tags, role/content/position XPath, counts,
+  redacted QaLens XML, live match queries and explicit exports. Reject unsafe/unsupported/ambiguous
+  XPath; keep hidden/password/custom coverage limits and worker processing.
+- [x] Verify actual overlay search/copy, live phone↔browser highlighting and attributes, clipboard,
+  search/action filters, page refresh and query builder; add standard XPath/core, bridge/privacy
+  and actual browser wiring regressions. Update contributor/onboarding/protocol guidance.
+- Physical phones/TalkBack/other Compose versions and browser-download completion in Codex remain
+  unverified. Robot integration, flow recording and broad Appium replacement are outside this scope.
 
 ## Landing desktop and easier connection — 2026-10-04
 

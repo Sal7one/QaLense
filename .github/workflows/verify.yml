@@ -45,5 +45,6 @@ jobs:
           node --check tools/local-bridge/app.js
           node tools/local-bridge/test_recording_transfer.js
           node tools/local-bridge/test_polling.js
+          node tools/local-bridge/test_selectors.js
       - name: Backend regression tests
         run: python3 backend/tests/test_backend.py

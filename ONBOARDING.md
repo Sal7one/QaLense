@@ -1,6 +1,6 @@
 # QaLens onboarding
 
-Updated 2026-10-02. This guide is for QA testers, Android integrators and engineers evaluating
+Updated 2026-10-05. This guide is for QA testers, Android integrators and engineers evaluating
 QaLens for a team. It explains the Android SDK, browser players, Python desktop and local test
 backend, then walks through capture, inspection, replay and sharing. Start with synthetic data.
 
@@ -234,14 +234,21 @@ After updating, rebuild the QA app and restart Python before testing.
 2. Profiles remember the phone/app without credentials. **Auto reconnect** repairs temporary USB
    outages within this approved session. A restart, device switch or revoked token requires approval
    again. **Stop PC inspector** on the phone revokes access; no app data is reset.
-3. Select any tree element to load all public attributes. The detail tabs separate **Attributes**,
-   **Semantics**, **Tree position** and **Diagnostics**. Highlight or tap/type/scroll via explicit
-   buttons, then refresh to verify effects. Tags must be unique; live IDs change with the UI.
+3. Keep **Link phone & web selection** checked. Select in the phone inspector and its details load
+   in the browser; choose a tree element or preview rectangle and the phone highlights it.
+   Selection never taps the app. **Attributes**, **Selectors**, **Semantics**, **Tree position** and
+   **Diagnostics** separate the details; tap/type/scroll use explicit buttons. Refresh after changes.
+   Search tags/text/roles/actions and filter by action, role or tag presence.
 4. **Start preview** shows sampled live phone pixels (up to 1 fps), including other apps. It is
    explicit, memory-only, unmasked and stops when leaving Landing/hiding the tab/disconnecting.
    Click a matching visible Compose element to inspect it; actions require separate buttons.
-5. **Send to PC** beside **Copy test tag** sends attributes to **Receive phone selections** on Landing.
-   Review values/bounds/ancestry, then **Save JSON** to persist the deduplicated component.
+5. On the phone use **More tools → Search selectors & tags**, or search from the movable inspector
+   and full **Automation Tags** tab. Select a result; **Actions & XPath selectors** offers copyable
+   selectors with match counts. In the browser **Selectors** adds a builder, live match checking and
+   explicit XML/JSON exports. XPath targets QaLens's visible Compose XML; prefer unique tags over
+   changing text/tree positions. Full contract: [desktop guide](tools/local-bridge/README.md#search-and-selectors).
+6. **Send to PC** beside **Copy test tag** remains an optional captured transfer to **Receive sent
+   components**. Review values/bounds/ancestry, then **Save JSON** to persist the deduplicated component.
 
 Hidden/password values are excluded according to capture policy; custom properties have limited
 coverage. A component document is attributes and tree position, not a screenshot or recreated widget.

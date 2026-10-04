@@ -3,6 +3,8 @@ const $ = id => document.getElementById(id);
 let autoConnectAttempted = false;
 let selectionGeneration = 0, previewGeneration = 0, previewEnabled = false, previewBusy = false, previewUrl = '', connectPolling = false, discoveredApps = [], liveSelecting = false;
 let snapshot = null, selected = null, busy = false, session = '', workbench = null, component = null, previews = [], activeProfile = null, polling = false, savedHashes = new Set();
+let selectorBundle = null, queryGeneration = 0, selectionPolling = false, lastPhoneSelection = null, choosing = 0;
+let highlightQueue = Promise.resolve();
 const status = text => { $('status').textContent = text; };
 async function api(path, command) {
   const headers = {'X-Qalens-Session': session};
@@ -47,15 +49,26 @@ async function refresh() {
   $('screen').textContent = `${snapshot.screen} · ${snapshot.nodes.length} visible nodes`;
   status(`${snapshot.nodes.length} visible elements · ${snapshot.omittedNodes} omitted. Select any element to read its attributes.`);
   render(); details();
-  if (selected && !liveSelecting) await choose(selected);
+  renderRoles();
+  if (selected && !liveSelecting) await choose(selected, 'refresh');
 }
 function filtered() {
-  const needle = $('search').value.toLowerCase();
-  return (snapshot?.nodes || []).filter(n => (!$('tagged').checked || n.tag) && `${n.tag || ''} ${n.label || ''} ${n.id}`.toLowerCase().includes(needle));
+  const needle = $('search').value.trim().toLowerCase(), action = $('action-filter').value, role = $('role-filter').value;
+  return (snapshot?.nodes || []).filter(n => (!$('tagged').checked || n.tag) && (!role || n.role === role) &&
+    (!action || (action === 'none' ? !n.actions.length : n.actions.includes(action))) &&
+    [n.tag, n.label, n.role, n.state, ...(n.text || []), ...(n.description || []), ...n.actions].filter(Boolean).join(' ').toLowerCase().includes(needle));
+}
+function renderRoles() {
+  const current = $('role-filter').value; $('role-filter').replaceChildren();
+  for (const role of ['', ...new Set((snapshot?.nodes || []).map(n => n.role).filter(Boolean))]) {
+    const option = document.createElement('option'); option.value = role; option.textContent = role || 'Any role'; $('role-filter').append(option);
+  }
+  if ([...$('role-filter').options].some(o => o.value === current)) $('role-filter').value = current;
 }
 function render() {
   $('tree').replaceChildren(); $('map').replaceChildren();
-  if (!snapshot) return;
+  $('search-count').textContent = snapshot ? `${filtered().length} matches / ${snapshot.nodes.length} visible elements${snapshot.omittedNodes ? ` · ${snapshot.omittedNodes} omitted` : ''}` : 'Connect and refresh to search.';
+  if (!snapshot) { clearSelectors(); return; }
   const viewport = snapshot.screenViewport || snapshot.viewport;
   $('map').setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
   const frame = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -69,26 +82,43 @@ function render() {
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect'), b = node.bounds;
     rect.setAttribute('x', b.left + (snapshot.viewport.originX || 0)); rect.setAttribute('y', b.top + (snapshot.viewport.originY || 0)); rect.setAttribute('width', b.right-b.left); rect.setAttribute('height', b.bottom-b.top); rect.setAttribute('class', selected?.id === node.id ? 'selected' : '');
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = node.tag || node.label;
-    rect.append(title); rect.onclick = () => choose(node); $('map').append(rect);
+    rect.append(title); rect.onclick = event => {
+      // Live preview resolves the smallest current element once in the parent click handler.
+      if (!previewEnabled) { event.stopPropagation(); void choose(node); }
+    }; $('map').append(rect);
   }
 }
-async function choose(node) {
+async function choose(node, origin = 'pc') {
   if (!snapshot || snapshot.connectionId !== workbench?.connectionId) { status('Connection changed. Refresh the tree before selecting.'); return; }
   const generation = ++selectionGeneration, connectionId = workbench?.connectionId;
-  selected = node; component = null; render(); details(); componentButtons();
+  choosing++;
+  selected = node; component = null; clearSelectors(); render(); details(); componentButtons();
   $('component-title').textContent = node.tag || node.label || 'Component';
   $('component-meta').textContent = 'Loading all public attributes…';
   $('attributes').replaceChildren(); $('semantic-attributes').replaceChildren();
   $('attributes-empty').hidden = false; $('attributes-empty').textContent = 'Loading attributes…';
   try {
+    if (origin === 'pc' && $('link-selections').checked) {
+      // Inspection only: choosing a node must never tap/type/scroll the host.
+      try {
+        const highlight = highlightQueue.catch(() => {}).then(async () => {
+          if (generation !== selectionGeneration || connectionId !== workbench?.connectionId || !$('link-selections').checked) return;
+          await api('command', {action: 'select', id: node.id});
+          if (generation === selectionGeneration) lastPhoneSelection = node.id;
+        });
+        highlightQueue = highlight; await highlight;
+      }
+      catch (error) { status(`Selected on web. Phone highlight unavailable: ${error.message}`); }
+      if (generation !== selectionGeneration || connectionId !== workbench?.connectionId) return;
+    }
     const result = await api('component', {id: node.id});
     if (generation !== selectionGeneration || connectionId !== workbench?.connectionId) return;
-    showComponent(result.document, true); await loadPreviews();
+    showComponent(result.document, true); await loadSelectors(node.id, generation, connectionId); await loadPreviews();
   } catch (error) {
     if (generation !== selectionGeneration) return;
     $('component-meta').textContent = error.message; $('attributes-empty').textContent = 'Refresh the tree and select again.';
     status(error.message);
-  }
+  } finally { choosing--; }
 }
 function details() {
   $('summary').textContent = selected ? `${selected.label}\nTag: ${selected.tag || 'none'} · ${selected.role || 'Component'} · ${selected.enabled ? 'Enabled' : 'Disabled'}\n${selected.bounds.right-selected.bounds.left} × ${selected.bounds.bottom-selected.bounds.top} px` : 'Choose a tree node or a rectangle.';
@@ -108,9 +138,9 @@ function row(name, value, target = 'attributes') {
   const tr = document.createElement('tr'), key = document.createElement('td'), val = document.createElement('td');
   key.textContent = name; val.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); tr.append(key, val); $(target).append(tr);
 }
-function componentButtons() { connectionButtons(); $('copy-tag').disabled = !(component?.content.component.tag || selected?.tag) || busy; $('save').disabled = !component || busy; $('download').disabled = !component || busy; $('run').disabled = !component || busy || !$('pipeline').value || !savedHashes.has(component.hash); }
+function componentButtons() { connectionButtons(); $('copy-tag').disabled = !(component?.content.component.tag || selected?.tag) || busy; $('save').disabled = !component || busy; $('download').disabled = !component || busy; $('run').disabled = !component || busy || !$('pipeline').value || !savedHashes.has(component.hash); $('download-tree').disabled = !selectorBundle || busy; $('export-selectors').disabled = !selectorBundle || busy; }
 function showComponent(entry, live = false) {
-  if (!live) { ++selectionGeneration; selected = null; render(); details(); }
+  if (!live) { ++selectionGeneration; selected = null; clearSelectors(); render(); details(); }
   component = entry;
   const data = entry.content, node = data.component;
   $('component-title').textContent = node.label || node.tag || 'Component';
@@ -194,6 +224,7 @@ async function saved() {
   if (data.omitted) status(`Library shows 500 files; ${data.omitted} older files remain on disk.`);
 }
 $('refresh').onclick = () => perform(refresh); $('search').oninput = render; $('tagged').onchange = render;
+$('action-filter').onchange = render; $('role-filter').onchange = render;
 $('events').onclick = () => perform(async () => { $('observations').textContent = JSON.stringify(await api('events'), null, 2); status('Read recent observations.'); });
 $('save').onclick = () => perform(async () => {
   await api('import', {document: component}); // saved snapshots can be re-opened after preview eviction
@@ -249,13 +280,104 @@ setInterval(async () => {
   try {
     const inbox = await api('inbox'); previews = inbox.documents; renderPreviews();
     if (inbox.connectionId !== workbench?.connectionId) return;
-    if (inbox.received && previews.length) { showComponent(previews.at(-1)); status(`Received from phone · review attributes, then Save. PC preview omissions: ${inbox.omittedPreviews || 0}.${inbox.dropped ? ` ${inbox.dropped} older phone previews were dropped by the queue budget.` : ''}`); }
+    if (inbox.received && previews.length && !choosing) {
+      const entry = previews.at(-1), target = snapshot?.nodes.find(n => n.id === entry.liveNodeId);
+      if (target && location.hash === '#landing' && $('link-selections').checked) await choose(target, 'phone');
+      else showComponent(entry);
+      status(`Received from phone · review attributes, then Save. PC preview omissions: ${inbox.omittedPreviews || 0}.${inbox.dropped ? ` ${inbox.dropped} older phone previews were dropped by the queue budget.` : ''}`);
+    }
   } catch (error) {
     if ([401, 403, 409].includes(error.status)) { $('receive').checked = false; status(`${error.message} Reconnect and enable Receive again.`); }
     else status(`${error.message} Receive remains enabled and will check again.`);
   }
   finally { polling = false; }
 }, 2500);
+
+function clearSelectors() {
+  selectorBundle = null; queryGeneration++;
+  $('selector-candidates').replaceChildren(); $('query-matches').replaceChildren();
+  $('selector-note').textContent = 'Choose a live element to generate selectors.';
+  $('download-tree').disabled = true; $('export-selectors').disabled = true;
+}
+async function loadSelectors(id, generation, connectionId) {
+  try {
+    const result = await api('selectors', {id});
+    if (generation !== selectionGeneration || connectionId !== workbench?.connectionId || result.connectionId !== connectionId) return;
+    selectorBundle = result; $('selector-candidates').replaceChildren();
+    $('selector-note').textContent = `${result.suggestions.length} selectors · ${result.omittedNodes ? `${result.omittedNodes} nodes omitted · counts are partial` : 'counts checked against the visible tree'}`;
+    for (const suggestion of result.suggestions) {
+      const card = documentElement('div', 'selector-card'), title = documentElement('strong', suggestion.matches === 1 ? '' : 'ambiguous');
+      title.textContent = `${suggestion.title} · ${suggestion.matches} match${suggestion.matches === 1 ? '' : 'es'}`;
+      const code = documentElement('code', ''); code.textContent = suggestion.xpath;
+      const hint = documentElement('p', 'helper'); hint.textContent = suggestion.stability === 'position' ? 'Changes when visible tree position changes.' : suggestion.stability === 'content' ? 'Depends on displayed content and language.' : suggestion.matches === 1 ? 'Tag selector; revalidate after navigation.' : 'Scope to a parent to distinguish duplicates.';
+      const actions = documentElement('div', 'toolbar');
+      button('Copy XPath', () => perform(async () => { await navigator.clipboard.writeText(suggestion.xpath); status('QaLens XPath copied.'); }), actions);
+      button('Check matches', () => { $('xpath-input').value = suggestion.xpath; $('selector-builder').open = true; perform(checkSelector); }, actions);
+      card.append(title, code, hint, actions); $('selector-candidates').append(card);
+    }
+    $('xpath-input').value = result.suggestions[0]?.xpath || '';
+    $('selector-attribute').value = selected?.tag ? 'tag' : 'label'; $('selector-value').value = selected?.tag || selected?.label || '';
+    $('selector-parent').value = ''; $('selector-action').value = '';
+    $('download-tree').disabled = false; $('export-selectors').disabled = false;
+  } catch (error) {
+    if (generation === selectionGeneration && connectionId === workbench?.connectionId) $('selector-note').textContent = error.status === 404 ? 'Element changed. Refresh the tree and select again.' : `Selectors unavailable: ${error.message}`;
+  }
+}
+function xpathLiteral(value) {
+  if (!value.includes("'")) return `'${value}'`;
+  if (!value.includes('"')) return `"${value}"`;
+  return `concat(${value.split("'").map(part => `'${part}'`).join(',"\'",')})`;
+}
+$('build-selector').onclick = () => {
+  const value = $('selector-value').value, attribute = $('selector-attribute').value;
+  if (!value) { status('Enter an exact attribute value.'); return; }
+  const clauses = [`@${attribute}=${xpathLiteral(value)}`];
+  if ($('selector-action').value) clauses.push(`@${$('selector-action').value}='true'`);
+  $('xpath-input').value = `${$('selector-parent').value ? `//node[@tag=${xpathLiteral($('selector-parent').value)}]` : ''}//node[${clauses.join(' and ')}]`;
+};
+async function checkSelector() {
+  const generation = ++queryGeneration, connectionId = workbench?.connectionId;
+  if (!workbench?.connected) throw Error('Connect to check this selector against the phone.');
+  const result = await api('query', {xpath: $('xpath-input').value});
+  if (generation !== queryGeneration || result.connectionId !== connectionId || connectionId !== workbench?.connectionId) return;
+  $('query-matches').replaceChildren();
+  const count = documentElement('p', 'helper'); count.textContent = `${result.count} matches${result.omittedNodes ? ' · tree coverage is partial' : ''}${result.omittedMatches ? ` · showing ${result.nodes.length}` : ''}`; $('query-matches').append(count);
+  for (const node of result.nodes) button(`${node.attributes.tag || 'No tag'} · ${node.attributes.label || node.attributes.role || 'Component'}`, () => perform(async () => {
+    if (connectionId !== workbench?.connectionId) throw Error('Connection changed. Check the selector again.');
+    const fresh = await api('snapshot'); if (fresh.connectionId !== connectionId) return;
+    snapshot = fresh; renderRoles(); const target = fresh.nodes.find(n => n.id === node.id);
+    if (!target) throw Error('Element changed. Check the selector again.');
+    await choose(target);
+  }), $('query-matches'), 'node');
+  status(count.textContent);
+}
+$('query-selector').onclick = () => perform(checkSelector);
+$('copy-xpath').onclick = () => perform(async () => { if (!$('xpath-input').value) throw Error('Build or choose a selector first.'); await navigator.clipboard.writeText($('xpath-input').value); status('QaLens XPath copied.'); });
+$('download-tree').onclick = () => { if (selectorBundle) download('qalens-tree.xml', selectorBundle.xml); };
+$('export-selectors').onclick = () => { if (selectorBundle) { const {connectionId, ...document} = selectorBundle; download('qalens-selectors.json', JSON.stringify(document, null, 2)); } };
+async function syncPhoneSelection() {
+  if (!$('link-selections').checked || !workbench?.connected || document.hidden || location.hash !== '#landing' || busy || choosing || liveSelecting || selectionPolling) return;
+  selectionPolling = true;
+  const connectionId = workbench.connectionId, generation = selectionGeneration;
+  try {
+    const result = await api('selection');
+    if (connectionId !== workbench?.connectionId || result.connectionId !== connectionId || generation !== selectionGeneration || !$('link-selections').checked) return;
+    if (!result.selectedId) {
+      if (lastPhoneSelection && selected) { ++selectionGeneration; selected = null; render(); details(); clearComponent(); status('Phone selection cleared.'); }
+      lastPhoneSelection = null; return;
+    }
+    if (result.selectedId === lastPhoneSelection || result.selectedId === selected?.id) { lastPhoneSelection = result.selectedId; return; }
+    const fresh = await api('snapshot');
+    if (fresh.connectionId !== connectionId || connectionId !== workbench?.connectionId || generation !== selectionGeneration || !$('link-selections').checked || document.hidden || location.hash !== '#landing') return;
+    snapshot = fresh; renderRoles();
+    const target = fresh.nodes.find(n => n.id === result.selectedId);
+    if (target) { lastPhoneSelection = result.selectedId; await choose(target, 'phone'); status('Selected on phone · tags, actions and selectors loaded.'); }
+  } catch (error) {
+    if (connectionId === workbench?.connectionId && [401, 403, 404].includes(error.status)) { $('link-selections').checked = false; status(`${error.message} Selection linking paused.`); }
+  } finally { selectionPolling = false; }
+}
+setInterval(() => { void syncPhoneSelection(); }, 1500);
+$('link-selections').onchange = () => { lastPhoneSelection = null; if ($('link-selections').checked) void syncPhoneSelection(); };
 perform(async () => { session = (await api('bootstrap')).session; await loadWorkbench(); await loadPreviews(); await saved(); await discover(); await localRecordings(); await maybeAutoConnect(); if (workbench.connected && location.hash === '#landing') await refresh(); });
 
 const recordingTransfer = new QaLensRecordingTransfer({
@@ -489,6 +611,7 @@ setInterval(() => {
 
 function clearComponent() {
   component = null;
+  clearSelectors(); lastPhoneSelection = null;
   $('component-title').textContent = 'Choose an element';
   $('component-meta').textContent = 'Attributes load when you select. Nothing is saved until you choose Save JSON.';
   for (const id of ['attributes', 'semantic-attributes', 'component-context', 'component-map']) $(id).replaceChildren();

@@ -1,8 +1,9 @@
 # QaLens desktop and component workbench
 
 A local browser GUI for a **QaLens-enabled Android QA build**. Inspect the live Compose tree, search
-exact tags, highlight components on the phone and invoke public tap/type/scroll actions. Send a
-selected component from the phone, read its attributes and tree position, save deduplicated JSON,
+tags, text, roles and actions, and link selections between the phone and browser. Generate/check
+QaLens XPath, highlight components and invoke public tap/type/scroll actions. Read a selected
+component's attributes and tree position, save deduplicated JSON,
 and run your own processors. Python standard library only; no Appium server or extra Android
 library is required. Release builds still use `qalens-noop`.
 
@@ -79,13 +80,21 @@ or Disconnect removes only a forward created by this workbench, preserving other
 
 ## Phone → preview → file
 
-1. Pair and enable **Receive phone selections** on Landing. It checks a memory inbox every
-   2.5 seconds while the page is visible. This does not continuously scan the Compose tree.
-2. Select a component on the phone. **Send to PC** is beside **Copy test tag**, including for
-   components without a tag. Alternatively select a node in the tree or click its position on the live screen preview; attributes load automatically.
-3. Use the selected element’s **Attributes**, **Semantics**, **Tree position** and **Diagnostics** tabs. The complete
+1. Pair with **Link phone & web selection** checked (the default). Select in the SDK inspector or
+   its **Search selectors & tags** screen: the browser loads attributes/selectors automatically.
+   Selecting a tree node or preview rectangle highlights it on the phone. Selection never invokes
+   a host tap/type/scroll action; those keep their separate buttons.
+2. Linking reads only the cached selected ID every 1.5 seconds while Landing is visible. A changed
+   selection reads a fresh visible tree and component; it does not continuously walk Compose.
+   Turn linking off for independent inspection. Requests are bounded and stale replies/device
+   changes cannot replace a newer choice. Rapid browser highlights are serialized; superseded
+   queued choices are skipped. Stale targets explain the failure; actions are never retried.
+3. **Send to PC** remains beside **Copy test tag**, including for untagged elements. Optional
+   **Receive sent components** reads its bounded inbox every 2.5 seconds; it can receive already
+   captured components while Control Room is in front. It is independent of live selection linking.
+4. Use the selected element’s **Attributes**, **Selectors**, **Semantics**, **Tree position** and **Diagnostics** tabs. The complete
    JSON remains available. Component JSON contains bounds and semantics; screen pixels are a separate preview and are not saved with JSON.
-4. **Save JSON** writes a content-addressed file. Repeated saves reuse it. **Download JSON** exports
+5. **Save JSON** writes a content-addressed file. Repeated saves reuse it. **Download JSON** exports
    to the browser's download location. **Import component JSON** opens a preview without saving;
    imported documents depend on their producer's redaction rules.
 
@@ -114,6 +123,44 @@ child/path counts are disclosed. Device inbox: 10 previews / 1 MiB, oldest dropp
 Reads are non-destructive; acknowledgements are idempotent after PC memory accepts a preview.
 Stop/disable clears the inbox. PC previews: 10 / 2 MiB, omission counter exposed. Neither inbox is
 durable: process/PC restarts and budget eviction can discard unsaved data. Receive stays enabled after temporary errors; authentication/connection changes stop it. Saved library lists the newest 500 files and reports omissions.
+
+## Search and selectors
+
+Landing searches tags, labels, text, descriptions, roles, state and supported actions; filter by
+tag presence, role or tap/type/scroll/no actions. **Selectors** suggests exact tags, ancestor-tag
+scopes for duplicates, role/content matches and visible sibling paths, with a match count for each.
+**Check matches** opens the results; choose a result to inspect/highlight it. The builder combines
+an exact attribute, optional parent tag and required action. Zero/duplicate matches are explicit.
+**Export tree XML** and **Export selectors JSON** are explicit browser downloads; neither linking
+nor generating suggestions writes application data to disk.
+
+The Android **More tools**, full **Tools**, and movable inspector expose **Search selectors & tags**.
+Full **Automation Tags** has the same searchable list. Choose a result to highlight its live host
+element; **Actions & XPath selectors** shows actions and copyable suggestions. Tree capture stays
+on main; redaction, matching, XML and selector generation run off main. Refresh after navigation
+or changing content. Hidden/password values remain excluded, and custom/private state is not read.
+
+XPath addresses **QaLens XML**, whose root is `<qalens>` with nested `<node>` elements. It is not
+an Appium/UIAutomator XPath. Each node has a live `id`, plus allowlisted attributes `tag`, `label`,
+`text`, `description`, `role`, `enabled`, `selected`, `heading`, `clickable`, `focusable`, `tap`,
+`type` and `scroll`. Boolean/action values are strings `true`/`false`. Missing attributes stay absent.
+The live evaluator accepts a bounded XPath 1.0 subset: child/descendant `node` paths, one positive
+sibling-position predicate **or** exact attribute equalities joined with `and` per step; quoted
+literals and `concat()` handle mixed quotes. Wildcards, arbitrary functions, unions and imported
+XML evaluation are rejected. Examples:
+
+```xpath
+//node[@tag='checkout.submit']
+//node[@tag='cart.row.42']//node[@tag='remove' and @tap='true']
+/qalens/node[1]/node[2]
+```
+
+Counts describe the current visible tree (up to 1,000 nodes), not uniqueness across screens or an
+entire list. Omitted nodes are disclosed; XPath commands reject truncated trees, duplicates and
+trees that change during resolution. Prefer stable unique tags; content depends on values/language
+and positional paths change with layout. XPath length <=4,096, <=64 steps; query returns at most
+100 matches with omission counts. XML and selector strings follow host redaction; illegal XML
+characters are removed consistently. This feature does not change `.sal` replay or add a runner.
 
 ## Persistence and automation
 
@@ -178,8 +225,11 @@ This trusts the local OS/adb environment; it is not a remotely exposed or multi-
 | `POST /api/preview` | `{enabled,connectionId}` → explicit preview choice |
 | `GET /api/screen` | PNG; requires session/connection headers and active preview |
 | `GET /api/snapshot` | `/v1/snapshot`: forest, viewport, parent IDs, tags, actions |
+| `GET /api/selection` | `/v1/selection`: cached selected ID, no Compose walk |
+| `POST /api/selectors` | `/v1/selectors`: `{id}` → suggestions, match counts and redacted QaLens XML |
+| `POST /api/query` | `/v1/query`: `{xpath}` → current visible matches and omission counts |
 | `GET /api/events` | `/v1/events`: last 100 observations/network entries and cached data |
-| `POST /api/command` | `/v1/command`: `{action,id}` or `{action,tag}`, tap/type/scroll/select |
+| `POST /api/command` | `/v1/command`: one of `{action,id}`, `{action,tag}`, `{action,xpath}`; tap/type/scroll/select |
 | `POST /api/component` | `/v1/component`: `{id}` or `{tag}`, returns a component preview |
 | `GET /api/inbox` | `/v1/components/inbox` + `/ack`: bounded phone selections → PC previews |
 | `GET /api/previews`, `/api/saved`, `/api/workbench` | Memory previews, saved metadata, profiles/jobs |
@@ -216,6 +266,7 @@ python3 tools/local-bridge/test_desktop.py
 node --check tools/local-bridge/app.js
 node tools/local-bridge/test_recording_transfer.js
 node tools/local-bridge/test_polling.js
+node tools/local-bridge/test_selectors.js
 # Build/install sample debug + androidTest APKs as in CONTRIBUTING.md, then:
 adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e bridgeOnly true \
   com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
@@ -226,6 +277,9 @@ phone button transfers, queue overflow/ack/restart, main timeout cancellation, d
 LTR/RTL gestures. Python checks cover hashing/dedup/restart, profiles/no-reset, local API controls,
 connection freshness and real pipeline success/failure/timeout/shutdown/output paths. Physical
 phones, TalkBack, other Compose versions and Windows processor cleanup remain unverified.
+The selector browser regression uses the actual `app.js` and exercises inspection-only linking,
+search/filtering, visible query results, clearing selection, stale reads/device switches and serialized
+latest highlights. Core tests compare generated XPath with a standard XML XPath engine.
 
 Phone approval also has a focused check:
 

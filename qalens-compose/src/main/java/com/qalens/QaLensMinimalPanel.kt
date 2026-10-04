@@ -258,6 +258,7 @@ internal fun QaLensMinimalPanel(
             }
 
             Spacer(Modifier.height(14.dp))
+            QaLensSelectorLauncher(colors)
             QaLensPcInspectorControls(colors)
 
             if (macros.isNotEmpty()) {

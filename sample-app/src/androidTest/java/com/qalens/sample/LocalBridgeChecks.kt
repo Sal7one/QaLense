@@ -87,6 +87,21 @@ internal class LocalBridgeChecks(private val runner: Instrumentation) {
             val json = snapshot.toString()
             check(!json.contains("never-export-password") && !json.contains("hidden-secret") && !json.contains("bridge.hidden")) { "Bridge leaked private semantics" }
             check(snapshot.getJSONArray("nodes").getJSONObject(0).has("parentId"))
+            val targetId = (0 until snapshot.getJSONArray("nodes").length()).map { snapshot.getJSONArray("nodes").getJSONObject(it) }
+                .single { it.optString("tag") == "bridge.tap" }.getString("id")
+            val selectors = call("selectors", JSONObject().put("id", targetId)).second
+            check(selectors.getString("schema") == "qalens.selectors")
+            val xml = selectors.getString("xml")
+            check(xml.contains("tag=\"bridge.tap\"") && xml.contains("tap=\"true\""))
+            check(!xml.contains("never-export-password") && !xml.contains("hidden-secret") && !xml.contains("custom-value-must-not-export")) { "Selector XML leaked private values" }
+            val xpath = selectors.getJSONArray("suggestions").getJSONObject(0).getString("xpath")
+            check(call("query", JSONObject().put("xpath", xpath)).second.getInt("count") == 1)
+            check(call("query", JSONObject().put("xpath", "//node[@tag='bridge.duplicate']")).second.getInt("count") == 2)
+            check(call("command", JSONObject().put("action", "select").put("xpath", "//node[@tag='bridge.duplicate']")).first == 409)
+            check(call("query", JSONObject().put("xpath", "//*[contains(@text,'secret')]")).first == 400)
+            check(call("command", JSONObject().put("action", "select").put("xpath", xpath)).first == 200)
+            check(call("selection").second.getString("selectedId") == targetId)
+            check(taps.get() == 0) { "Selecting through XPath executed a host click" }
             check(command("tap", "bridge.duplicate").first == 409) { "Ambiguous tag silently chose a node" }
             check(command("tap", "bridge.hidden").first == 404)
             check(command("tap", "bridge.tap").first == 200 && taps.get() == 1)
@@ -103,6 +118,7 @@ internal class LocalBridgeChecks(private val runner: Instrumentation) {
             waitFor("Send to PC button missing next to Copy test tag; selected=${QaLens.state.value.selectedNode?.testTag}") { find("Send to PC") != null }
             val send = find("Send to PC") ?: error("Send to PC button vanished")
             check(find("Copy test tag") != null)
+            check(find("Actions & XPath selectors") != null)
             var sendButton = send
             while (!sendButton.isClickable && sendButton.parent != null) sendButton = sendButton.parent
             check(sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK))

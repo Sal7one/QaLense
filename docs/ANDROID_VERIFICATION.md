@@ -1,5 +1,30 @@
 # Android verification — 2026-10-04
 
+## Selector and linked inspection addendum — 2026-10-05
+
+The API 36 focused bridge test passes selector/XML/query privacy, scoped/duplicate tag counts,
+unsupported XPath rejection and inspect-only selection without host taps, alongside existing
+tap/type/scroll and inspector LTR/RTL/two-finger gestures. Actual accessible overlay controls search
+`home.total.balance`, select its host node, expand selectors and copy the validated XPath.
+The decoration initially left the edit field without an accessible label; the final field is labeled.
+
+A live Android → adb → Python → Codex-browser test passes generated-credential phone approval,
+phone selection appearing without Send, browser selection highlighting the phone, page refresh
+restoring selection, tag/action search filters, clipboard copy, live generated-selector checks and
+builder tag+action matches. No host tap is invoked by selecting a tappable component. Query checks
+open their results panel. Browser-download completion remains unconfirmed in Codex; XML and
+generated XPath are validated through device API and the standard JVM XML XPath engine.
+The final preview click selects its current component once; 1440px/390px selector layouts have
+no page overflow. The focused wider tester workflow also passes on this build.
+Physical phones/TalkBack/other Compose versions and consuming-app failures remain unverified.
+The historical matrix below records the broader 2026-10-04 run; it was not all rerun for selectors.
+
+Current local builds pass 221 unit tests (183 core / 31 Compose / 5 replay / 2 no-op), five
+module/sample lint checks with zero errors, sample debug/test/release, independent consumer
+debug/release and both release isolation gates; 27 Python tests and selector/transfer/polling
+browser wiring checks pass. Unchanged checks may be cached. Commands are in
+[CONTRIBUTING.md](../CONTRIBUTING.md).
+
 Executed against the active SDK in the disposable API 36 arm64 sample emulator, using real Android
 UI actions, files, HTTP requests and video decoding. This is the tested feature matrix, not a
 certification of arbitrary host applications or every Android version. Commands live in

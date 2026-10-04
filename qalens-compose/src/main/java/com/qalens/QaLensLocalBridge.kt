@@ -129,6 +129,13 @@ internal object QaLensLocalBridge {
                             } ?: emptyList<Map<String, Any>>()))
                 }
                 request.method == "GET" && request.path == "/v1/snapshot" -> snapshot(generation)
+                request.method == "GET" && request.path == "/v1/selection" -> {
+                    requireSession(generation)
+                    if (!QaLens.config.value.enableSemanticsReflection) throw QaLensBridgeFailure(403, "Host disabled semantics inspection")
+                    mapOf("ok" to true, "selectedId" to QaLens.state.value.selectedNode?.id)
+                }
+                request.method == "POST" && request.path == "/v1/selectors" -> selectors(readJson(request.body), generation)
+                request.method == "POST" && request.path == "/v1/query" -> query(readJson(request.body), generation)
                 request.method == "GET" && request.path == "/v1/events" -> observations(generation)
                 request.method == "GET" && request.path == "/v1/components/inbox" -> {
                     synchronized(this@QaLensLocalBridge) {
@@ -209,6 +216,7 @@ internal object QaLensLocalBridge {
             activity.windowManager.defaultDisplay.getRealSize(displaySize)
             mapOf<String, Any?>("ok" to true, "protocol" to 1, "screen" to QaLens.state.value.screen.displayName,
                 "route" to QaLens.state.value.screen.route, "capturedAtMillis" to System.currentTimeMillis(),
+                "selectedId" to QaLens.state.value.selectedNode?.id,
                 "viewport" to mapOf<String, Any?>("width" to activity.window.decorView.width, "height" to activity.window.decorView.height,
                     "originX" to origin[0], "originY" to origin[1]),
                 "screenViewport" to mapOf("width" to displaySize.x, "height" to displaySize.y),
@@ -235,6 +243,43 @@ internal object QaLensLocalBridge {
         if (node.config.contains(SemanticsActions.OnClick)) add("tap")
         if (node.config.contains(SemanticsActions.SetText)) add("type")
         if (node.config.contains(SemanticsActions.ScrollBy)) add("scroll")
+    }
+
+    private suspend fun selectorTree(generation: Long): Pair<QaLensAutomationInspection.Capture, List<QaLensSelectorNode>> {
+        val capture = onHost(generation) { QaLensAutomationInspection.capture(it) }
+        val nodes = capture.redacted()
+        requireCapture(capture, generation)
+        return capture to nodes
+    }
+
+    private fun requireCapture(capture: QaLensAutomationInspection.Capture, generation: Long) {
+        requireSession(generation)
+        if (capture.config != QaLens.config.value) throw QaLensBridgeFailure(409, "Inspection settings changed; refresh and retry")
+    }
+
+    private suspend fun selectors(input: JSONObject, generation: Long): Map<String, Any?> {
+        val id = input.opt("id") as? String ?: throw QaLensBridgeFailure(400, "Supply a current node id")
+        if (id.isBlank() || id.length > 128) throw QaLensBridgeFailure(400, "Supply a current node id")
+        val (capture, nodes) = selectorTree(generation)
+        if (nodes.none { it.id == id }) throw QaLensBridgeFailure(404, "Element changed; refresh and select it again")
+        val result = mapOf("ok" to true, "schema" to "qalens.selectors", "version" to 1, "liveNodeId" to id,
+            "suggestions" to QaLensAutomationInspection.suggestions(nodes, id), "xml" to QaLensSelectors.xml(nodes),
+            "omittedNodes" to capture.omitted, "coverage" to "QaLens visible Compose XML. XPath is not an Appium/UIAutomator locator. Match counts apply to this snapshot; positions and content can change.")
+        requireCapture(capture, generation)
+        return result
+    }
+
+    private suspend fun query(input: JSONObject, generation: Long): Map<String, Any?> {
+        val xpath = input.opt("xpath") as? String ?: throw QaLensBridgeFailure(400, "Supply XPath text")
+        try { QaLensSelectors.resolve(emptyList(), xpath) }
+            catch (failure: IllegalArgumentException) { throw QaLensBridgeFailure(400, failure.message ?: "Invalid XPath") }
+        val (capture, nodes) = selectorTree(generation)
+        val matches = try { QaLensSelectors.resolve(nodes, xpath) }
+            catch (failure: IllegalArgumentException) { throw QaLensBridgeFailure(400, failure.message ?: "Invalid XPath") }
+        requireCapture(capture, generation)
+        return mapOf("ok" to true, "count" to matches.size, "omittedNodes" to capture.omitted,
+            "nodes" to matches.take(100).map { mapOf("id" to it.id, "attributes" to it.attributes) },
+            "omittedMatches" to (matches.size - minOf(matches.size, 100)))
     }
 
     fun sendComponent(id: String) {
@@ -269,7 +314,7 @@ internal object QaLensLocalBridge {
     }
 
     private suspend fun command(command: JSONObject, generation: Long): Map<String, Any?> {
-        for (field in listOf("action", "id", "tag", "text")) {
+        for (field in listOf("action", "id", "tag", "text", "xpath")) {
             if (command.has(field) && command.opt(field) !is String)
                 throw QaLensBridgeFailure(400, "$field must be a string")
         }
@@ -281,7 +326,21 @@ internal object QaLensLocalBridge {
         if (action !in listOf("tap", "type", "scroll", "select")) throw QaLensBridgeFailure(400, "Use tap, type, scroll or select")
         val id = command.optString("id")
         val tag = command.optString("tag")
-        if ((id.isBlank()) == (tag.isBlank())) throw QaLensBridgeFailure(400, "Supply exactly one exact id or tag")
+        val xpath = command.optString("xpath")
+        if (listOf(id, tag, xpath).count { it.isNotBlank() } != 1) throw QaLensBridgeFailure(400, "Supply exactly one id, tag or QaLens XPath")
+        var xpathCapture: QaLensAutomationInspection.Capture? = null
+        val resolvedId = if (xpath.isNotBlank()) {
+            try { QaLensSelectors.resolve(emptyList(), xpath) }
+                catch (failure: IllegalArgumentException) { throw QaLensBridgeFailure(400, failure.message ?: "Invalid XPath") }
+            val (capture, nodes) = selectorTree(generation)
+            if (capture.omitted > 0) throw QaLensBridgeFailure(409, "Tree is truncated; XPath uniqueness cannot be established")
+            xpathCapture = capture
+            val matches = try { QaLensSelectors.resolve(nodes, xpath) }
+                catch (failure: IllegalArgumentException) { throw QaLensBridgeFailure(400, failure.message ?: "Invalid XPath") }
+            if (matches.isEmpty()) throw QaLensBridgeFailure(404, "XPath matched no visible element")
+            if (matches.size != 1) throw QaLensBridgeFailure(409, "XPath is ambiguous (${matches.size} matches); scope it to a parent")
+            matches.single().id
+        } else id
         val text = command.optString("text")
         if (action == "type" && (!command.has("text") || text.length > 4_096)) throw QaLensBridgeFailure(400, "Type requires text of at most 4096 characters")
         val dx = command.optDouble("dx", 0.0).toFloat()
@@ -290,7 +349,12 @@ internal object QaLensLocalBridge {
             throw QaLensBridgeFailure(400, "Scroll deltas must be finite window pixels within ±10000")
         return onHost(generation) { activity ->
             val (visible, raw) = live(activity)
-            val matches = visible.filter { if (id.isNotBlank()) it.id == id else it.testTag == tag }
+            xpathCapture?.let { before ->
+                val current = QaLensAutomationInspection.capture(visible, raw)
+                if (current.nodes != before.nodes || current.config != before.config)
+                    throw QaLensBridgeFailure(409, "Tree changed while resolving XPath; refresh and verify the target")
+            }
+            val matches = visible.filter { if (resolvedId.isNotBlank()) it.id == resolvedId else it.testTag == tag }
             if (matches.isEmpty()) throw QaLensBridgeFailure(404, "Target is absent, hidden or off-screen; refresh the tree")
             if (matches.size != 1) throw QaLensBridgeFailure(409, "Tag is ambiguous; use a tree node id")
             val hit = matches.single()
@@ -330,7 +394,7 @@ internal object QaLensLocalBridge {
     private fun sanitize(value: Map<String, Any?>): Map<String, Any?> {
         val config = QaLens.config.value
         fun clean(item: Any?, field: String = "", dynamicKeys: Boolean = false): Any? = when (item) {
-            is String -> if (!dynamicKeys && field in listOf("id", "parentId", "actions", "action")) item
+            is String -> if (!dynamicKeys && field in listOf("id", "parentId", "selectedId", "actions", "action")) item
                 else config.redact(item).take(2_048)
             is Map<*, *> -> item.entries.associate {
                 val key = it.key.toString()
