@@ -34,7 +34,10 @@ phone has not been verified. Video uses a duration-aware bitrate (up to 4 Mbps) 
 file limit to fit existing readers. Long sessions trade encoding quality for duration. This does
 not promise constant visual quality, audio capture, or that every encoder honors its bitrate.
 
-Frame mode scales JPEGs to at most 720 px wide, quality 60. Sampling is approximately
+Recording frame allocations (including HD fallbacks) are bounded before capture: at most 720 px
+wide, 2 million pixels and 2,880 px tall. PixelCopy scales into that destination; privacy masks scale
+with it and round outward. JPEG quality is 60. Allocation failure or a window resize skips that frame.
+Sampling is approximately
 `max(500 ms, configured duration / 3600)`; a default hour samples about once per second.
 At most 3,600 frames / 192 MiB remain. Older media is evicted if either budget fills and loss is
 reported in existing partial-recording coverage. Video keeps 650 fallback frames, sampled about
@@ -103,7 +106,9 @@ adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -r -e videoDenyOnly true \
   com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
 ```
 
-Require their `OK:` result; adb exit zero is insufficient. The frame-focused check clicks preset/custom
-native clip controls. The tests overflow log history, retain a recent failure, exclude post-mark logs, keep capture running, and inspect the actual archive media.
-Video verifies both master and clip have a readable H.264 track beginning at a sync frame. Physical
+Require their `OK:` result; adb exit zero is insufficient. Both frame and HD checks click preset/custom
+native clip controls and stop with a menu visible. API 31+ enables StrictMode incorrect-context
+termination; run with overlay permission both enabled and disabled. The tests overflow log history,
+retain a recent failure, exclude post-mark logs and keep capture running. Video verifies all master/UI/API
+clips have readable H.264 tracks beginning at a sync frame and decodes a real frame from each. Physical
 phones, complete-hour endurance, rotation/encoder vendor matrices and TalkBack remain unverified.

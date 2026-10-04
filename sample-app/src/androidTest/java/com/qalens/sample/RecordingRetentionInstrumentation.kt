@@ -382,6 +382,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         }
         // Compose virtual nodes support traversal; framework find-by-text is not reliable here.
         fun visibleText(text: String, exact: Boolean = true): android.view.accessibility.AccessibilityNodeInfo? {
+            // Continuous updates can leave UiAutomation's cached child visibility behind scroll.
+            if (android.os.Build.VERSION.SDK_INT >= 33) uiAutomation.clearCache()
             fun find(node: android.view.accessibility.AccessibilityNodeInfo): android.view.accessibility.AccessibilityNodeInfo? {
                 val label = node.text?.toString()?.trim().orEmpty()
                 if (node.isVisibleToUser && (if (exact) label == text else label.contains(text))) return node
@@ -392,18 +394,30 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         }
         fun openTab(label: String, heading: String) {
             val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
-            var target = visibleText(label)
-            while (target == null && android.os.SystemClock.elapsedRealtime() < deadline) {
-                // The tab strip is horizontal and some tabs begin outside the viewport.
-                fun scroll(node: android.view.accessibility.AccessibilityNodeInfo): Boolean {
-                    if (node.isScrollable && node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true
-                    repeat(node.childCount) { index -> node.getChild(index)?.let { if (scroll(it)) return true } }
-                    return false
+            fun tabStrip(): android.view.accessibility.AccessibilityNodeInfo? {
+                if (android.os.Build.VERSION.SDK_INT >= 33) uiAutomation.clearCache()
+                fun find(node: android.view.accessibility.AccessibilityNodeInfo): android.view.accessibility.AccessibilityNodeInfo? {
+                    if (node.className?.toString() == "android.widget.HorizontalScrollView" && node.isScrollable) return node
+                    repeat(node.childCount) { index -> node.getChild(index)?.let { find(it)?.let { found -> return found } } }
+                    return null
                 }
-                uiAutomation.rootInActiveWindow?.let(::scroll)
+                return uiAutomation.rootInActiveWindow?.let(::find)
+            }
+            fun tab(node: android.view.accessibility.AccessibilityNodeInfo?): android.view.accessibility.AccessibilityNodeInfo? {
+                node ?: return null
+                if (node.isVisibleToUser && node.text?.toString() == label) return node
+                repeat(node.childCount) { index -> tab(node.getChild(index))?.let { return it } }
+                return null
+            }
+            var strip = tabStrip()
+            var target = tab(strip)
+            while (target == null && android.os.SystemClock.elapsedRealtime() < deadline) {
+                // Avoid repeatedly scanning the changing network list for off-screen tab labels.
+                strip?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                 heartbeat()
-                Thread.sleep(100)
-                target = visibleText(label)
+                Thread.sleep(400) // Let the accessibility scroll complete before issuing another.
+                strip = tabStrip()
+                target = tab(strip)
             }
             var clickable = checkNotNull(target) {
                 val labels = mutableListOf<String>()
@@ -527,7 +541,11 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         runOnMainSync {
             QaLens.setScreen("Route two", "route-two")
             check(QaLens.state.value.nodes.none { it.testTag == "route-one" }) { "Previous route nodes survived screen change" }
-            activity.setContent { Box(Modifier.fillMaxSize().background(Color.Red).testTag("route-two").qaHiddenFromReports()) }
+            activity.setContent {
+                Box(Modifier.fillMaxSize().background(Color.Red).testTag("route-two")) {
+                    Box(Modifier.align(androidx.compose.ui.Alignment.BottomEnd).fillMaxSize(0.5f).qaHiddenFromReports())
+                }
+            }
         }
         waitForIdleSync()
 
@@ -575,8 +593,11 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             }
             val frame = zip.entries().asSequence().first { it.name.endsWith(".jpg") }
             val image = zip.getInputStream(frame).use { android.graphics.BitmapFactory.decodeStream(it) }
-            val pixel = image.getPixel(image.width / 2, image.height / 2)
+            check(image.width <= 720 && image.height <= 2880 && image.byteCount <= 8_000_000)
+            val pixel = image.getPixel(image.width * 3 / 4, image.height * 3 / 4)
             check(android.graphics.Color.red(pixel) < 8 && android.graphics.Color.green(pixel) < 8 && android.graphics.Color.blue(pixel) < 8) { "Hidden pixels leaked into recorded frames" }
+            val visible = image.getPixel(image.width / 4, image.height / 4)
+            check(android.graphics.Color.red(visible) > 200 && android.graphics.Color.green(visible) < 16) { "Scaled mask erased visible content or capture was empty" }
             image.recycle()
         }
         val session = archive.inputStream().use { com.qalens.replay.QaLensSalReader.read(targetContext, it) }

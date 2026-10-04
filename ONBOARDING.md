@@ -198,6 +198,9 @@ SDK enabled state, foreground Activity and surfaced recording error. If capture 
 check protected/secure content. If it is empty or replay fails, check encoder/start/stop errors and
 the actual archive. The sample passed HD on an API 36 emulator at 862 × 1920; this does not establish
 that your app/phone works. Test your exact app, Android version and phone with the same SDK build.
+The 2026-10-04 recording-control fix removes incorrect visual-context use that can terminate apps
+under StrictMode, and reduces fallback-frame allocations. Use a build containing that fix; keep
+host diagnostics enabled. A remaining crash needs its stack trace to distinguish UI, codec and host errors.
 
 Current limits include 3,600 frames / 192 MiB, a 240 MiB video ceiling, 20 marks per session and
 30 saved archives / 1 GiB. Encoding quality adapts to duration; video clips can start slightly earlier

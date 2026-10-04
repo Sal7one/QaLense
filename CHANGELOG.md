@@ -2,6 +2,20 @@
 
 ## Unreleased — post-0.9.0
 
+### Recording controls and capture memory — 2026-10-04
+- Fix overlay recording controls/clip popups using an application context for visual APIs. Use a
+  display/window context on API 30+ and SDK-owned native widget styles; preserve the host's StrictMode
+  policy. This removes reproduced incorrect-context violations that can terminate strict QA builds.
+- Dismiss clip menus/dialogs with the REC window and guard native control construction.
+- Allocate recording/fallback frames at bounded size before PixelCopy, rather than allocating the
+  full display and scaling afterward. Transform masks to output coordinates, round outward and reject
+  resized/stale captures. Allocation failures skip a frame instead of escaping onto the host UI thread.
+- Exercise actual preset/custom controls in HD as well as frame tests, with incorrect-context
+  termination enabled, stop while a menu is visible, and decode every exported HD master/clip.
+  The full device runner passes, including scaled partial-region masks; keep load-test tab discovery
+  scoped to its strip and refresh stale accessibility cache under continuous updates.
+  The reported consuming-app crash still needs its own trace to confirm the same cause.
+
 ### Product onboarding and documentation cleanup — 2026-10-02
 - Add one onboarding guide for SDK/web/desktop/backend evaluation, data hooks, recording/clips,
   pairing, persistence, component processors, privacy, troubleshooting and team integration advice.

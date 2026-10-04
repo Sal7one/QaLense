@@ -1,9 +1,9 @@
 # QaLens engineering handover
 
-Updated 2026-10-02. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
+Updated 2026-10-04. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
 the user/integrator overview; [next.md](next.md) is the only current backlog;
 [CONTRIBUTING.md](CONTRIBUTING.md) owns portable build/device commands. This handover records
-the current engineering baseline through `08c27e2`. Git and CHANGELOG retain earlier history.
+the current engineering baseline, including the recording-control fixes below. Git and CHANGELOG retain earlier history.
 Check the working tree, remote branches and CI before assuming publication or validation state.
 
 ## Product and priorities
@@ -45,6 +45,29 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Recording controls — 2026-10-04
+
+The user reported HD and Last 10s crashes in a consuming app. A new sample regression reproduced
+incorrect-context violations in `QaLensSystemChip.show` and deferred clip-popup layout/click callbacks
+with overlay permission enabled. StrictMode's incorrect-context termination policy can kill these
+hosts; catching popup construction is insufficient. The SDK now uses a visual window context and
+its own native widget theme, dismisses menus/dialogs on stop and keeps the host policy intact.
+Recording/fallback bitmap allocations now have a pre-capture pixel/dimension budget with scaled,
+outward-rounded masks. The user's exact crash remains unconfirmed without that host's trace.
+
+Compose's 31 unit tests and lint (zero errors), sample debug/test builds and release isolation passed.
+The focused frame and HD tests exercise real preset/custom menu actions with StrictMode termination
+enabled, both with and without overlay permission. They keep capture running at marks, stop with a
+menu visible and validate saved evidence; HD decodes a frame from every master/UI/API clip.
+The independent consumer debug/release builds and release isolation passed. The full API 36 runner
+passed, including a partial-region privacy mask at the reduced frame size. Its load case observed
+7,117 background events and a worst measured main heartbeat of 123 ms. The runner's tab discovery
+now refreshes accessibility cache and searches the tab strip directly instead of repeatedly scanning
+the changing Network list; its prior timeout was not accepted as a successful full run.
+Full physical-device encoder/rotation/endurance coverage remains open.
+
+### Desktop/clip baseline — 2026-10-02
 
 These checks passed during the 2026-10-02 desktop/clip work. They are a dated local baseline,
 not a remote CI result or a certification of arbitrary consuming applications.
@@ -100,6 +123,8 @@ claim is made for crash/power-loss recovery of unsaved journals.
 - MediaRecorder setup/stop, remuxing, image encoding, files and ZIP export run off main. Live
   View/semantics capture remains on main. HD requires host `allowUnmaskedVideo=true` and Android
   consent; this opt-in was introduced in the September audit. There are no video pixel masks.
+  Recording/fallback bitmaps allocate at most 720 px width / 2 million pixels / 2,880 px height before
+  capture. Window changes fail closed; privacy masks transform to those output coordinates.
 - Completed archives live in app-private `files/qalens/recordings/`; legacy cache archives migrate.
   Host backup rules govern whether these files leave the device. Failed raw sources remain in cache.
 - Chucker 4.1.0 coexistence uses both interceptors and its public launcher. There is no supported

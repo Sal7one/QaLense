@@ -29,7 +29,6 @@ internal object QaLensSessionRecorder {
 
     private const val FPS = 2
     private const val MAX_FRAMES = 3_600          // Leaves room for structured entries within the shared ZIP budget.
-    private const val MAX_FRAME_WIDTH = 720
     private const val MAX_SAVED_SAL = 30
     private const val WATCHDOG_TIMEOUT_MS = 10_000L // A5: auto-cancel if no frame for 10s
     private const val WATCHDOG_TICK_MS = 2_000L       // A5: watchdog polls every 2s
@@ -342,19 +341,17 @@ internal object QaLensSessionRecorder {
         capturing = true
         // Overlay is hidden for the whole session and the REC chip lives in a separate window
         // (PixelCopy can't see it) — so no per-frame toggling, no flashing.
-        QaLensScreenCapture.captureFrame(activity, manageOverlay = false) { bmp ->
+        QaLensScreenCapture.captureFrame(activity, manageOverlay = false, recordingSize = true) { bmp ->
             if (bmp == null) { capturing = false; return@captureFrame }
             // Serialize media writes with archive writes, but never compress or wait for disk on main.
             val capturedAt = System.currentTimeMillis()
             writer.execute {
-                var scaled: Bitmap? = null
                 try {
                     if (!lifecycle.acceptsFrame(id) || !QaLens.config.value.enabled) return@execute
-                    scaled = scale(bmp)
                     val ts = capturedAt
                     val name = "frames/%06d.jpg".format(frameCounter + 1)
                     val file = File(dir, name)
-                    FileOutputStream(file).use { check(scaled.compress(Bitmap.CompressFormat.JPEG, 60, it)) }
+                    FileOutputStream(file).use { check(bmp.compress(Bitmap.CompressFormat.JPEG, 60, it)) }
                     synchronized(mediaLock) {
                         if (lifecycle.acceptsFrame(id) && sessionDir == dir && QaLens.config.value.enabled) {
                             frameCounter++
@@ -373,18 +370,11 @@ internal object QaLensSessionRecorder {
                 } catch (failure: Exception) {
                     QaLens.log("Frame capture failed: ${failure.message}")
                 } finally {
-                    if (scaled !== bmp) scaled?.recycle()
                     bmp.recycle()
                     handler.post { if (id == lifecycle.sessionId) capturing = false }
                 }
             }
         }
-    }
-
-    private fun scale(bmp: Bitmap): Bitmap {
-        if (bmp.width <= MAX_FRAME_WIDTH) return bmp
-        val ratio = MAX_FRAME_WIDTH.toFloat() / bmp.width
-        return Bitmap.createScaledBitmap(bmp, MAX_FRAME_WIDTH, (bmp.height * ratio).toInt(), true)
     }
 
     private fun finalizeAndShare(video: File?) = finalize(video, share = shareWhenSaved)

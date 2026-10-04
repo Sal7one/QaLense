@@ -1,6 +1,6 @@
 # Current backlog
 
-Updated 2026-10-02. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
+Updated 2026-10-04. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
 ## Completed 2026-10-02: desktop launcher and retrospective clips
@@ -52,6 +52,12 @@ baselines and project context. Older changelog entries are historical, not uncom
   and release isolation checks, and update integration instructions and the handover with limits.
 
 ## Priority 1: make the client useful to real QA teams
+
+- **Confirm the reported HD/Last 10s crash in the consuming app.** Incorrect visual-context use
+  in recording overlays/popups is reproduced and corrected without disabling host StrictMode.
+  Recording bitmap allocation is bounded before capture. HD now exercises the actual clip controls,
+  not just API marks. Still obtain the app/device crash trace and verify the consuming build includes
+  these changes; sample/emulator success cannot establish that this was its cause.
 
 - **Validate the responsiveness fix in real host apps.** Dashboard queues are now bounded and
   batched, Repro/evidence/filter/search processing runs off main, and large tracks render lazily.
