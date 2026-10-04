@@ -3,6 +3,24 @@
 Updated 2026-10-04. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Landing desktop and easier connection — 2026-10-04
+
+- [x] Consolidate screen preview, semantics tree and automatic selected-element attributes on Landing;
+  add clear Attributes/Semantics/Tree position/Diagnostics tabs and compact secondary navigation.
+- [x] Discover authorized phones and SDK apps; replace primary token-copy flow with memory-only
+  generated credentials and explicit SDK phone approval. Preserve advanced/manual compatibility.
+- [x] Gate requests to authorized adb shell, keep requests stable, expire/cancel/deny them and reject
+  ordinary other app UIDs. Preserve debug/no-op isolation and keep credentials out of profiles/reports.
+- [x] Add opt-in remembered-app auto connect (new phone approval each session), owned-forward
+  auto reconnect and explicit whole-phone sampled preview with memory/process/rate/pixel budgets.
+- [x] Exercise actual phone approval, screen PNG, attributes/save/dedup, forward repair, paused-host
+  Send/recording copies and revocation through Android/adb/Python; run 26 Python regressions and
+  SDK/sample/consumer build/lint/isolation checks.
+- [ ] Verify the redesigned Landing in the live browser: token-free Connect/phone approval, mirror
+  click selection, all detail tabs, auto connect/reconnect, Receive/collection, navigation/replay and
+  narrow layout. Mac relocked during work; user was asked to unlock. Earlier GUI checks above cover
+  the previous transfer UI, not this redesign. Physical phones/OEM receiver behavior also remain open.
+
 ## Completed 2026-10-04: host lifecycle and PC transfer reliability
 
 - [x] Reproduce Control Room's silent recording failure without Startup; establish scoped lifecycle
@@ -22,8 +40,8 @@ baselines and project context. Older changelog entries are historical, not uncom
 - [x] Verify real Android → adb → Python → shared transfer-controller copies, temporary forward
   outage recovery, private hashed files, deduplication and revoked authentication with an opt-in
   disposable-emulator harness.
-- Live desktop browser testing for this patch is pending while the Mac is locked. Earlier GUI
-  results are a dated baseline, not verification of the new checkbox flow.
+- [x] After unlocking, verify the actual Firefox transfer checkbox/recovery, embedded replay/Back,
+  SDK Send received with Control Room foreground, private JSON save/dedup and rotation shutdown.
 
 ## Completed 2026-10-02: desktop launcher and retrospective clips
 

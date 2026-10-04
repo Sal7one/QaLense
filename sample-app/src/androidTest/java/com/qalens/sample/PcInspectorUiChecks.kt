@@ -87,7 +87,7 @@ internal class PcInspectorUiChecks(private val test: Instrumentation) {
             status to JSONObject(payload)
         } finally { connection.disconnect() }
     }
-    private fun click(label: String, horizontal: Boolean = false) {
+    internal fun click(label: String, horizontal: Boolean = false) {
         var node = seek(horizontal) { it.text?.toString() == label || it.contentDescription?.toString() == label }
         while (!node.isClickable && node.parent != null) node = node.parent
         check(node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) { "SDK button could not be clicked: $label" }

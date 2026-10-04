@@ -46,6 +46,40 @@ assuming a named class or public signature is unchanged.
 
 ## Latest local verification
 
+### Landing desktop and phone approval — 2026-10-04
+
+The desktop now starts on Landing with screen preview, semantics tree and automatic selected-element
+attribute loading together. Detail tabs separate attributes, public semantics, tree position and
+recent diagnostics; saved elements, recording library, processors, shared replay and advanced
+phone tools remain reachable through compact navigation. Old home/inspect links resolve to Landing.
+
+Connect discovers SDK-enabled packages through launcher activities, creates a memory-only random
+credential and opens SDK Control Room approval through a DUMP-protected shell receiver. Ordinary
+other app UIDs cannot offer requests. No listener starts before phone approval; stable pending
+requests expire after two minutes. Deny/cancel/disable/expiry reject access. Credentials never enter
+Activity extras, saved profiles or reports. Advanced manual token/terminal pairing remains compatible.
+Opt-in auto connect remembers a profile ID and requests phone approval on the next desktop start;
+it never stores credentials or approves access. Disconnect turns that remembered choice off.
+Auto reconnect repairs only a missing owned adb forward within the same session; token revocation
+clears access and collection choices. Host actions are never retried automatically.
+
+Screen preview is a separate explicit whole-phone adb capture, memory-only and up to one frame/sec.
+It is unmasked, including other apps. Leaving Landing/hiding the browser/disconnecting stops browser
+sampling. Limits: one in-flight capture, four-second adb deadline, 16 MiB PNG, 24 million pixels.
+SDK snapshot screen dimensions/window origin align selectable bounds; mismatches reject selection.
+External scrcpy remains optional and is not required for the sampled preview.
+
+Local Python tests (26) and the shared six-scenario transfer controller pass; Compose unit/build/lint,
+sample debug/test/release and independent consumer debug/release/isolation pass (lint zero errors).
+The API 36 phone approval test passes ordinary-other-app denial, no listener before approval,
+Deny/cancel/expiry, authenticated host reads and disable/re-enable with Startup removed. An actual
+Android/adb/Python check passes generated-credential approval, tree/attributes/save/dedup, real screen
+PNG, owned-forward repair without a new session, paused-host SDK Send and master/clip copies, then
+revoked authentication cleanup. Temporary servers/storage/forwards are removed.
+The Mac relocked during this redesign; final Landing layout, browser click-to-select/auto-connect
+rendering and responsive visual QA are pending. Do not infer those checks from the transport tests
+or the earlier GUI run. Physical-device/OEM, TalkBack and high-FPS scrcpy remain unverified.
+
 ### Host lifecycle, pairing and transfer regression — 2026-10-04
 
 The user integrates with Application configuration and `QaLensRoot`. Control Room's old buttons
@@ -82,8 +116,11 @@ An additional end-to-end test uses the actual Android bridge, owned adb forward,
 GUI's shared transfer controller. It passes queued busy enable, an interrupted/restored forward,
 automatic master/clip copying with Control Room foreground, private SHA-256 files, deduplication
 and revoked-token shutdown. Temporary servers/storage/forwards are removed by the check.
-The Mac is locked, so this patch's live desktop browser check is pending; do not claim the dated
-2026-10-02 GUI runs verify the new checkbox rendering/navigation.
+After unlocking, the actual Firefox GUI also passed the updated controls: automatic-copy checkbox
+retention/recovery across an owned-forward outage, two master/clip pairs, embedded replay/Back,
+a live tagged selection/highlight, actual SDK Send to PC received with Control Room foreground,
+explicit private JSON save/dedup, and rotation disabling both Receive/automatic copy. These live
+checks verify the earlier transfer UI; the new Landing redesign below needs its own visual check.
 
 ### Recording controls — 2026-10-04
 
@@ -176,7 +213,7 @@ claim is made for crash/power-loss recovery of unsaved journals.
 - Two-finger inspector drags forward to Activity content after cancelling the inspector tap.
   Bubble/dock positions use physical coordinates and safe system/IME bounds in LTR/RTL.
   Registered dialog trees can be read; gesture forwarding stays in the Activity window.
-- Desktop GUI onboarding/Back embeds the exact `web/` sources. Profiles persist without tokens;
+- Desktop Landing/Back embeds the exact `web/` sources. Profiles and opt-in auto-connect profile IDs persist without tokens; every new automatic request still needs phone approval;
   previews are memory-only until Save. Component hashes ignore timestamps/live IDs and include
   exported values, bounds, package/viewport and visible tree position. Fixed adb tasks/Downloads
   transfers require the current connection nonce. Optional scrcpy is an owned external process.
@@ -218,8 +255,9 @@ Use the [contributor commands](CONTRIBUTING.md); set host paths through local en
 Serialize Gradle processes sharing this checkout. Earlier work used atomic
 `mkdir /tmp/qalens-gradle-lock` plus a cleanup trap; never delete another active build's lock.
 
-At this handover baseline, `dev` contains `4e14979` (bridge/movement), `7bfbecf` (component workbench)
-and `08c27e2` (desktop/clips) after the `dea9048` master merge. Check remote state before pushing or
+At this handover baseline, `dev` also contains `90d669f` (recording visual contexts/budgets) and
+`7059e29` (manual-root lifecycle/shared pairing/transfer recovery), plus the Landing/phone-approval
+work described above. Earlier bridge/component/clip commits follow the `dea9048` master merge. Check remote state before pushing or
 merging; this handover does not authorize merging a branch. Default coordinates are
 `com.qalens:<module>:0.9.0` with a `-PqalensVersion` override. `qalensDist` builds a local Maven
 repository; `scripts/release_internal.sh --verify` packages/checks it. Public artifact publication

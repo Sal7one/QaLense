@@ -16,24 +16,6 @@ An accepted semantics action is not proof of the resulting app state: refresh/as
 ## Start and pair
 
 Prerequisites: Python 3.9+, adb, an authorized USB/emulator device, an active QaLens QA build.
-In any active SDK app, open **QaLens Control → Desktop connection → PC inspector** or the overlay's
-**More tools → PC inspector** (full overlay: **Tools**). Choose the device port, tap **Start PC inspector**
-and **Copy pairing token**. The same SDK controls show status, rotate the token and stop pairing;
-there is no sample-app Settings dependency. Tokens stay in process memory, are hidden until explicitly
-shown and are excluded from reports. Stop/disable clears pairing; re-enable does not restart it.
-An explicit clipboard copy uses Android 13+ sensitive metadata and can outlive the pairing.
-
-Custom host controls remain optional:
-
-```kotlin
-// Generate once per pairing; display privately to the authorized tester, never log/save it.
-val token = ByteArray(24).also { java.security.SecureRandom().nextBytes(it) }
-    .joinToString("") { "%02x".format(it) }
-QaLens.startLocalBridge(token) // default device loopback port 8766
-// Observe QaLens.localBridgeStatus. When finished:
-QaLens.stopLocalBridge()
-```
-
 From the repository root:
 
 ```sh
@@ -41,18 +23,42 @@ python3 tools/local-bridge/server.py --gui \
   --pipeline-config tools/local-bridge/examples/pipelines.json
 ```
 
-Open **http://127.0.0.1:8765**. In **Devices & apps**, scan phones, choose a serial, enter the real
-Android package (`com.example.app`), optional activity (`.MainActivity`) and current pairing token.
-**Find installed apps** supplies package suggestions. **Save profile** remembers the setup;
-**Connect this profile** creates a dedicated adb forward. Launching is a separate button. It never
-clears/uninstalls app data or changes device animations. Expected Android version mismatches are
-reported; the device's actual version is displayed after pairing. Connecting establishes transport;
-**Refresh tree** verifies that the app bridge is running and the token matches.
+Open **http://127.0.0.1:8765**. **Landing** discovers authorized phones and installed QaLens apps.
+Choose the phone/app, click **Connect**, then **Approve desktop** on the phone. No token copying,
+custom host Settings or sample-app code is needed. The SDK Control Room asks for access to Compose
+inspection/actions, observations and completed recordings; it does not start recording. Approval
+returns to the host app. Connecting remembers a profile and preserves app data.
 
-Profiles remember name, serial, package, activity, expected version and port. Tokens stay in server/
-page memory and are cleared from the profile form after successful connection. A PC restart needs
-pairing again; saved profiles and component files remain. A device switch invalidates browser
-commands against an old tree, requiring refresh. There is no automatic launch, capture or recording.
+The PC creates a strong random credential internally, offers it through an explicit SDK receiver
+restricted to senders with Android's `DUMP` permission (authorized adb shell), and opens Control Room
+without credentials in Activity extras. The pending request expires after two minutes, stays stable
+under repeated offers, and is rejected by Deny, cancellation or SDK disable. A listener starts only
+after phone approval. **Cancel pairing** cancels the pending request. Ordinary other app UIDs cannot
+offer pairing. The host's own code remains trusted and can use the existing API.
+
+**Auto connect saved app** is opt-in after connecting once. It remembers that profile ID and
+requests approval when the desktop starts with that authorized phone available; new access still
+requires approval on the phone. It makes at most one request per page session and does not override
+Deny/expiry/revocation. Disconnect turns the remembered choice off.
+
+**Auto reconnect** repairs a missing adb forward after a temporary USB outage within this approved
+session. It keeps the connection nonce and collection choices; it never retries host actions or
+silently approves new access. Turn it off to stop transport repair. Token revocation, a device change,
+Disconnect or a PC restart requires a new connection/approval. SDK **Stop PC inspector** stops
+access; re-enable does not restart it. If the device listener is simply offline, the PC cannot
+distinguish Stop from a crashed/offline app and shows reconnection status until you Disconnect.
+
+For an older SDK or a custom/manual bridge, open **Device tools → Advanced manual pairing & saved
+profiles**. On the phone, **QaLens Control → Desktop connection → PC inspector** (or overlay **More
+tools**, full overlay **Tools**) offers Start, hidden-token copy, rotation and Stop. Copy its token
+into the advanced form. Tokens are memory-only and excluded from reports; explicit Android 13+
+clipboard copies use sensitive metadata and can outlive pairing. Existing `QaLens.startLocalBridge`
+custom controls and terminal pairing remain supported.
+
+Profiles remember name, serial, package, activity, expected Android version and port, without tokens.
+A PC restart retains profiles/saved files and requires approval again. An old-tree command cannot
+operate on a newly paired phone. There is no automatic recording or app reset. **Launch connected
+app** is available separately under Device tools.
 
 Appium-style capability import maps `appium:udid`, `appium:appPackage`, `appium:appActivity` and
 `appium:platformVersion`. `platformName` must be Android. A URL is not a package and whitespace is
@@ -73,12 +79,12 @@ or Disconnect removes only a forward created by this workbench, preserving other
 
 ## Phone → preview → file
 
-1. Pair and enable **Receive phone selections** in the inspector. It checks a memory inbox every
+1. Pair and enable **Receive phone selections** on Landing. It checks a memory inbox every
    2.5 seconds while the page is visible. This does not continuously scan the Compose tree.
 2. Select a component on the phone. **Send to PC** is beside **Copy test tag**, including for
-   components without a tag. Alternatively choose a live node on the PC and **Capture attributes**.
-3. Review the attributes table, viewport bounds diagram and ancestry/sibling indices. The complete
-   JSON remains available. These are bounds and semantics, not a pixel screenshot or recreated widget.
+   components without a tag. Alternatively select a node in the tree or click its position on the live screen preview; attributes load automatically.
+3. Use the selected element’s **Attributes**, **Semantics**, **Tree position** and **Diagnostics** tabs. The complete
+   JSON remains available. Component JSON contains bounds and semantics; screen pixels are a separate preview and are not saved with JSON.
 4. **Save JSON** writes a content-addressed file. Repeated saves reuse it. **Download JSON** exports
    to the browser's download location. **Import component JSON** opens a preview without saving;
    imported documents depend on their producer's redaction rules.
@@ -107,13 +113,12 @@ Limits: device components <=256 KiB after redaction, strings <=2048 characters, 
 child/path counts are disclosed. Device inbox: 10 previews / 1 MiB, oldest dropped with a counter.
 Reads are non-destructive; acknowledgements are idempotent after PC memory accepts a preview.
 Stop/disable clears the inbox. PC previews: 10 / 2 MiB, omission counter exposed. Neither inbox is
-durable: process/PC restarts and budget eviction can discard unsaved data. Receive pauses on an
-error until explicitly enabled again. Saved library lists the newest 500 files and reports omissions.
+durable: process/PC restarts and budget eviction can discard unsaved data. Receive stays enabled after temporary errors; authentication/connection changes stop it. Saved library lists the newest 500 files and reports omissions.
 
 ## Persistence and automation
 
 Default storage is **`~/.qalens/bridge`**; override with `--data-dir /your/local/directory`.
-`profiles.json` holds allowlisted settings, `components/<hash>.json` holds explicitly saved data,
+`profiles.json` holds allowlisted settings, `desktop.json` holds the opt-in auto-connect profile ID, `components/<hash>.json` holds explicitly saved data,
 and `runs/<random-id>/` holds processor outputs plus `result.json`. New directories/files use
 private permissions where supported. Existing directory permissions, disk encryption, backups,
 retention and deleting files remain the PC owner's responsibility. The component workspace uses
@@ -167,6 +172,11 @@ This trusts the local OS/adb environment; it is not a remotely exposed or multi-
 
 | PC endpoint | Device endpoint / behavior |
 |---|---|
+| `POST /api/apps` | `{serial}` → launcher activities with QaLens availability |
+| `POST /api/pair` | `{profile}` → memory-only request for explicit phone approval |
+| `POST /api/connection/check` | `{reconnect}` → status, bounded health read / owned forward repair |
+| `POST /api/preview` | `{enabled,connectionId}` → explicit preview choice |
+| `GET /api/screen` | PNG; requires session/connection headers and active preview |
 | `GET /api/snapshot` | `/v1/snapshot`: forest, viewport, parent IDs, tags, actions |
 | `GET /api/events` | `/v1/events`: last 100 observations/network entries and cached data |
 | `POST /api/command` | `/v1/command`: `{action,id}` or `{action,tag}`, tap/type/scroll/select |
@@ -201,6 +211,7 @@ are clamped within system/IME bounds in LTR/RTL and retained across size changes
 ```sh
 python3 tools/local-bridge/test_server.py
 python3 tools/local-bridge/test_workbench.py
+python3 tools/local-bridge/test_connection.py
 python3 tools/local-bridge/test_desktop.py
 node --check tools/local-bridge/app.js
 node tools/local-bridge/test_recording_transfer.js
@@ -214,6 +225,16 @@ phone button transfers, queue overflow/ack/restart, main timeout cancellation, d
 LTR/RTL gestures. Python checks cover hashing/dedup/restart, profiles/no-reset, local API controls,
 connection freshness and real pipeline success/failure/timeout/shutdown/output paths. Physical
 phones, TalkBack, other Compose versions and Windows processor cleanup remain unverified.
+
+Phone approval also has a focused check:
+
+```sh
+adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e pcPairingOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+It checks a distinct app UID cannot offer access, no listener before approval, Deny/cancel/expiry,
+real approval returning to a manual-root host, authenticated reads and disable/re-enable.
 
 The SDK pairing UI also has a focused regression (with Startup installation removed):
 
@@ -230,6 +251,7 @@ The optional end-to-end transfer check requires installed sample/test APKs, Node
 
 ```sh
 node tools/local-bridge/test_device_transfer.js emulator-SERIAL
+python3 tools/local-bridge/test_device_pairing.py emulator-SERIAL
 ```
 
 Use a disposable emulator. The check owns its temporary server/storage/forward and generates a
@@ -240,19 +262,31 @@ browser; browser checkbox/layout/navigation need a separate live check.
 
 ## Desktop launcher, replay and phone tasks
 
-`--gui` starts on a choice screen: Replay evidence, Connect a phone, Inspect components or Collect
-recordings. Sticky Back/Start and browser history navigate between pages; leaving Replay pauses its
+`--gui` starts on **Landing**: connection, screen mirror, semantics tree and selected element
+details together. Recordings, Saved elements, Automation, Replay and Device tools remain in the
+compact navigation. Back and browser history navigate between pages; leaving Replay pauses its
 video. Modern and classic replay load directly from the repository's `web/` source files through
 an explicit asset allowlist, so fixes to those viewers apply here too. File picking/drop, timeline,
 comparisons and the `.appsal` editor remain the existing web client's features. The shell and
 viewers share one localhost origin; viewer preferences/recents use that origin's browser storage.
 
-Devices & apps includes phone Back/Home/Wake, Android settings and the existing explicit no-reset
+Device tools includes phone Back/Home/Wake, Android settings and the existing explicit no-reset
 launch. Start mirror launches **your installed `scrcpy`** in a separate window, using this profile's
 serial and adb executable. Stop mirror/disconnect/server exit closes the owned process. If scrcpy
 is absent the GUI reports how to enable it; this tool does not download/install it. No external
 mirror is embedded or remote-exposed. scrcpy launch was covered by the argv contract; real mirroring
 requires installed scrcpy and remains unverified on this host.
+
+Landing’s **Start preview** uses adb screen PNGs directly, without requiring scrcpy. This shows
+**the whole phone**, including other apps and sensitive pixels; host text redaction/pixel masks do
+not sanitize it. It requires explicit start after approved connection, keeps pixels only in memory,
+and stops on leaving Landing, hiding the browser tab or disconnect. No background capture or files.
+Capture is limited to one frame/second, one in-flight request, a four-second adb deadline, 16 MiB
+PNG and 24 million decoded pixels. It is a sampled live preview, not a high-FPS video stream.
+Selecting a screen position refreshes the live tree and chooses the smallest containing visible
+node; dimensions and window origin must align. Unsupported/native areas are not Compose targets.
+It selects for inspection; host actions require separate buttons. scrcpy remains the optional
+high-FPS external mirror under Device tools.
 
 Push explicitly chooses a browser file, up to 32 MiB, and writes `/sdcard/Download/<filename>`;
 an existing same-name phone file is replaced. Names allow only letters/numbers/dot/dash/underscore.
@@ -261,9 +295,9 @@ under `transfers/`. Arbitrary device paths, shell commands, resets and uninstall
 not exposed. These actions require the current connection nonce; they never operate on a new
 phone using a stale page's request. adb operations time out after 10 seconds.
 
-Recordings lists completed device `.sal` files and offers explicit Copy to PC / Open replay.
+Landing’s **Collect finished recordings** checkbox controls automatic collection. Recordings lists completed device `.sal` files and offers explicit Copy to PC / Open replay.
 Automatic copy is opt-in, watches new completed files only after enabling, is not persisted,
-and resets on device changes or failures. Archives stream over the authenticated device bridge
+and resets on device changes, disconnect or revoked authentication. Temporary failures retain the choice with bounded retries. Archives stream over the authenticated device bridge
 into private `recordings/<sha256>.sal` files; metadata remembers the original filename/app.
 Transfer is bounded to 400 MiB / 60 seconds, basic ZIP/manifest budgets are checked before
 publication, and the replay reader performs full track/checksum validation. A slow/failed transfer

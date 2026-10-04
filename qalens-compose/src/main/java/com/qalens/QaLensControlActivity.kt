@@ -31,6 +31,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -190,6 +192,21 @@ private fun ControlRoom(
     val state by QaLens.state.collectAsState()
     val webhookStates by QaLensWebhook.states.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
+    val pairingRequest by QaLensPcPairing.request.collectAsState()
+    pairingRequest?.let { request ->
+        AlertDialog(
+            modifier = Modifier.qaHiddenFromReports(),
+            onDismissRequest = { QaLensPcPairing.clear() },
+            title = { Text("Connect QaLens desktop?") },
+            text = { Text("Your authorized adb computer requested access to this app’s Compose tree, component attributes, observations and saved recordings. It can run UI actions. Screen preview and automatic recording copy are separate choices on the PC. Approve only for your QA session; Stop PC inspector revokes access.") },
+            confirmButton = { TextButton(onClick = {
+                if (QaLensPcPairing.approve(request)) {
+                    hostLaunchIntent(context)?.let { runCatching { context.startActivity(it) } }
+                }
+            }) { Text("Approve desktop") } },
+            dismissButton = { TextButton(onClick = { QaLensPcPairing.clear() }) { Text("Deny") } }
+        )
+    }
     var webhookUrl by remember { mutableStateOf(QaLensPrefs.webhookUrl(context)) }
     // Bumps when the active QA profile switches so webhook fields re-seed from the new prefs.
     var profilesVersion by remember { mutableStateOf(0) }

@@ -33,6 +33,8 @@ class BridgeServer(ThreadingHTTPServer):
         self.device_port = device_port
         self.token = token
         self.workbench = workbench
+        if workbench and token:
+            workbench.phase = "connected"; workbench.approved = True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -94,7 +96,12 @@ class Handler(BaseHTTPRequestHandler):
         desktop = bench and hmac.compare_digest(self.headers.get("X-Qalens-Session", "").encode(), bench.session.encode())
         device = self.server.token and hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode())
         if not (desktop or device):
-            return self.reply(401, {"ok": False, "error": "Enter the device pairing token"})
+            return self.reply(401, {"ok": False, "error": "Reload the desktop page to renew its session. Scripts require a valid pairing token."})
+        if self.path == "/api/screen" and self.command == "GET" and bench:
+            try:
+                return self.reply(200, bench.desktop.screen(self.headers.get("X-Qalens-Connection", "")), "image/png")
+            except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+                return self.reply(400, {"ok": False, "error": str(error)[:256]})
         if binary and self.command == "GET" and bench:
             try:
                 path = bench.desktop.recording(parse_qs(parsed.query).get("id", [""])[0])
@@ -158,7 +165,8 @@ class Handler(BaseHTTPRequestHandler):
                     # PC memory owns the preview before acknowledgement; Save is still explicit.
                     if ids: self.proxy("/v1/components/ack", json.dumps({"ids": ids}).encode(), "POST")
                     payload = {"ok": True, "dropped": payload.get("dropped", 0), "received": len(ids),
-                               "documents": list(bench.pending.values()), "omittedPreviews": bench.preview_dropped}
+                               "documents": list(bench.pending.values()), "omittedPreviews": bench.preview_dropped,
+                               "connectionId": bench.connection_id}
                 return self.reply(code, payload)
         except ValueError as error:
             return self.reply(400, {"ok": False, "error": str(error)[:256]})
@@ -178,15 +186,15 @@ class Handler(BaseHTTPRequestHandler):
                 if len(data) > MAX_RESPONSE: raise ValueError("Device response exceeds limit")
                 return response.code, json.loads(data)
         except (URLError, TimeoutError, ConnectionError, ValueError):
-            return 502, {"ok": False, "error": "Device unavailable. Start its bridge, check token/adb, then refresh. Commands are never retried automatically."}
+            return 502, {"ok": False, "error": "Phone unavailable. Check USB and return to the app. UI actions are never retried automatically."}
 
     def workbench_request(self, body):
         bench = self.server.workbench
         if self.command == "GET":
             if self.path == "/api/workbench":
                 with bench.lock:
-                    return {"ok": True, "connected": bool(self.server.token), "connection": bench.connection,
-                            "connectionId": bench.connection_id, "profiles": bench.profiles(), "dataDir": str(bench.root.resolve()),
+                    return {**bench.connection_state(self.server), "profiles": bench.profiles(), "dataDir": str(bench.root.resolve()),
+                            "preferences": bench.preferences(),
                             "pipelines": [{"id": p["id"], "name": p.get("name", p["id"])} for p in bench.pipelines.values()],
                             "jobs": list(bench.jobs.values()), "scrcpyAvailable": bool(shutil.which("scrcpy"))}
             if self.path == "/api/recordings/local": return bench.desktop.library()
@@ -195,6 +203,10 @@ class Handler(BaseHTTPRequestHandler):
                 with bench.lock: return {"ok": True, "documents": list(bench.pending.values()), "omittedPreviews": bench.preview_dropped}
             raise ValueError("POST required")
         if self.path == "/api/adb": return bench.desktop.task(body)
+        if self.path == "/api/preview": return bench.desktop.preview(body)
+        if self.path == "/api/connection/check": return bench.check_connection(self.server, body.get("reconnect", True) is True)
+        if self.path == "/api/apps": return {"ok": True, "apps": bench.apps(body.get("serial"))}
+        if self.path == "/api/preferences": return {"ok": True, "preferences": bench.save_preferences(body)}
         if self.path == "/api/recordings/receive": return bench.desktop.receive(self.server, body)
         if self.path == "/api/devices": return {"ok": True, "devices": bench.devices()}
         if self.path == "/api/packages":
@@ -211,6 +223,7 @@ class Handler(BaseHTTPRequestHandler):
                 write_json(bench.profiles_path, [p for p in bench.profiles() if p["id"] != body.get("id")])
             return {"ok": True}
         if self.path == "/api/connect": return {"ok": True, "connection": bench.connect(self.server, body["profile"], body.get("token"))}
+        if self.path == "/api/pair": return {"ok": True, "connection": bench.pair(self.server, body["profile"])}
         if self.path == "/api/disconnect": bench.disconnect(self.server); return {"ok": True}
         if self.path == "/api/launch":
             with bench.lock:
@@ -228,6 +241,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 WORKBENCH_ROUTES = {"/api/workbench", "/api/saved", "/api/previews", "/api/devices", "/api/packages",
+                    "/api/apps", "/api/pair", "/api/connection/check", "/api/preview", "/api/screen", "/api/preferences",
                     "/api/profile", "/api/profile/delete", "/api/connect", "/api/disconnect", "/api/launch",
                     "/api/adb", "/api/file/push", "/api/recordings/local", "/api/recordings/receive", "/api/import", "/api/save", "/api/document", "/api/run", "/api/artifacts", "/api/artifact"}
 

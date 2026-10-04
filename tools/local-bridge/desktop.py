@@ -9,6 +9,8 @@ import secrets
 import shutil
 import subprocess
 import time
+import threading
+import struct
 import zipfile
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
@@ -55,11 +57,62 @@ class Desktop:
         self.transfers = bench.root / "transfers"
         for path in (self.recordings, self.transfers): path.mkdir(mode=0o700, exist_ok=True)
         self.mirror = None
+        self.preview_active = False
+        self.preview_generation = 0
+        self.preview_lock = threading.Lock()
+        self.preview_time = 0
+
+    def stop_preview(self):
+        self.preview_active = False
+        self.preview_generation += 1
+
+    def preview(self, body):
+        with self.bench.lock:
+            self.current(body)
+            if self.bench.phase != "connected": raise ValueError("Approve and connect the phone before starting preview")
+            if type(body.get("enabled")) is not bool: raise ValueError("Choose Start or Stop preview")
+            self.stop_preview()
+            self.preview_active = body["enabled"]
+        return {"ok": True, "enabled": self.preview_active}
+
+    def screen(self, connection_id):
+        # One bounded capture at a time, no disk, no continued sampling without browser requests.
+        if not self.preview_lock.acquire(blocking=False): raise ValueError("Screen capture already running")
+        process = None
+        timer = None
+        try:
+            with self.bench.lock:
+                current = self.current({"connectionId": connection_id})
+                if not self.preview_active or self.bench.phase != "connected": raise ValueError("Start screen preview first")
+                if time.monotonic() - self.preview_time < 0.8: raise ValueError("Preview is limited to one frame per second")
+                self.preview_time = time.monotonic()
+                generation = self.preview_generation
+                command = [self.bench.adb, "-s", current["serial"], "exec-out", "screencap", "-p"]
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            timer = threading.Timer(4, process.kill); timer.start()
+            data = process.stdout.read(16 * 1024 * 1024 + 1)
+            if len(data) > 16 * 1024 * 1024: raise ValueError("Screen image exceeds preview budget")
+            if process.wait(timeout=1) != 0: raise ValueError("Screen capture unavailable")
+            if len(data) < 24 or data[:16] != b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR": raise ValueError("Invalid screen image")
+            width, height = struct.unpack(">II", data[16:24])
+            if not 0 < width <= 8192 or not 0 < height <= 8192 or width * height > 24_000_000: raise ValueError("Screen dimensions exceed preview budget")
+            with self.bench.lock:
+                if generation != self.preview_generation or connection_id != self.bench.connection_id or not self.preview_active:
+                    raise ValueError("Screen preview stopped or device changed")
+            return data
+        finally:
+            if timer: timer.cancel()
+            if process:
+                if process.poll() is None: process.kill()
+                process.wait(timeout=2)
+                if process.stdout: process.stdout.close()
+            self.preview_lock.release()
 
     def current(self, body):
         current = self.bench.connection
         if not current or body.get("connectionId") != self.bench.connection_id:
             raise ValueError("Device connection changed; reconnect before running a device task")
+        if self.bench.phase == "awaiting-approval": raise ValueError("Approve desktop access on the phone first")
         return current
 
     def task(self, body):

@@ -2,6 +2,19 @@
 
 ## Unreleased — post-0.9.0
 
+### Landing workspace and phone-approved connection — 2026-10-04
+- Bring screen preview, live semantics tree and selected-element attributes into Landing; load
+  attributes on selection, add focused detail tabs and consolidate secondary tools/navigation.
+- Discover SDK-enabled apps; primary Connect handles random credentials internally and opens a
+  shared SDK phone approval prompt through a DUMP-protected receiver. Keep manual/terminal pairing.
+- Bound pending approval, reject other app senders, allow Deny/cancel/expiry/disable and keep tokens
+  out of Activity extras, saved profiles and reports. Preserve no-op release dependency isolation.
+- Add opt-in remembered-app connection requests, session-preserving owned-forward reconnect and
+  explicit memory-only whole-phone screen PNG preview (up to 1 fps); keep scrcpy optional.
+- Pass 26 Python regressions, shared transfer-controller checks, SDK/sample/consumer builds/lint/
+  isolation and real Android/adb/Python approval, screen, attributes, repair, paused-host transfer and
+  token revocation. Final redesigned browser layout/click interaction is pending while Mac is locked.
+
 ### Host lifecycle, SDK pairing and resilient PC transfers — 2026-10-04
 - Let explicit `QaLensRoot` integrations establish application context and scoped Activity lifecycle
   callbacks when Startup installation is absent. This fixes foreground-host discovery for Send to PC

@@ -46,8 +46,10 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var controlOnly = false
     private var controlVideoOnly = false
     private var manualRootOnly = false
+    private var pcPairingOnly = false
     private var pcUiOnly = false
     private var desktopTransferToken: String? = null
+    private var desktopPhoneApproval = false
     override fun onCreate(arguments: Bundle?) {
         videoDenyOnly = arguments?.getString("videoDenyOnly") == "true"
         clipsOnly = arguments?.getString("clipsOnly") == "true"
@@ -58,8 +60,10 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         controlOnly = arguments?.getString("controlOnly") == "true"
         controlVideoOnly = arguments?.getString("controlVideoOnly") == "true"
         manualRootOnly = arguments?.getString("manualRootOnly") == "true"
+        pcPairingOnly = arguments?.getString("pcPairingOnly") == "true"
         pcUiOnly = arguments?.getString("pcUiOnly") == "true"
         desktopTransferToken = arguments?.getString("desktopTransferToken")
+        desktopPhoneApproval = arguments?.getString("desktopPhoneApproval") == "true"
         super.onCreate(arguments)
         start()
     }
@@ -68,8 +72,13 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         val result = Bundle()
         try {
             desktopTransferToken?.let { token ->
-                DesktopTransferChecks(this).run(token)
+                DesktopTransferChecks(this).run(token, desktopPhoneApproval)
                 result.putString("stream", "\nOK: Real desktop transfer copied the completed master/clip while Control Room was foreground and revoked pairing after rotation.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (pcPairingOnly) {
+                PcPairingChecks(this).run()
+                result.putString("stream", "\nOK: Shell pairing requires phone approval; normal-app sender, deny, cancellation, expiry and disable gates pass with a manual-root host.\n")
                 finish(android.app.Activity.RESULT_OK, result); return
             }
             if (pcUiOnly) {

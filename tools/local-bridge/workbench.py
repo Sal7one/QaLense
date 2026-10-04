@@ -10,6 +10,9 @@ import signal
 import subprocess
 import sys
 import threading
+import time
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 KILL = getattr(signal, "SIGKILL", signal.SIGTERM)
 MAX_DOCUMENT = 256 * 1024
@@ -106,6 +109,11 @@ class Workbench:
         self.connection = None
         self.connection_id = secrets.token_hex(16)
         self.owned_forward = None
+        self.phase = "disconnected"
+        self.pair_deadline = 0
+        self.approved = False
+        self.last_check = 0
+        self.connection_notice = "Connect your phone to begin."
         self.jobs = {}
         self.pipelines = self.load_pipelines(pipeline_config)
         self.worker = None
@@ -154,6 +162,24 @@ class Workbench:
             write_json(self.profiles_path, items + [clean])
         return clean
 
+    def preferences(self):
+        path = self.root / "desktop.json"
+        if not path.exists(): return {"autoConnect": False, "profileId": ""}
+        if path.stat().st_size > 4096: raise ValueError("Desktop preferences exceed limit")
+        value = json.loads(path.read_text())
+        if not isinstance(value, dict): raise ValueError("Invalid desktop preferences")
+        return {"autoConnect": value.get("autoConnect") is True, "profileId": str(value.get("profileId", ""))[:24]}
+
+    def save_preferences(self, body):
+        if type(body.get("autoConnect")) is not bool: raise ValueError("Choose whether to auto connect")
+        with self.lock:
+            ident = body.get("profileId", "")
+            if body["autoConnect"] and not any(p["id"] == ident for p in self.profiles()):
+                raise ValueError("Connect once and choose a saved app before enabling auto connect")
+            clean = {"autoConnect": body["autoConnect"], "profileId": ident if body["autoConnect"] else ""}
+            write_json(self.root / "desktop.json", clean)
+            return clean
+
     def adb_call(self, arguments, serial=None):
         if not self.adb: raise ValueError("adb unavailable; pass --adb /path/to/adb")
         command = [self.adb] + (["-s", serial] if serial else []) + arguments
@@ -181,24 +207,133 @@ class Workbench:
         forward = self.adb_call(["forward", "tcp:0", f"tcp:{clean['devicePort']}"], clean["serial"]).strip()
         try: port = int(forward)
         except ValueError: raise ValueError("adb returned an invalid forwarding port")
+        if not 1 <= port <= 65535: raise ValueError("adb returned an invalid forwarding port")
         with self.lock:
             self.disconnect(server)
             self.owned_forward = (clean["serial"], port)
             self.connection = dict(clean, actualPlatformVersion=version)
             server.device_port = port; server.token = token
+            self.phase = "connected"; self.approved = True
+            self.last_check = 0
+            self.connection_notice = "Connected. App data preserved."
         return self.connection
 
     def disconnect(self, server):
         self.desktop.stop_mirror()
         with self.lock:
-            server.device_port = None; server.token = None
-            self.connection = None
-            self.connection_id = secrets.token_hex(16)
-            if self.owned_forward:
-                serial, port = self.owned_forward
-                self.owned_forward = None
-                try: self.adb_call(["forward", "--remove", f"tcp:{port}"], serial)
+            if self.connection and self.phase == "awaiting-approval" and server.token:
+                try:
+                    self.adb_call(["shell", "am", "broadcast", "-n", self.connection["package"] + "/com.qalens.QaLensPcPairingReceiver",
+                        "-a", "com.qalens.action.CANCEL_PC_PAIRING", "--es", "token", server.token], self.connection["serial"])
                 except ValueError: pass
+            server.device_port = None; server.token = None
+            self.remove_owned_forward()
+            self.connection = None
+            self.phase = "disconnected"; self.approved = False; self.pair_deadline = 0
+            self.desktop.stop_preview()
+            self.connection_id = secrets.token_hex(16)
+
+    def apps(self, serial):
+        if not isinstance(serial, str) or not re.fullmatch(r"[A-Za-z0-9_.:\[\]-]{1,128}", serial):
+            raise ValueError("Choose an authorized phone")
+        rows = self.adb_call(["shell", "cmd", "package", "query-activities", "--components", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER"], serial).splitlines()
+        apps = {}
+        for row in rows:
+            parts = row.strip().split("/", 1)
+            if len(parts) != 2 or not PACKAGE.fullmatch(parts[0]): continue
+            package, activity = parts
+            if not re.fullmatch(r"\.?[A-Za-z][A-Za-z0-9_.$]*", activity): continue
+            app = apps.setdefault(package, {"package": package, "activity": "", "qalens": False})
+            if activity == "com.qalens.QaLensControlActivity": app["qalens"] = True
+            elif not activity.startswith("com.qalens.") and not app["activity"]: app["activity"] = activity
+        return sorted(apps.values(), key=lambda a: (not a["qalens"], a["package"]))[:2000]
+
+    def pair(self, server, value):
+        # Token generated here, never returned to the GUI, a profile, or Activity extras.
+        with self.lock:
+            self.connect(server, value, secrets.token_urlsafe(32))
+            self.phase = "awaiting-approval"; self.approved = False
+            self.pair_deadline = time.monotonic() + 120
+            self.connection_notice = "Approve desktop access on your phone."
+            current = self.connection
+            try:
+                result = self.adb_call(["shell", "am", "broadcast", "-n", current["package"] + "/com.qalens.QaLensPcPairingReceiver",
+                    "-a", "com.qalens.action.REQUEST_PC_PAIRING", "--es", "token", server.token,
+                    "--ei", "port", str(current["devicePort"])], current["serial"])
+                if "Permission Denial" in result or "Exception" in result: raise ValueError("Pairing request was rejected")
+                code = re.search(r"Broadcast completed: result=(\d+)", result)
+                if not code or code.group(1) != "1":
+                    notices = {"2": "A pairing request is already open on the phone. Deny or finish it, then Connect again.",
+                               "3": "QaLens is disabled in the app. Enable it before connecting."}
+                    raise ValueError(notices.get(code.group(1) if code else "", "Phone approval is unavailable. Update the app's QaLens SDK, or use Advanced manual connection."))
+                self.adb_call(["shell", "am", "start", "-n", current["package"] + "/com.qalens.QaLensControlActivity"], current["serial"])
+                self.save_profile(current)
+            except ValueError as error:
+                self.disconnect(server)
+                raise ValueError(str(error)) from error
+            return self.connection
+
+    def check_connection(self, server, reconnect=True):
+        with self.lock:
+            if not self.connection or not server.token: return self.connection_state(server)
+            now = time.monotonic()
+            if now - self.last_check < 1: return self.connection_state(server)
+            self.last_check = now
+            if not self.approved and now >= self.pair_deadline:
+                self.disconnect(server); self.phase = "expired"
+                self.connection_notice = "Phone approval expired or was denied. Click Connect to try again."
+                return self.connection_state(server)
+            try:
+                request = Request(f"http://127.0.0.1:{server.device_port}/v1/recordings", headers={"Authorization": f"Bearer {server.token}"})
+                with urlopen(request, timeout=2) as response:
+                    payload = response.read(512 * 1024 + 1)
+                    if len(payload) > 512 * 1024: raise ValueError("Bridge response exceeds limit")
+                    if response.code != 200 or not json.loads(payload).get("ok"): raise ValueError("Bridge unavailable")
+                self.phase = "connected"; self.approved = True
+                self.connection_notice = "Connected. Select a component to inspect it."
+            except HTTPError as error:
+                if error.code in (401, 403) and self.approved:
+                    self.disconnect(server); self.phase = "revoked"
+                    self.connection_notice = "Phone revoked access. Click Connect and approve again."
+                elif not self.approved: self.phase = "awaiting-approval"
+                else: self.phase = "reconnecting"
+                error.close()
+            except (URLError, TimeoutError, ConnectionError, ValueError):
+                if not self.approved: self.phase = "awaiting-approval"
+                else:
+                    self.phase = "reconnecting"
+                    self.connection_notice = "Phone temporarily unavailable. Reconnecting…" if reconnect else "Phone unavailable. Auto reconnect is off."
+                if reconnect:
+                    try:
+                        current = self.connection
+                        if any(d["serial"] == current["serial"] and d["state"] == "device" for d in self.devices()):
+                            # Recreate an absent forward; never steal a local port rebound to another target.
+                            rows = [r.split() for r in self.adb_call(["forward", "--list"]).splitlines()]
+                            wanted = [current["serial"], f"tcp:{server.device_port}", f"tcp:{current['devicePort']}"]
+                            if wanted not in rows:
+                                port = int(self.adb_call(["forward", "tcp:0", wanted[2]], current["serial"]).strip())
+                                if not 1 <= port <= 65535: raise ValueError("Invalid adb port")
+                                self.remove_owned_forward()
+                                self.owned_forward = (current["serial"], port); server.device_port = port
+                    except (ValueError, TypeError): pass
+            return self.connection_state(server)
+
+    def remove_owned_forward(self):
+        if not self.owned_forward: return
+        serial, port = self.owned_forward
+        self.owned_forward = None
+        try:
+            expected = f"tcp:{self.connection['devicePort']}" if self.connection else None
+            rows = [r.split() for r in self.adb_call(["forward", "--list"]).splitlines()]
+            if any(r[:2] == [serial, f"tcp:{port}"] and (expected is None or r[2:] == [expected]) for r in rows):
+                self.adb_call(["forward", "--remove", f"tcp:{port}"], serial)
+        except ValueError: pass
+
+    def connection_state(self, server):
+        return {"ok": True, "phase": self.phase, "notice": self.connection_notice,
+                "connected": bool(server.token) and (self.approved or self.connection is None),
+                "connection": self.connection, "connectionId": self.connection_id,
+                "preview": self.desktop.preview_active}
 
     def preview(self, document):
         clean = canonical(document)

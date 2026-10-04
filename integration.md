@@ -372,13 +372,18 @@ instead. The independent consumer fixture is the executable example for external
 
 ## Local PC inspection and Compose control
 
-Every active SDK integration includes **PC inspector** in **Control Room → Desktop connection**,
-the tester overlay's **More tools**, and the full overlay's **Tools** tab. Choose a device port
-(default 8766), tap **Start PC inspector**, and **Copy pairing token** into the desktop connection
-form. No host Settings screen or sample-app dependency is required. **New pairing token** revokes
-the old connection; **Stop PC inspector** closes the listener. Tokens are hidden until explicitly
-shown, kept in process memory, excluded from reports and copied as sensitive clipboard data on
-Android 13+. A user-requested clipboard copy can outlive the pairing.
+Every active SDK integration supports desktop **Landing → Connect**. It discovers the installed
+QaLens app, offers credentials through an adb-only (`DUMP` sender permission) SDK receiver, and opens
+**Control Room → Approve desktop**. Access starts only after explicit phone approval, returns to the
+host app and expires if not approved within two minutes. No host Settings or sample dependency.
+Credentials stay in process memory; profiles persist only device/app settings.
+
+Manual **PC inspector** controls remain in **Control Room → Desktop connection**, the tester
+**More tools** and full **Tools** tab for older desktops/custom ports. Start/token copy/rotation/Stop
+share the listener. Tokens are hidden until shown, excluded from reports and marked sensitive on
+Android 13+ clipboard copies. **Stop PC inspector** or disable stops access; re-enable needs approval
+or an explicit start. The desktop’s screen preview is a separate explicit, whole-phone adb capture,
+not a masked SDK screenshot. It is memory-only and must not be treated as sanitized evidence.
 
 For custom host controls, `QaLens.startLocalBridge(token, port = 8766)` still exposes redacted visible
 semantics and tap/type/scroll handlers on device loopback. `QaLens.stopLocalBridge()` closes it;

@@ -37,6 +37,7 @@ jobs:
         run: |
           python3 tools/local-bridge/test_server.py
           python3 tools/local-bridge/test_workbench.py
+          python3 tools/local-bridge/test_connection.py
           python3 tools/local-bridge/test_desktop.py
           node --check tools/local-bridge/app.js
           node tools/local-bridge/test_recording_transfer.js

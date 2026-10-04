@@ -221,23 +221,27 @@ python3 tools/local-bridge/server.py --gui
 # Open http://127.0.0.1:8765
 ```
 
-Choose Replay evidence, Connect a phone, Inspect components or Collect recordings. Back and Start
-navigate between workspaces. Both modern/classic players are embedded; leaving replay pauses video.
-For phone tools you also need adb, an authorized device/emulator and the active QaLens QA build.
-After pulling an SDK/desktop update, rebuild the QA app and restart the Python server before testing.
+The desktop opens **Landing** with connection, screen mirror, semantics tree and selected element
+attributes together. Recordings, Saved elements, Automation, Replay and Device tools are one click
+away; Back/browser history work between pages. Both existing web players are embedded, and leaving
+replay pauses video. Phone tools need adb, an authorized device/emulator and the active QA build.
+After updating, rebuild the QA app and restart Python before testing.
 
-1. Run `adb devices` and identify the intended device. In **QaLens Control → Desktop connection**
-   or the overlay's **More tools → PC inspector**, choose **Start PC inspector**, then **Copy pairing
-   token**. This is part of the SDK in every consuming QA app; no custom app Settings are required.
-2. In desktop **Devices & apps**, scan devices, select the serial, enter the actual Android package
-   and current token, then **Connect this profile**. Launch is a separate action and preserves app data.
-3. Save a profile to remember serial/package/activity/port. **New pairing token** revokes the previous
-   pairing, and **Stop PC inspector** closes it. Tokens remain in memory; a restart needs
-   pairing again. Appium-style import maps selected profile fields only; it does not start an Appium driver.
-4. In **Inspector**, refresh the tree, choose a component, highlight it or request tap/type/scroll.
-   Refresh afterward to verify the effect. Exact tags must be unique; live IDs expire as the UI changes.
-5. On the phone, **Send to PC** beside **Copy test tag** sends a preview when PC receive is enabled.
-   Read attributes, values, bounds and visible ancestry, then explicitly **Save JSON** to keep it.
+1. Connect by USB and approve Android USB debugging. Landing discovers phones and QaLens apps;
+   choose the intended app and **Connect**. **Approve desktop** in the phone’s SDK Control Room.
+   Credentials are generated and handled internally. This works in consuming QA apps without
+   sample Settings or custom host code. **Device tools → Advanced manual pairing** supports older SDKs.
+2. Profiles remember the phone/app without credentials. **Auto reconnect** repairs temporary USB
+   outages within this approved session. A restart, device switch or revoked token requires approval
+   again. **Stop PC inspector** on the phone revokes access; no app data is reset.
+3. Select any tree element to load all public attributes. The detail tabs separate **Attributes**,
+   **Semantics**, **Tree position** and **Diagnostics**. Highlight or tap/type/scroll via explicit
+   buttons, then refresh to verify effects. Tags must be unique; live IDs change with the UI.
+4. **Start preview** shows sampled live phone pixels (up to 1 fps), including other apps. It is
+   explicit, memory-only, unmasked and stops when leaving Landing/hiding the tab/disconnecting.
+   Click a matching visible Compose element to inspect it; actions require separate buttons.
+5. **Send to PC** beside **Copy test tag** sends attributes to **Receive phone selections** on Landing.
+   Review values/bounds/ancestry, then **Save JSON** to persist the deduplicated component.
 
 Hidden/password values are excluded according to capture policy; custom properties have limited
 coverage. A component document is attributes and tree position, not a screenshot or recreated widget.
@@ -251,8 +255,7 @@ Device tools offer Back/Home/Wake/Settings, explicit app launch, optional instal
 own window, and file push/pull through Downloads. Files are limited to 32 MiB; push replaces a
 same-name file, and pull writes under PC `transfers/`. The desktop does not install scrcpy.
 
-In **Recordings**, check completed phone archives, **Copy to PC**, then **Open replay**. Automatic
-copy is off by default. Polling runs while the desktop page is visible, so keep it open for collection.
+In **Recordings**, check completed phone archives, **Copy to PC**, then **Open replay**. Landing’s **Collect finished recordings** is off by default. Polling runs while the desktop page is visible, so keep it open for collection.
 Enabling takes the existing phone library as a baseline and copies new
 completed files, including clips after stop. Temporary discovery/copy failures keep it enabled and
 retry with a bounded delay. Device switches, disconnects and revoked pairing stop it.

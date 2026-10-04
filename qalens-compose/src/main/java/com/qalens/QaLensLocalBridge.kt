@@ -30,6 +30,7 @@ internal object QaLensLocalBridge {
     private var job: Job? = null
 
     @Synchronized fun stop() {
+        QaLensPcPairing.clear()
         epoch++
         job?.cancel(); job = null
         runCatching { client?.close() }; client = null
@@ -202,9 +203,15 @@ internal object QaLensLocalBridge {
         val result = onHost<Map<String, Any?>>(generation) { activity ->
             val (nodes, raw) = live(activity)
             val included = nodes.take(1_000).map { it.id }.toSet()
+            val origin = IntArray(2).also { activity.window.decorView.getLocationOnScreen(it) }
+            val displaySize = android.graphics.Point()
+            @Suppress("DEPRECATION")
+            activity.windowManager.defaultDisplay.getRealSize(displaySize)
             mapOf<String, Any?>("ok" to true, "protocol" to 1, "screen" to QaLens.state.value.screen.displayName,
                 "route" to QaLens.state.value.screen.route, "capturedAtMillis" to System.currentTimeMillis(),
-                "viewport" to mapOf<String, Any?>("width" to activity.window.decorView.width, "height" to activity.window.decorView.height),
+                "viewport" to mapOf<String, Any?>("width" to activity.window.decorView.width, "height" to activity.window.decorView.height,
+                    "originX" to origin[0], "originY" to origin[1]),
+                "screenViewport" to mapOf("width" to displaySize.x, "height" to displaySize.y),
                 "omittedNodes" to (nodes.size - included.size),
                 "nodes" to nodes.take(1_000).map { node ->
                     val semantic = raw[node.id]

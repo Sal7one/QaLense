@@ -21,6 +21,7 @@ node web/test/read.test.js
 python3 backend/tests/test_backend.py
 python3 tools/local-bridge/test_server.py
 python3 tools/local-bridge/test_workbench.py
+python3 tools/local-bridge/test_connection.py
 python3 tools/local-bridge/test_desktop.py
 node --check tools/local-bridge/app.js
 node tools/local-bridge/test_recording_transfer.js
@@ -120,3 +121,15 @@ not establish that `com.qalens` artifacts are available from Maven Central. Run
 `scripts/release_internal.sh --verify` for a checked local zip, or add `--version 0.9.0-preview1`
 for a preview with matching coordinates across modules. The script clears stale generated
 publications before packaging. Publishing externally is a separate step.
+
+The Landing connection flow has opt-in disposable-emulator checks after installing debug/test APKs:
+
+```sh
+adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e pcPairingOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+python3 tools/local-bridge/test_device_pairing.py emulator-SERIAL
+```
+
+The latter creates its own temporary server/storage/forward and uses actual SDK phone approval,
+attributes/save/dedup, adb screen PNG, forward repair, paused-host Send/recording copies and revoked
+access. It does not test browser rendering; verify Landing separately in the GUI.
