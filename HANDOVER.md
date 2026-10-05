@@ -1,7 +1,8 @@
 # QaLens engineering handover
 
 Updated 2026-10-05. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
-the user/integrator overview; [next.md](next.md) is the only current backlog;
+the user/integrator overview; [AI integration](docs/AI_INTEGRATION.md) is the host-agent work order;
+[next.md](next.md) is the only current backlog;
 [CONTRIBUTING.md](CONTRIBUTING.md) owns portable build/device commands. This handover records
 the current engineering baseline, including the recording-control fixes below. Git and CHANGELOG retain earlier history.
 Check the working tree, remote branches and CI before assuming publication or validation state.
@@ -45,6 +46,21 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Integration documentation — 2026-10-05
+
+Host agents now have a dedicated discovery/work order, privacy surface review, troubleshooting,
+public source index and completion template. The integration recipes cover custom variants/shared
+modules, a production graph gate, Startup/manual-install ordering, existing navigation observation,
+stable tags/window roots, real OSS owners and host acceptance. The independent consumer has a
+README separating compilation/isolation evidence from host runtime validation. Entry points route
+agents to these contracts; stale sample-Settings desktop pairing guidance is removed. These are
+documentation changes, not a new device audit or confirmation of the reported consuming-app crash.
+Local checks pass: changed-document links/anchors/fences, consumer debug/release builds and its
+existing isolation gate, plus the exact new documentation gate executed through a temporary init
+script. Consumer merged manifests contain the active debug components and no QaLens-owned release
+components. Most build tasks reuse prior outputs. Public examples were checked against current
+source; not every snippet was compiled as a standalone host app.
 
 ### Two-way inspection and selectors — 2026-10-05
 
@@ -327,7 +343,8 @@ Use the [contributor commands](CONTRIBUTING.md); set host paths through local en
 Serialize Gradle processes sharing this checkout. Earlier work used atomic
 `mkdir /tmp/qalens-gradle-lock` plus a cleanup trap; never delete another active build's lock.
 
-At this handover baseline, `dev` also contains `90d669f` (recording visual contexts/budgets) and
+At this handover baseline, `dev` contains `a04b107` (linked inspection/selectors) as well as
+`90d669f` (recording visual contexts/budgets) and
 `7059e29` (manual-root lifecycle/shared pairing/transfer recovery), plus the Landing/phone-approval
 work at `27821a7` and Android/browser audit fixes described above. Earlier bridge/component/clip
 commits follow the `dea9048` master merge. Check remote state before pushing or
@@ -335,6 +352,9 @@ merging; this handover does not authorize merging a branch. Default coordinates 
 `com.qalens:<module>:0.9.0` with a `-PqalensVersion` override. `qalensDist` builds a local Maven
 repository; `scripts/release_internal.sh --verify` packages/checks it. Public artifact publication
 and an authenticated company backend are separate work.
+GitHub CI for `a04b107` completed successfully in
+[run 37245400393](https://github.com/Sal7one/QaLense/actions/runs/37245400393). That result covers
+that implementation revision; inspect the current HEAD's run separately.
 
 ## Documentation ownership
 
@@ -344,6 +364,8 @@ and an authenticated company backend are separate work.
 | [next.md](next.md) | Single prioritized backlog and acceptance criteria |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Build/lint/consumer/device/distribution commands |
 | [integration.md](integration.md) | Host wiring, capture/privacy/backup policy and variants |
+| [AI integration](docs/AI_INTEGRATION.md) | Consumer-agent discovery/work order, diagnosis, acceptance routing and handoff template |
+| [Consumer fixture](integration-tests/consumer/README.md) | External build/API/isolation example and the limits of its evidence |
 | [OSS integrations](docs/OSS_INTEGRATIONS.md) | Supported library contracts and version limits |
 | [Architecture](docs/ARCHITECTURE.md) | Module and observation/analysis/capture/lifecycle boundaries |
 | [Recording clips](docs/RECORDING_CLIPS.md), [retention](docs/RECORDING_RETENTION.md) | Timing, journal/media budgets and omissions |

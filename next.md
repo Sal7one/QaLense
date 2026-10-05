@@ -3,6 +3,17 @@
 Updated 2026-10-05. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Completed 2026-10-05: AI host integration documentation
+
+- [x] Add an agent discovery/work order, privacy surface review, failure diagnosis, public source
+  index and host completion template; link it from repository entry points.
+- [x] Expand variant/shared-module mapping, production graph gate, Startup/manual lifecycle,
+  existing navigation observation, tag/window design and real OSS/data owner recipes.
+- [x] Document phone/browser inspection, connection/collection choices, artifact identity and
+  host acceptance separately from SDK tests; clarify external consumer fixture limits.
+- Reported consuming-app HD/ANR behavior and remaining device/toolchain checks still need actual
+  host validation. Documentation completion does not close those engineering items.
+
 ## Completed 2026-10-05: linked QA inspection and selectors
 
 - [x] Link Android inspector/search and browser selections in both directions without requiring

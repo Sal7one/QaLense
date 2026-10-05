@@ -9,6 +9,9 @@ library is required. Release builds still use `qalens-noop`.
 
 Start with [ONBOARDING.md](../../ONBOARDING.md) for the SDK/web/Python overview. This guide owns
 the desktop pairing, component, transfer and processor contracts.
+For integrating the SDK into another app, follow [integration.md](../../integration.md) and the
+[AI agent runbook](../../docs/AI_INTEGRATION.md). Pairing and inspection are SDK features; copying
+the sample app or adding the mock backend is unnecessary.
 
 Coverage is visible Compose semantics from attached/registered roots in the foreground Activity.
 Native views, WebViews, arbitrary private state and unregistered windows are outside this tool.

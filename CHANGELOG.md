@@ -2,6 +2,18 @@
 
 ## Unreleased — post-0.9.0
 
+### Host integration documentation for AI agents — 2026-10-05
+
+- Add a consumer-agent runbook with discovery/work order, public source index, privacy review,
+  troubleshooting, acceptance routing and a concrete host handoff template.
+- Expand integration recipes for custom QA/production variants, shared module dependencies,
+  resolved production graph checks, Startup/manual lifecycle, existing navigation observation,
+  stable tags/windows, actual OSS owners and phone/browser selection/collection workflows.
+- Document external consumer fixture coverage and limits; update entry points/document ownership
+  and remove stale sample-only desktop pairing guidance. Preserve unresolved host/device limits.
+- Verify local document links/anchors/fences, external consumer debug/release/isolation, the
+  documented production gate and consumer merged manifests; source-check public API examples.
+
 ### Linked QA inspection and selectors — 2026-10-05
 - Link live selection between the Android inspector and desktop Landing. Phone selections load
   attributes/selectors automatically; browser tree/preview selection highlights the phone without

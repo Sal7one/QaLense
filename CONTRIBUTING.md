@@ -5,6 +5,10 @@ For a product overview read [ONBOARDING.md](ONBOARDING.md). Start development wi
 [OSS integration contract](docs/OSS_INTEGRATIONS.md). A small reproduction and regression test are
 more useful than a broad rewrite. Use synthetic data in public issues and fixtures.
 
+Agents integrating into another app should use the [host integration runbook](docs/AI_INTEGRATION.md)
+and [external consumer example](integration-tests/consumer/README.md). SDK tests and builds do not
+establish that a different host's lifecycle, clients or production variants are correctly wired.
+
 ## Build locally
 
 Use JDK 17, Android SDK 35 and Gradle 9.1.0. Set `JAVA_HOME` and `ANDROID_HOME` for your machine;

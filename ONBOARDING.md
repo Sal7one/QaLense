@@ -15,6 +15,7 @@ analysis services; the included backend is a local development mock.
 | Explore a recording and try sending it | Web demo below | No |
 | Replay files and manage a QA phone from one window | Python desktop below | Only for phone tools |
 | Add QaLens to your app | SDK setup below, then [integration](integration.md) | Yes |
+| Have an AI agent integrate into an existing app | [AI integration runbook](docs/AI_INTEGRATION.md), [consumer example](integration-tests/consumer/README.md) | For runtime acceptance |
 | Inspect components or run your processors | Desktop pairing and automation below | Yes for live capture |
 | Change the project | [HANDOVER.md](HANDOVER.md), [CONTRIBUTING.md](CONTRIBUTING.md), [next.md](next.md) | Depends on the change |
 
@@ -100,7 +101,7 @@ dependencies {
 
 Map custom QA/production variants deliberately, and check their dependency graphs. The active
 library's release AAR still contains capture code; production safety comes from selecting
-`qalens-noop`. The independent [consumer fixture](integration-tests/consumer) checks this separation.
+`qalens-noop`. The independent [consumer fixture](integration-tests/consumer/README.md) checks this separation.
 Local Maven and internal repository distribution are covered in [integration.md](integration.md).
 
 AndroidX Startup normally installs the active SDK. Run the QA build and check the bubble or
@@ -108,6 +109,7 @@ AndroidX Startup normally installs the active SDK. Run the QA build and check th
 
 ```kotlin
 QaLens.configure {
+    enabled = BuildConfig.DEBUG // custom QA builds may need their own defined flag
     appName = "Example App"
     appVersion = BuildConfig.VERSION_NAME
     buildVariant = BuildConfig.BUILD_TYPE
@@ -117,7 +119,9 @@ QaLens.configure {
 ```
 
 Add `QaLensRoot { App() }` around the Compose root when useful, keep unique `Modifier.testTag`
-values, and report routes through `QaLensNavHost` or `QaLens.setScreen`. Ordinary Activity Compose
+values, and observe the existing controller with `QaLensNavigationObserver` or report routes through
+`QaLens.setScreen`. `QaLensNavHost` is an optional wrapper with a limited signature; keep the
+existing typed-route/transition NavHost when observing. Ordinary Activity Compose
 roots are discovered; register separate Compose Dialog/Popup roots with `qaInspectionRoot` as
 shown in the integration guide. Private application state and arbitrary native/WebView controls
 are not available through Compose semantics.
@@ -125,6 +129,10 @@ are not available through Compose semantics.
 If Startup was removed, the wrapper now tracks its own Activity and supplies the application
 context. Call `QaLens.install(this)` from `Application.onCreate()` for application-wide hooks.
 `QaLens.configure` only configures options. Control Room installs hooks on an explicit record action.
+Startup runs before `Application.onCreate()`; see the integration guide for removing only QaLens
+initializer metadata when deliberately owning startup. Preserve the existing Application, DI,
+theme, navigation and insets. The AI runbook supplies discovery, troubleshooting and a handoff
+template; sample code is an example, not a replacement app architecture.
 
 ## Connect useful evidence sources
 
@@ -353,6 +361,8 @@ or an owned backend whose validated limits suit your recordings.
 | Topic | Document |
 |---|---|
 | Android wiring, variants, media and backup exclusions | [integration.md](integration.md) |
+| AI agent discovery, work order, troubleshooting and completion report | [AI integration runbook](docs/AI_INTEGRATION.md) |
+| External active/no-op build example and its limits | [Consumer fixture](integration-tests/consumer/README.md) |
 | Chucker, transports, Room, DataStore, Timber and crash hooks | [OSS integrations](docs/OSS_INTEGRATIONS.md) |
 | Desktop pairing, API, files, profiles and processors | [Desktop guide](tools/local-bridge/README.md) |
 | Browser replay, config editor and CLI | [Web guide](web/README.md) |

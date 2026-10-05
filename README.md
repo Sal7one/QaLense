@@ -11,6 +11,10 @@ Python desktop, local backend, recording/inspection workflows and practical team
 For development, read [HANDOVER.md](HANDOVER.md) for the current verified baseline and engineering
 contracts, then [next.md](next.md) for the backlog.
 
+**Integrating with an AI agent? Use the [host integration runbook](docs/AI_INTEGRATION.md).** It
+covers discovery, safe variant mapping, real source hooks, phone/PC setup, troubleshooting,
+acceptance and a completion template.
+
 ## What it does
 
 - Floating QA panel, separate Control Room, Compose inspect/tag modes and accessibility checks.
@@ -37,9 +41,11 @@ dependencies {
 
 For an external app, follow [integration.md](integration.md). Composite builds and local Maven
 repositories are supported. Default coordinates are `com.qalens:<module>:0.9.0`; availability on
-Maven Central is not claimed. The separate `integration-tests/consumer` builds both variants.
+Maven Central is not claimed. The separate [consumer fixture](integration-tests/consumer/README.md)
+builds both variants. Pin a revision or an immutable internal artifact version; map custom QA and
+production flavors deliberately and verify each production graph.
 
-AndroidX Startup installs the active overlay. Add `QaLensRoot`, navigation wrappers, an interceptor
+AndroidX Startup installs the active overlay. Add `QaLensRoot`, navigation observation, an interceptor
 and enrichment only where useful. Open it through the bubble, shake, notification or **QaLens
 Control** launcher. Test on a QA/debug build with synthetic data.
 
@@ -83,6 +89,7 @@ button requires HTTP serving. `web/index.html` remains the classic fallback and 
 | Understand modules and data flow | [Architecture](docs/ARCHITECTURE.md) |
 | Understand overlay behavior and token coverage | [Overlay design](docs/OVERLAY_DESIGN.md) |
 | Integrate into an app | [Integration](integration.md), [OSS contracts](docs/OSS_INTEGRATIONS.md) |
+| Give an AI agent an integration work order and acceptance criteria | [AI integration runbook](docs/AI_INTEGRATION.md), [consumer example](integration-tests/consumer/README.md) |
 | Understand client fixes and compatibility changes | [Client fixes](docs/CLIENT_SAFETY_FIXES.md) |
 | Implement or inspect recordings | [SAL format](docs/SAL_FORMAT.md), [retention](docs/RECORDING_RETENTION.md), [clips](docs/RECORDING_CLIPS.md) |
 | Pair phones, inspect components and process saved files | [Desktop guide](tools/local-bridge/README.md) |
@@ -92,12 +99,14 @@ button requires HTTP serving. `web/index.html` remains the classic fallback and 
 
 ## Desktop and phone inspection
 
-The [local PC tool](tools/local-bridge/README.md) reads a live Compose tree, searches test tags,
-shows selectable bounds and runs exact-tag/ID tap, type and scroll actions in an explicitly paired
-QA build. It also reads recent observed logs/network metadata and cached host data snapshots.
-Run `python3 tools/local-bridge/server.py --gui` after starting the sample’s bridge in Settings.
-Pair from the GUI, send component attributes from the phone, save hashed JSON snapshots, remember
-device/app profiles and run locally configured processing pipelines. Release/no-op builds remain inert.
+The [local PC tool](tools/local-bridge/README.md) links phone/browser selections, reads a live Compose
+tree, searches tags/roles/actions and shows attributes, bounds and checked QaLens XPath selectors.
+Tap, type and scroll are explicit host actions. It also reads recent observed logs/network metadata
+and cached host data snapshots. Run `python3 tools/local-bridge/server.py --gui`, choose the host
+QA package on **Landing → Connect** and approve on the phone through SDK Control Room. This works
+in any active SDK integration; no sample Settings or backend is required. Return to the host for
+live inspection. Save hashed component JSON explicitly, remember device/app profiles and run
+locally configured processors. Release/no-op builds provide no listener or pairing UI.
 
 On the phone, use two fingers to scroll in inspect/tag mode, and drag **Move inspector** to reposition
 the filters and selected-node card. Bubble/dock movement follows physical screen directions in RTL.
