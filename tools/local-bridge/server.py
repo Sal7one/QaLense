@@ -87,6 +87,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, (WEB_ROOT / name).read_bytes(), mimetypes.guess_type(name)[0] or "application/octet-stream")
         assets = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/recording-transfer.js": ("recording-transfer.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8")}
         assets["/mirror-controls.js"] = ("mirror-controls.js", "text/javascript; charset=utf-8")
+        assets["/diagnostics.js"] = ("diagnostics.js", "text/javascript; charset=utf-8")
         if self.command == "GET" and self.path in assets:
             name, mime = assets[self.path]
             return self.reply(200, Path(__file__).with_name(name).read_bytes(), mime)
@@ -95,6 +96,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ok": True, "session": bench.session})
         endpoints = {("GET", "/api/recordings/device"): "/v1/recordings", ("GET", "/api/snapshot"): "/v1/snapshot", ("GET", "/api/selection"): "/v1/selection", ("POST", "/api/selectors"): "/v1/selectors", ("POST", "/api/query"): "/v1/query", ("GET", "/api/events"): "/v1/events", ("POST", "/api/command"): "/v1/command", ("POST", "/api/component"): "/v1/component", ("GET", "/api/inbox"): "/v1/components/inbox"}
         endpoints.update({("POST", "/api/recording"): "/v1/recording", ("POST", "/api/inspection"): "/v1/inspection", ("POST", "/api/screenshot"): "/v1/screenshot"})
+        endpoints.update({(method, f"/api/{name}"): f"/v1/{name}" for method in ("GET", "POST") for name in ("data", "sql")})
         route = endpoints.get((self.command, self.path))
         binary = parsed.path == "/api/recordings/file"
         if not route and not (bench and (self.path in WORKBENCH_ROUTES or binary)):
@@ -156,7 +158,7 @@ class Handler(BaseHTTPRequestHandler):
             # Serialize session switching with a device read/action; never replay a command.
             from contextlib import nullcontext
             with bench.lock if bench else nullcontext():
-                if desktop and self.command == "POST" and self.headers.get("X-Qalens-Connection") != bench.connection_id:
+                if desktop and (self.command == "POST" or self.path in {"/api/events", "/api/data", "/api/sql"}) and self.headers.get("X-Qalens-Connection") != bench.connection_id:
                     return self.reply(409, {"ok": False, "error": "Device connection changed; refresh the tree before selecting a target"})
                 if not desktop and not hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode()):
                     return self.reply(401, {"ok": False, "error": "Device pairing changed; connect again"})
@@ -164,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
                     code, pixels, mime = self.proxy_screenshot(body)
                     return self.reply(code, pixels, mime)
                 code, payload = self.proxy(route, body, self.command)
-                if code == 200 and bench and self.path in {"/api/recording", "/api/inspection"}: payload["connectionId"] = bench.connection_id
+                if code == 200 and bench and self.path in {"/api/recording", "/api/inspection", "/api/events", "/api/data", "/api/sql"}: payload["connectionId"] = bench.connection_id
                 if code == 200 and bench and self.path in {"/api/snapshot", "/api/selection", "/api/selectors", "/api/query", "/api/recordings/device"}: payload["connectionId"] = bench.connection_id
                 if code == 200 and bench and self.path == "/api/component":
                     payload = {"ok": True, "document": bench.preview(payload)}
@@ -195,8 +197,12 @@ class Handler(BaseHTTPRequestHandler):
             with response:
                 data = response.read(MAX_RESPONSE + 1)
                 if len(data) > MAX_RESPONSE: raise ValueError("Device response exceeds limit")
-                return response.code, json.loads(data)
-        except (URLError, TimeoutError, ConnectionError, ValueError):
+                declared = response.headers.get("Content-Length")
+                if declared is not None and int(declared) != len(data): raise ValueError("Device response interrupted")
+                payload = json.loads(data)
+                if not isinstance(payload, dict): raise ValueError("Invalid device response")
+                return response.code, payload
+        except (URLError, TimeoutError, ConnectionError, ValueError, IncompleteRead):
             return 502, {"ok": False, "error": "Phone unavailable. Check USB and return to the app. UI actions are never retried automatically."}
 
     def proxy_screenshot(self, body):

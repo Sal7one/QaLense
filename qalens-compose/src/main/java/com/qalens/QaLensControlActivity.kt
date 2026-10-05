@@ -214,7 +214,7 @@ private fun ControlRoom(
             modifier = Modifier.qaHiddenFromReports(),
             onDismissRequest = { QaLensPcPairing.clear() },
             title = { Text("Connect QaLens desktop?") },
-            text = { Text("Your authorized adb computer requested access to this app’s Compose tree, component attributes, observations and saved recordings. It can run UI actions and request recordings, bug clips and masked screenshots. HD still requires Android consent. Screen mirror and automatic recording copy are separate choices on the PC. Approve only for your QA session; Stop PC inspector revokes access.") },
+            text = { Text("Your authorized adb computer requested access to this app’s Compose tree, component attributes, observations and saved recordings. It can inspect decoded app values, read preferences and SQLite previews, and manage saved SQL queries. Database rows are read-only. It can run UI actions and request recordings, bug clips and masked screenshots. HD still requires Android consent. Screen mirror and automatic recording copy are separate choices on the PC. Approve only for your QA session; Stop PC inspector revokes access.") },
             confirmButton = { TextButton(onClick = {
                 if (QaLensPcPairing.approve(request)) {
                     hostLaunchIntent(context)?.let { runCatching { context.startActivity(it) } }
@@ -785,7 +785,10 @@ private fun DatabaseSection(context: Context) {
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { cancellation?.cancel(); queryJob?.cancel() } }
     LaunchedEffect(scanVersion) {
         scanning = true
-        dbs = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { QaLensDataTools.databases(context.applicationContext) }
+        val loaded = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            QaLensDataTools.databases(context.applicationContext) to QaLensAppSal.queries(context)
+        }
+        dbs = loaded.first; queries = loaded.second
         if (selectedDb !in dbs) selectedDb = dbs.firstOrNull().orEmpty()
         scanning = false
     }
@@ -838,8 +841,10 @@ private fun DatabaseSection(context: Context) {
     Spacer(Modifier.height(8.dp))
     SettingField("Query name", saveName, "Name this query to reuse it") { saveName = it }
     DataButton("Save query", Modifier.fillMaxWidth(), Accent, enabled = saveName.isNotBlank() && sql.isNotBlank() && selectedDb.isNotBlank()) {
-        queries = queries.filterNot { it.name == saveName.trim() } + AppSalQuery(saveName.trim(), selectedDb, sql.trim())
-        QaLensAppSal.setQueries(context, queries)
+        synchronized(QaLensAppSal) {
+            queries = QaLensAppSal.queries(context).filterNot { it.name == saveName.trim() } + AppSalQuery(saveName.trim(), selectedDb, sql.trim())
+            QaLensAppSal.setQueries(context, queries)
+        }
         saveName = ""
     }
 
@@ -891,8 +896,10 @@ private fun DatabaseSection(context: Context) {
                         runQuery(selectedDb, q.sql)
                     }
                     DataButton("Delete", Modifier.weight(1f), Red, description = "Delete saved query ${q.name}") {
-                        queries = queries.filterNot { it.name == q.name }
-                        QaLensAppSal.setQueries(context, queries)
+                        synchronized(QaLensAppSal) {
+                            queries = QaLensAppSal.queries(context).filterNot { it.name == q.name }
+                            QaLensAppSal.setQueries(context, queries)
+                        }
                     }
                 }
             }

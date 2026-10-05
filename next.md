@@ -3,6 +3,22 @@
 Updated 2026-10-05. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Desktop diagnostics and data tools — 2026-10-05
+
+- [x] Connect searchable bounded live Network/Logs to Landing with Errors only, Follow/Pause and
+  hidden/closed-page guards; preserve host body-capture opt-in and truthful omission coverage.
+- [x] Expose decoded cached DataStore/Room/app fields/status, ten pins and before/after baselines;
+  reset private comparisons on detected policy/connection changes and explain binary/file-only stores.
+- [x] Attach optional bug notes to existing recent clip marks, master timeline and clip labels
+  without stopping recording or changing archive format; verify actual compressed saved tracks.
+- [x] Add read-only desktop SQL/table/result/cancel tools and phone-shared saved queries; enforce
+  real read-only connections, path/ID limits, IO jobs, timeout/expiry and no main-thread heavy locks.
+- [x] Pass 240 units, build/lint/isolation, 42 Python/five JS/web suites, focused real data/capture/
+  Control Room and full Android checks; update SDK/desktop/AI host integration guidance.
+- [ ] Complete the new panel/page's live visual browser acceptance using the disposable
+  `desktopDataGuiSeconds` fixture. UI access was unavailable (locked-Mac/no-browser tool result);
+  controller/protocol tests are not a visual check. Physical/consuming-app acceptance remains separate.
+
 ## Completed 2026-10-05: desktop mirror and capture workspace
 
 - [x] Put resizable mirror/selected-element/tree panes in that order, with a smaller tree, shared

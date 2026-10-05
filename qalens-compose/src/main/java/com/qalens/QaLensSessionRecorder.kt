@@ -64,7 +64,7 @@ internal object QaLensSessionRecorder {
         "canClip" to (lifecycle.phase == RecordingLifecycle.Phase.CAPTURING && clipCount < 20),
         "allowVideo" to QaLens.config.value.allowUnmaskedVideo,
         "inspection" to QaLens.state.value.isInspectMode,
-        "capabilities" to listOf("recording-control", "inspection-control", "masked-screenshot")
+        "capabilities" to listOf("recording-control", "inspection-control", "masked-screenshot", "live-app-values", "read-only-sql")
     )
     private val mediaLock = Any()
     @Volatile private var frameCounter = 0

@@ -2,6 +2,20 @@
 
 ## Unreleased — post-0.9.0
 
+### Desktop live diagnostics and data tools — 2026-10-05
+
+- Add collapsible Landing Network/Logs/App values with local search, Errors only, bounded Follow/
+  Pause, source status, ten pins and change baselines; clear stale/private comparisons on detected
+  config/connection changes. Body previews keep the host's existing opt-in.
+- Add bug notes to recent clips and retain them in the master BUG mark and clip analysis label.
+- Add a Data tools SQL workbench with genuine read-only SQLite/Room connections, table reads,
+  bounded masked results, async cancel/deadline/expiry and phone-shared saved-query management.
+- Offer explicit redacted ordinary preference snapshots and DataStore file metadata/guidance;
+  reuse decoded host Flows without creating stores, parsing arbitrary files or bypassing encryption.
+- Extend authenticated internal bridge/data capabilities, approval disclosure and regression/
+  integration guidance. Preserve public/no-op API and recording schema. New GUI visual acceptance
+  remains open because desktop UI access was unavailable; protocol/controller/native checks pass.
+
 ### Desktop mirror and capture workspace — 2026-10-05
 
 - Arrange Landing as resizable mirror, selected attributes and smaller semantics tree. Add height

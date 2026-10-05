@@ -38,6 +38,7 @@ internal object QaLensLocalBridge {
         mutableStatus.value = "Stopped"
         mutablePairing.value = null
         QaLensBridgeComponents.clear()
+        QaLensBridgeDataTools.stop()
     }
 
     @Synchronized fun start(token: String, port: Int) {
@@ -147,6 +148,13 @@ internal object QaLensLocalBridge {
                 request.method == "POST" && request.path == "/v1/selectors" -> selectors(readJson(request.body), generation)
                 request.method == "POST" && request.path == "/v1/query" -> query(readJson(request.body), generation)
                 request.method == "GET" && request.path == "/v1/events" -> observations(generation)
+                request.method == "GET" && request.path == "/v1/data" -> { requireSession(generation); QaLensBridgeDataTools.values() }
+                request.method == "POST" && request.path == "/v1/data" -> { requireSession(generation); QaLensBridgeDataTools.data(readJson(request.body)) }
+                request.method == "GET" && request.path == "/v1/sql" -> { requireSession(generation); QaLensBridgeDataTools.catalog() }
+                request.method == "POST" && request.path == "/v1/sql" -> {
+                    requireSession(generation)
+                    QaLensBridgeDataTools.sql(readJson(request.body)) { generation == epoch && QaLens.config.value.enabled }
+                }
                 request.method == "GET" && request.path == "/v1/components/inbox" -> {
                     synchronized(this@QaLensLocalBridge) {
                         requireSession(generation)
@@ -479,18 +487,28 @@ internal object QaLensLocalBridge {
     private suspend fun observations(generation: Long): Map<String, Any?> {
         requireSession(generation) // Cached evidence can be read while Control Room is in front.
         val state = QaLens.state.value
+        val logs = state.events.filter { it.type == QaEventType.LOG }
+        val config = QaLens.config.value
         return sanitize(mapOf<String, Any?>("ok" to true, "coverage" to "Bounded dashboard observations, not a complete recording",
             "events" to state.events.takeLast(100).map { mapOf<String, Any?>("time" to it.timestampMillis, "type" to it.type.name, "tag" to it.tag, "message" to it.message) },
-            "network" to state.networkEvents.takeLast(100).map { mapOf<String, Any?>("method" to it.method, "url" to it.url, "status" to it.status, "durationMs" to it.latencyMs) },
+            "logs" to logs.takeLast(100).map { mapOf<String, Any?>("time" to it.timestampMillis, "type" to it.type.name, "tag" to it.tag, "message" to it.message) },
+            "omittedLogs" to (logs.size - minOf(logs.size, 100)),
+            "policyId" to QaLensBridgeDataTools.policyId(),
+            "network" to state.networkEvents.takeLast(100).map { mapOf<String, Any?>(
+                "time" to it.timestampMillis, "method" to it.method, "url" to it.url, "status" to it.status,
+                "error" to it.error, "durationMs" to it.latencyMs, "requestBytes" to it.requestBodyBytes,
+                "responseBytes" to it.responseBodyBytes, "connectivity" to it.connectivity?.type?.name,
+                "requestPreview" to if (config.captureNetworkBodies) it.requestBodyPreview else null,
+                "responsePreview" to if (config.captureNetworkBodies) it.responseBodyPreview else null) },
             "omittedEvents" to (state.events.size - minOf(state.events.size, 100)),
             "omittedNetwork" to (state.networkEvents.size - minOf(state.networkEvents.size, 100)),
-            "omittedDataSources" to (state.dataSources.size - minOf(state.dataSources.size, 20)),
-            "dataSources" to state.dataSources.entries.take(20).associate { (name, values) -> name to values.entries.take(100).associate { it.key to it.value } }))
+            "omittedDataSources" to (state.dataSources.size - minOf(state.dataSources.size, 30)),
+            // Kept for older desktop clients, now with a global response budget and key masking.
+            "dataSources" to QaLensBridgeDataTools.values()["dataSources"]), config).also { QaLensBridgeDataTools.policyId(config) }
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun sanitize(value: Map<String, Any?>): Map<String, Any?> {
-        val config = QaLens.config.value
+    private fun sanitize(value: Map<String, Any?>, config: QaLensConfig = QaLens.config.value): Map<String, Any?> {
         fun clean(item: Any?, field: String = "", dynamicKeys: Boolean = false): Any? = when (item) {
             is String -> if (!dynamicKeys && field in listOf("id", "parentId", "selectedId", "actions", "action")) item
                 else config.redact(item).take(2_048)

@@ -244,10 +244,23 @@ python3 tools/local-bridge/server.py --gui
 
 The desktop opens **Landing** with connection and capture controls above adjustable panes:
 **screen mirror → selected element → semantics tree**. Drag the separators/bottom height handle;
-Reset layout restores defaults. Recordings, Saved elements, Automation, Replay and Device tools are one click
+Reset layout restores defaults. Recordings, Data tools, Saved elements, Automation, Replay and Device tools are one click
 away; Back/browser history work between pages. Both existing web players are embedded, and leaving
 replay pauses video. Phone tools need adb, an authorized device/emulator and the active QA build.
 After updating, rebuild the QA app and restart Python before testing.
+
+Open **Live diagnostics** below the workspace for searchable Network/Logs with Errors only and
+Follow/Pause. **App values** reads the host's decoded cache: pin up to ten fields and compare against
+the first read or a new baseline while using the mirror. DataStore's binary file may simply need
+the app's serializer; wire its existing decoded Flow with `observeDataStoreValues` instead of
+trying to decrypt a backing file. Unconnected stores show metadata/guidance in **Data tools**.
+
+**Data tools → SQL workbench** provides database/table selection, shared phone saved queries,
+bounded masked result tables and Cancel. Desktop connections are read-only, run on IO and have a
+ten-second cancellation watchdog. Control Room still owns its separate explicit write controls.
+In Landing's **Keep a bug**, enter an optional note before Mark clip; it follows the mark into the
+master timeline and exported clip. [The desktop guide](tools/local-bridge/README.md#live-diagnostics)
+documents privacy, bounds, lifecycle and protocol limits.
 
 If startup reports an occupied port, use the existing QaLens instance or add `--port 0` and open
 the printed HTTP URL. Unwritable storage reports the blocked folder and a restart command using a

@@ -1,6 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict'), fs = require('node:fs'), vm = require('node:vm');
 const Mirror = require('./mirror-controls.js'), Transfer = require('./recording-transfer.js');
+const Diagnostics = require('./diagnostics.js');
 const drain = async () => { for (let i = 0; i < 12; i++) await new Promise(setImmediate); };
 function fixture() {
   const elements = new Map(), requests = [], timers = [], posts = [], urls = [];
@@ -17,6 +18,7 @@ function fixture() {
   const document = {hidden: false, body: get('body'), getElementById: get, querySelectorAll: () => [], querySelector: get, createElement: make, createElementNS: make, addEventListener() {}};
   const context = vm.createContext({document, location: {hash: '#landing', origin: 'http://fixture'}, history: {replaceState() {}, pushState() {}}, window: {scrollTo() {}, addEventListener() {}},
     navigator: {clipboard: {writeText: async () => {}}}, QaLensMirror: {...Mirror, installLayout() {}}, QaLensRecordingTransfer: Transfer,
+    QaLensDiagnostics: {...Diagnostics, install: () => ({sync() {}, buttons() {}, pageChanged() {}})},
     Date, URL: {createObjectURL: () => { const url = `blob:${urls.length}`; urls.push(url); return url; }, revokeObjectURL() {}},
     setInterval: (callback, delay) => timers.push({callback, delay}), setTimeout, clearTimeout,
     fetch: async (url, options = {}) => {
@@ -108,7 +110,10 @@ async function run() {
   }
   {
     const f = fixture(); await vm.runInContext('captureCommand("start")',f.context);
+    f.get('clip-note').value = 'Checkout stalls after Pay';
     await vm.runInContext('captureCommand("clip")',f.context);
+    assert.equal(f.requests.find(r => r.url === '/api/recording' && r.body.action === 'clip').body.label, 'Checkout stalls after Pay');
+    assert.equal(f.get('clip-note').value, '');
     assert.equal(f.state.controls.phase,'capturing'); assert.equal(f.state.controls.markedClips,1);
     assert.match(f.get('status').textContent,/export happens after Stop/);
     f.get('clip-duration').value='custom'; f.get('clip-custom').value='1.5';

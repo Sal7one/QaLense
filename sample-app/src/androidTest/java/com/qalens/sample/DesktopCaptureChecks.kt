@@ -115,7 +115,8 @@ internal class DesktopCaptureChecks(private val runner: Instrumentation) {
             check(command("start").first == 409)
             check(json("inspection", JSONObject().put("enabled", true)).first == 409)
             Thread.sleep(1_200)
-            check(command("clip", "seconds" to 10).first == 200)
+            val bugNote = "Checkout stalled after Pay"
+            check(json("recording", JSONObject().put("action", "clip").put("seconds", 10).put("label", bugNote)).first == 200)
             check(controls().getInt("markedClips") == 1 && QaLens.state.value.isRecording)
             val session = controls().getString("sessionName")
             check(command("stop").first == 200)
@@ -124,6 +125,23 @@ internal class DesktopCaptureChecks(private val runner: Instrumentation) {
             check((0 until files.length()).any { files.getJSONObject(it).getString("name") == session })
             val start = session.removePrefix("session_").removeSuffix(".sal")
             check((0 until files.length()).any { files.getJSONObject(it).getString("name").contains("clip_${start}_1") }) { "Marked clip did not export with the master" }
+            val clip = (0 until files.length()).map { files.getJSONObject(it).getString("name") }.first { it.contains("clip_${start}_1") }
+            fun archiveText(name: String, entry: String): String {
+                val bytes = request("recordings/$name").second
+                java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes)).use { zip ->
+                    while (true) {
+                        val item = zip.nextEntry ?: error("Missing archive entry $entry")
+                        if (item.name == entry) {
+                            val content = zip.readBytes()
+                            return if (content.size >= 2 && content[0] == 0x1f.toByte() && content[1] == 0x8b.toByte())
+                                java.util.zip.GZIPInputStream(java.io.ByteArrayInputStream(content)).use { String(it.readBytes()) }
+                            else String(content)
+                        }
+                    }
+                }
+            }
+            check(archiveText(session, "marks.json").contains(bugNote)) { "Bug note missing from master timeline" }
+            check(JSONObject(archiveText(clip, "analysis.json")).getJSONObject("clip").getString("label") == bugNote) { "Bug note missing from clip analysis" }
             runner.runOnMainSync { check(overlay.visibility == View.VISIBLE) }
             check(command("stop").first == 409)
             // PixelCopy callbacks run after this main turn: a capture must not undo a concurrent

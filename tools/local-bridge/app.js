@@ -11,6 +11,7 @@ let screenshotUrl = '', screenshotBlob = null;
 let mirrorModeGeneration = 0;
 let lastPreviewRequest = 0, treeRefreshTimer = null;
 let captureChecked = false, captureIssue = '';
+let diagnostics = null;
 const status = text => { $('status').textContent = text; };
 async function api(path, command, connectionId = workbench?.connectionId) {
   const headers = {'X-Qalens-Session': session};
@@ -27,7 +28,7 @@ async function perform(work) {
   try { await work(); } catch (error) { status(error.message); }
   finally { busy = false; document.querySelectorAll('button').forEach(b => { b.disabled = false; }); componentButtons(); $('back').disabled = location.hash === '#landing'; void recordingTransfer.poll(); }
 }
-const pageNames = {landing: 'Landing', devices: 'Device tools', library: 'Saved elements', automation: 'Automation', recordings: 'Recordings', replay: 'Replay'};
+const pageNames = {landing: 'Landing', 'data-tools': 'Data tools', devices: 'Device tools', library: 'Saved elements', automation: 'Automation', recordings: 'Recordings', replay: 'Replay'};
 function tab(id, push = true) {
   if (!pageNames[id]) { id = 'landing'; if (!push) history.replaceState(history.state, '', '#landing'); }
   if (id !== 'landing' && previewEnabled) void stopPreview();
@@ -40,6 +41,7 @@ function tab(id, push = true) {
   window.scrollTo({top: 0});
   $('back').disabled = id === 'landing';
   $('viewer').contentWindow?.postMessage({type: 'qalens-visibility', visible: id === 'replay'}, location.origin);
+  diagnostics?.pageChanged(id);
 }
 document.querySelectorAll('[data-tab]').forEach(button => { button.onclick = () => tab(button.dataset.tab); });
 $('back').onclick = () => { if (history.state?.qalens) history.back(); else tab('landing', false); };
@@ -152,7 +154,7 @@ function row(name, value, target = 'attributes') {
   const tr = document.createElement('tr'), key = document.createElement('td'), val = document.createElement('td');
   key.textContent = name; val.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); tr.append(key, val); $(target).append(tr);
 }
-function componentButtons() { connectionButtons(); $('copy-tag').disabled = !(component?.content.component.tag || selected?.tag) || busy; $('save').disabled = !component || busy; $('download').disabled = !component || busy; $('run').disabled = !component || busy || !$('pipeline').value || !savedHashes.has(component.hash); $('download-tree').disabled = !selectorBundle || busy; $('export-selectors').disabled = !selectorBundle || busy; }
+function componentButtons() { connectionButtons(); diagnostics?.buttons(); $('copy-tag').disabled = !(component?.content.component.tag || selected?.tag) || busy; $('save').disabled = !component || busy; $('download').disabled = !component || busy; $('run').disabled = !component || busy || !$('pipeline').value || !savedHashes.has(component.hash); $('download-tree').disabled = !selectorBundle || busy; $('export-selectors').disabled = !selectorBundle || busy; }
 function showComponent(entry, live = false) {
   if (!live) { ++selectionGeneration; selected = null; clearSelectors(); render(); details(); }
   component = entry;
@@ -194,6 +196,7 @@ async function loadWorkbench() {
   const connection = workbench.connection;
   if (captureConnection !== workbench.connectionId || !workbench.connected) resetCapture();
   recordingTransfer.checkConnection(workbench.connectionId, workbench.connected);
+  diagnostics?.sync();
   document.querySelector('[data-adb="mirror"]').title = workbench.scrcpyAvailable ? 'Start installed scrcpy' : 'Install scrcpy to enable this tool';
   $('auto-connect').checked = workbench.preferences.autoConnect;
   connectionStatus(workbench); connectionButtons();
@@ -240,7 +243,7 @@ async function saved() {
 }
 $('refresh').onclick = () => perform(refresh); $('search').oninput = render; $('tagged').onchange = render;
 $('action-filter').onchange = render; $('role-filter').onchange = render;
-$('events').onclick = () => perform(async () => { $('observations').textContent = JSON.stringify(await api('events'), null, 2); status('Read recent observations.'); });
+$('events').onclick = () => diagnostics?.open();
 $('save').onclick = () => perform(async () => {
   await api('import', {document: component}); // saved snapshots can be re-opened after preview eviction
   const result = await api('save', {hash: component.hash}); status(result.duplicate ? `Already saved · ${result.file}` : `Saved · ${result.file}`); await saved(); savedHashes.add(component.hash);
@@ -534,6 +537,7 @@ setInterval(async () => {
     const state = await api('connection/check', {reconnect: $('auto-reconnect').checked});
     if (id !== workbench.connectionId) return;
     Object.assign(workbench, state); connectionStatus(state); connectionButtons(); recordingTransfer.checkConnection(state.connectionId, state.connected);
+    diagnostics?.sync();
     if (state.connectionId !== id) { ++selectionGeneration; snapshot = null; selected = null; render(); details(); $('receive').checked = false; await stopPreview(); }
     if (previous !== 'connected' && state.phase === 'connected') {
       $('receive').checked = true; status('Connected. Select an element to read its attributes.');
@@ -750,6 +754,7 @@ function clearComponent() {
 function resetCapture() {
   captureState = null; captureChecked = false; captureIssue = ''; captureConnection = workbench?.connectionId || null; phoneArchiveList = []; pendingReplay = null;
   $('watch-after-stop').checked = false; captureUi();
+  $('clip-note').value = '';
 }
 function captureUi() {
   const ready = !!workbench?.connected && (!workbench.phase || workbench.phase === 'connected') && captureConnection === workbench.connectionId;
@@ -782,12 +787,13 @@ async function captureCommand(action) {
     const value = $('clip-duration').value === 'custom' ? $('clip-custom').value : $('clip-duration').value;
     const seconds = Number(value);
     if (!Number.isInteger(seconds) || seconds < 1 || seconds > 300) throw Error('Choose 1–300 whole seconds for the clip.');
-    command.seconds = seconds; command.label = `Bug clip · last ${seconds}s`;
+    command.seconds = seconds; command.label = typeof QaLensDiagnostics !== 'undefined' ? QaLensDiagnostics.clipLabel($('clip-note').value, seconds) : `Bug clip · last ${seconds}s`;
   }
   const before = captureState;
   const result = await api('recording', command, connectionId);
   if (connectionId !== workbench.connectionId || result.connectionId !== connectionId) return;
   captureState = result.controls; captureConnection = connectionId;
+  if (action === 'clip' && (typeof QaLensDiagnostics === 'undefined' || QaLensDiagnostics.clipLabel($('clip-note').value, command.seconds) === command.label)) $('clip-note').value = '';
   if (action === 'stop' && before?.phase === 'capturing' && $('watch-after-stop').checked) {
     pendingReplay = {connectionId, name: before.sessionName, deadline: Date.now() + 120000};
   }
@@ -857,3 +863,6 @@ $('screenshot-copy').onclick = () => perform(async () => {
 });
 try { if (typeof QaLensMirror !== 'undefined') QaLensMirror.installLayout(document, window.localStorage); } catch (_) { /* Storage restrictions do not block capture/inspection. */ }
 mirrorUi(); captureUi();
+if (typeof QaLensDiagnostics !== 'undefined') diagnostics = QaLensDiagnostics.install({document, api,
+  connection: () => ({id: workbench?.connectionId, connected: !!workbench?.connected && (!workbench.phase || workbench.phase === 'connected')}),
+  workBusy: () => busy || mirrorInputBusy, navigate: tab});

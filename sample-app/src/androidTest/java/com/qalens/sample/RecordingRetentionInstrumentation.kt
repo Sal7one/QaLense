@@ -43,6 +43,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var longSession = false
     private var bridgeOnly = false
     private var desktopCaptureOnly = false
+    private var desktopDataOnly = false
+    private var desktopDataGuiSeconds = 0
     private var desktopGuiHoldSeconds = 0
     private var overlayLoadOnly = false
     private var controlOnly = false
@@ -67,6 +69,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         longSession = arguments?.getString("longSession") == "true"
         bridgeOnly = arguments?.getString("bridgeOnly") == "true"
         desktopCaptureOnly = arguments?.getString("desktopCaptureOnly") == "true"
+        desktopDataOnly = arguments?.getString("desktopDataOnly") == "true"
+        desktopDataGuiSeconds = arguments?.getString("desktopDataGuiSeconds")?.toIntOrNull() ?: 0
         desktopGuiHoldSeconds = arguments?.getString("desktopGuiHoldSeconds")?.toIntOrNull() ?: 0
         overlayLoadOnly = arguments?.getString("overlayLoadOnly") == "true"
         controlOnly = arguments?.getString("controlOnly") == "true"
@@ -92,6 +96,16 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         val result = Bundle()
         var consent: java.util.concurrent.FutureTask<Unit>? = null
         try {
+            if (desktopDataGuiSeconds > 0) {
+                DesktopDiagnosticsChecks(this).holdGui(desktopDataGuiSeconds)
+                result.putString("stream", "\nOK: Disposable desktop data GUI fixture restored hooks, databases, queries and privacy.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (desktopDataOnly) {
+                DesktopDiagnosticsChecks(this).run()
+                result.putString("stream", "\nOK: Desktop live evidence/decoded DataStore/foreground updates, preference privacy, WAL read-only SQL/bounds/saved queries/cancel/timeout/disable and main responsiveness.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             if (desktopGuiHoldSeconds > 0) {
                 DesktopCaptureChecks(this).holdGui(desktopGuiHoldSeconds)
                 result.putString("stream", "\nOK: Disposable desktop GUI fixture finished and restored HD policy.\n")

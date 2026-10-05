@@ -101,6 +101,30 @@ cannot be identified reliably; the host value hook is the supported integration 
 DataStore backing files show names/sizes only and explicitly describe that coverage. File lists
 show at most 50 entries each. Stored values and file metadata are distinct sources of evidence.
 
+## Inspect from the desktop
+
+Phone approval now discloses decoded fields, preference/SQLite reads and shared saved queries.
+**Landing → Live diagnostics → App values** reads the same cached values/status; it never calls a
+provider or opens a DataStore on demand. Follow/Pause, source/key/value search, ten memory-only pins
+and comparison baselines help spot changes while using the mirror. Missing fields are explicitly
+unavailable in that bounded snapshot, not claimed to be deleted. Privacy/config or connection
+changes clear prior comparisons. Desktop returns at most 30 sources / 300 fields / 100,000 field
+characters with omission counts. No new public hook, no-op subscription or recording format is added.
+
+Binary `.preferences_pb` does not by itself mean encryption. An IDE plugin may know that schema;
+the supported integration is the existing decoded host Flow shown above. Proto/custom/encrypted
+DataStore follows the same mapper contract. **Data tools → Show storage files** offers metadata,
+explicit redacted ordinary preference snapshots and recognized encrypted-envelope guidance.
+It excludes SDK config and never accepts an arbitrary file path or runs a second DataStore.
+
+**Data tools → SQL workbench** queries the app's own standard SQLite/Room files through a separate
+read-only connection; it cannot use Control Room's writes. IO jobs expose cancellation and a
+ten-second cancellation watchdog without occupying the device bridge socket. Rows/cells/columns
+are bounded and credential-like column names plus current rules are masked before truncation;
+SQL aliases and ordinary business data still need host policy. Saved read queries share the existing
+phone list; enter Control Room or Rescan to refresh it. See the
+[desktop data contract](../tools/local-bridge/README.md#sql-workbench-and-storage) for limits and API.
+
 ## Verify in a consuming app
 
 Change an allowed setting through the app's real UI or existing state owner. With Control Room

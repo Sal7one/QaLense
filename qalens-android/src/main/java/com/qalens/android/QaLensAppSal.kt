@@ -53,7 +53,7 @@ object QaLensAppSal {
         prefs(context).edit().putString(KEY_PANEL_MODE, if (mode == "minimal") "minimal" else "full").apply()
 
     // ── Saved queries / macros / watch list (persisted as JSON arrays) ──────
-    fun queries(context: Context): List<AppSalQuery> =
+    @Synchronized fun queries(context: Context): List<AppSalQuery> =
         runCatching {
             val arr = JSONArray(prefs(context).getString(KEY_QUERIES, "[]") ?: "[]")
             (0 until arr.length()).mapNotNull { i ->
@@ -63,7 +63,7 @@ object QaLensAppSal {
             }
         }.getOrDefault(emptyList())
 
-    fun setQueries(context: Context, list: List<AppSalQuery>) {
+    @Synchronized fun setQueries(context: Context, list: List<AppSalQuery>) {
         val arr = JSONArray()
         list.forEach {
             arr.put(JSONObject().put("name", it.name).put("db", it.db).put("sql", it.sql))

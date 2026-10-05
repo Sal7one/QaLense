@@ -26,6 +26,55 @@ internal object QaLensDataTools {
         val error: String? = null
     )
 
+    data class DesktopResult(
+        val columns: List<String>, val rows: List<List<String>>, val durationMs: Long,
+        val limited: Boolean, val omittedColumns: Int, val policy: QaLensConfig
+    )
+
+    /** A distinct connection: PC access can never use the Control Room write path. Runs on IO. */
+    fun desktopQuery(context: Context, dbName: String, sql: String,
+        cancellation: android.os.CancellationSignal): DesktopResult {
+        val query = DesktopSqlPolicy.bounded(sql)
+        require(dbName in databases(context)) { "Database unavailable; rescan databases" }
+        val file = context.getDatabasePath(dbName)
+        val directory = context.getDatabasePath("qalens-path-check.db").parentFile?.canonicalFile
+        require(file.name == dbName && file.isFile && file.canonicalFile.parentFile == directory) { "Database path is unavailable" }
+        val start = android.os.SystemClock.elapsedRealtime()
+        cancellation.throwIfCanceled()
+        return SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            check(db.isReadOnly) { "Read-only database unavailable" }
+            db.rawQuery(query, null, cancellation).use { cursor ->
+                val config = QaLens.config.value
+                val rawColumns = cursor.columnNames.take(30)
+                val columns = rawColumns.map { config.redact(it).take(200) }
+                val rows = mutableListOf<List<String>>()
+                var remaining = 60_000
+                var limited = false
+                while (cursor.moveToNext()) {
+                    cancellation.throwIfCanceled()
+                    if (rows.size == 100 || remaining <= 0) { limited = true; break }
+                    val values = rawColumns.indices.map { i ->
+                        val raw = when (cursor.getType(i)) {
+                            android.database.Cursor.FIELD_TYPE_NULL -> "NULL"
+                            android.database.Cursor.FIELD_TYPE_BLOB -> "[binary value]"
+                            else -> cursor.getString(i).orEmpty()
+                        }
+                        // Mask using the original column name before any preview truncation.
+                        val safe = DataValuePreview.sanitize(mapOf(rawColumns[i] to raw), config).values.first()
+                        val budget = minOf(512, remaining).coerceAtLeast(0)
+                        val cell = if (safe.length > budget) { limited = true; safe.take(budget) + "…" } else safe
+                        remaining -= minOf(budget, safe.length)
+                        cell
+                    }
+                    rows += values
+                }
+                QaLens.breadcrumb("Desktop SQL read: ${rows.size} preview rows")
+                DesktopResult(columns, rows, android.os.SystemClock.elapsedRealtime() - start,
+                    limited, (cursor.columnCount - columns.size).coerceAtLeast(0), config)
+            }
+        }
+    }
+
     /** The app's SQLite databases (journal/wal/shm side-files filtered out). */
     fun databases(context: Context): List<String> =
         context.databaseList()

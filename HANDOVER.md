@@ -48,6 +48,50 @@ assuming a named class or public signature is unchanged.
 
 ## Latest local verification
 
+### Desktop live diagnostics, decoded values, clip notes and SQL — 2026-10-05
+
+The selected desktop improvements are implemented: a collapsible Landing Network/Logs/App values
+panel with search, Errors only and opt-in two-second Follow/Pause; decoded cache/status, ten pinned
+fields and comparison baselines; bug notes attached to existing clip marks/master evidence; and a
+separate Data tools page for read-only SQLite/Room, tables, shared phone saved queries and cancellation.
+`tools/local-bridge/diagnostics.js` owns this UI/memory state; `QaLensBridgeDataTools` owns bounded
+cached data, optional file/preference snapshots and async SQL jobs. No new public facade/no-op
+subscription or `.sal` schema. Update/reinstall the host SDK, restart Python and refresh the browser.
+
+DataStore backing files are metadata, not decoded values. Binary does not necessarily mean
+encryption; the existing host-owned decoded Flow/serializer remains the integration path. Cache
+responses retain at most 30 sources, 300 fields / 100k field characters, with omissions/status.
+Network/logs retain 100 each; dashboard omissions are not complete recording coverage. Body previews
+require existing host opt-in. Pins/comparisons/results stay in memory and invalidate on detected
+privacy/config/connection changes; paused views cannot know about later host changes until refreshed.
+
+Desktop SQL uses a distinct `OPEN_READONLY` connection and wrapped SELECT/CTE reads, catalog IDs and
+resolved own-directory boundaries. A ten-second watchdog signals cancellation; one active job/result,
+100 rows / 30 columns / 512-char cells / 60k cell characters and five-minute expiry bound it. It does
+not hold the bridge socket or a main-thread stop monitor while querying/redacting. SQLite/file-open
+behavior may delay cancellation completion. Existing Control Room writes remain explicit/separate.
+Shared saved-query mutations preserve other entries; Control Room entry/Rescan refreshes them.
+Raw SQL aliases/business data still need host policy. Source/literals are not logged in SQL crumbs.
+
+Local verification passes 240 units (183/37/17/3), Compose/Android/sample lint with zero errors,
+sample debug/test/release/isolation and independent consumer debug/release/isolation. All 42 Python
+tests, five desktop JS suites/syntax and web-reader/CLI pass. API 36 `desktopDataOnly` passes real
+WAL reads, actual Preferences DataStore initial/Control Room foreground updates, key/text masks,
+preference/envelope metadata, typed writes/multi-statements/path rejection, bounded blobs/rows,
+saved-query identity, cancellation/timeout, responsive main/socket, privacy invalidation and disable/
+restart. The initial full-path-equality check incorrectly refused the emulator preference path;
+resolved parent-directory containment fixes it. `desktopCaptureOnly` confirms bug notes in the master
+marks and clip analysis using actual v2 GZIP tracks, alongside recorder/screenshot/consent checks.
+`dataUiOnly` and the full Android runner pass existing Control Room/data/OSS/bridge/privacy/replay/
+recording/traffic cases. These are synthetic device/build checks, not consuming-app certification.
+
+The new panel/page has executable DOM/controller regressions, but its live visual browser check
+is **unverified**: the UI tool reported a locked Mac and no browser surface; opening the local panel
+was queued. Prior mirror/capture browser coverage below does not certify these new views. The manual
+`desktopDataGuiSeconds` fixture and acceptance steps are in CONTRIBUTING/desktop guide. Physical
+phones, other serializers/encryption/OS/Compose, the consuming app's ANR/HD behavior and hour-long
+endurance remain separate. No real recordings, generated files or local credentials are committed.
+
 ### Desktop mirror and capture workspace — 2026-10-05
 
 Landing now places mirror → selected element → smaller semantics tree in independently adjustable

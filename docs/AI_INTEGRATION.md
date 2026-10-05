@@ -190,6 +190,22 @@ Keep the installed host and Python/browser protocol versions aligned. Rebuild/re
 QA APK when changing the SDK artifact; restart Python and refresh the browser when updating it.
 Source edits alone do not replace an old Maven cache or installed APK.
 
+Connect **Landing → Live diagnostics** to the host's existing network/log adapters; Follow/Pause
+reads bounded dashboard caches, not all traffic. Desktop does not enable body capture. **App values**
+reads the same decoded cache/status as Control Room; verify search, pinned comparisons, policy
+masking and an actual allowed setting change while the mirror is used. Empty metadata-only
+DataStore is an integration gap, not a reason to create another instance/file reader. Use the
+Application/DI-owned decoded Flow with `observeDataStoreValues`; map only approved keys. For Room,
+`observeRoom` records invalidations, while cached `registerDataSource` fields expose selected state
+without running a database query on main. See [app data](APP_DATA.md).
+
+**Data tools** uses standard app SQLite/Room files on a distinct read-only connection. Validate
+table selection, bounded masked cells, shared saved reads and Cancel on disposable data; unreadable
+encrypted/custom formats require decoded host snapshots. Stop/disable cancels jobs and clears
+cached results. A ten-second watchdog requests cancellation; it does not promise filesystem reads
+always complete in ten seconds. Control Room write tools are separate. Test a desktop clip with a
+bug note and inspect both the master BUG mark and clip `analysis.json` label after Stop.
+
 ### 6. Validate capture and optional team setup
 
 Start with private, masked frame recording and synthetic data. Record, mark a short clip, keep

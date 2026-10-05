@@ -118,4 +118,57 @@ class ControlsTests(unittest.TestCase):
             self.assertEqual(list(self.bench.desktop.transfers.iterdir()), [])
         finally: device.shutdown(); device.server_close()
 
+    def test_live_data_and_sql_reads_mutations_keep_connection_nonce_and_phone_auth(self):
+        calls = []
+        class Device(BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(inner):
+                self.assertEqual(inner.headers['Authorization'], 'Bearer synthetic-token')
+                calls.append((inner.path, None))
+                data = b'{"ok":true,"policyId":1}'
+                inner.send_response(200); inner.send_header('Content-Length', str(len(data))); inner.end_headers(); inner.wfile.write(data)
+            def do_POST(inner):
+                self.assertEqual(inner.headers['Authorization'], 'Bearer synthetic-token')
+                data = json.loads(inner.rfile.read(int(inner.headers['Content-Length'])))
+                calls.append((inner.path, data))
+                payload = b'{"ok":true,"phase":"running","id":"query-id"}'
+                inner.send_response(200); inner.send_header('Content-Length', str(len(payload))); inner.end_headers(); inner.wfile.write(payload)
+        device = HTTPServer(('127.0.0.1', 0), Device)
+        threading.Thread(target=device.serve_forever, daemon=True).start(); self.server.device_port = device.server_port
+        try:
+            old = dict(self.headers, **{'X-Qalens-Connection': 'old'})
+            for route in ('events', 'data', 'sql'):
+                self.assertEqual(self.request('/api/' + route, headers=old)[0], 409)
+                self.assertEqual(self.request('/api/' + route, headers={})[0], 401)
+                code, data, _ = self.request('/api/' + route)
+                self.assertEqual(code, 200); self.assertEqual(json.loads(data)['connectionId'], self.bench.connection_id)
+            for command in ({'action': 'start', 'database': 'opaque', 'sql': 'SELECT 42'}, {'action': 'status', 'id': 'query-id'}, {'action': 'cancel', 'id': 'query-id'}):
+                code, data, _ = self.request('/api/sql', command)
+                self.assertEqual(code, 200); self.assertEqual(json.loads(data)['connectionId'], self.bench.connection_id)
+            self.assertEqual([c[0] for c in calls], ['/v1/events', '/v1/data', '/v1/sql'] + ['/v1/sql'] * 3)
+            self.assertEqual(list(self.bench.root.glob('*.json')), [])
+        finally: device.shutdown(); device.server_close()
+
+    def test_interrupted_json_and_phone_errors_stay_actionable_without_retries(self):
+        calls = []
+        class Device(BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(inner):
+                calls.append(inner.path)
+                data = b'{"ok":true}'
+                inner.send_response(200); inner.send_header('Content-Length', str(len(data) + 100)); inner.end_headers(); inner.wfile.write(data)
+            def do_POST(inner):
+                calls.append(inner.path)
+                inner.rfile.read(int(inner.headers['Content-Length']))
+                data = b'{"ok":false,"error":"Query expired; run it again"}'
+                inner.send_response(404); inner.send_header('Content-Length', str(len(data))); inner.end_headers(); inner.wfile.write(data)
+        device = HTTPServer(('127.0.0.1', 0), Device)
+        threading.Thread(target=device.serve_forever, daemon=True).start(); self.server.device_port = device.server_port
+        try:
+            self.assertEqual(self.request('/api/data')[0], 502)
+            code, data, _ = self.request('/api/sql', {'action': 'status', 'id': 'old'})
+            self.assertEqual(code, 404); self.assertEqual(json.loads(data)['error'], 'Query expired; run it again')
+            self.assertEqual(calls, ['/v1/data', '/v1/sql'])
+        finally: device.shutdown(); device.server_close()
+
 if __name__ == '__main__': unittest.main()

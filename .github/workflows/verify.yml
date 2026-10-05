@@ -48,9 +48,11 @@ jobs:
           python3 tools/local-bridge/test_controls.py
           node --check tools/local-bridge/app.js
           node --check tools/local-bridge/mirror-controls.js
+          node --check tools/local-bridge/diagnostics.js
           node tools/local-bridge/test_recording_transfer.js
           node tools/local-bridge/test_polling.js
           node tools/local-bridge/test_selectors.js
           node tools/local-bridge/test_mirror.js
+          node tools/local-bridge/test_diagnostics.js
       - name: Backend regression tests
         run: python3 backend/tests/test_backend.py

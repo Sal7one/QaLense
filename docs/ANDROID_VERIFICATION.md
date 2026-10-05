@@ -1,5 +1,28 @@
 # Android verification — 2026-10-04
 
+## Desktop live data and SQL addendum — 2026-10-05
+
+API 36 `desktopDataOnly` passes actual decoded Preferences DataStore initial/foreground updates,
+bounded redacted log/network/body observations, explicit plain preference snapshots/envelope guidance
+and metadata-only DataStore files. A real WAL database verifies read-only SELECT/CTE, write/PRAGMA/
+ATTACH/multi-statement/path rejection, 100 retained rows/blob placeholders, shared saved-query IDs,
+cancel/ten-second watchdog and responsive main/socket. Privacy changes invalidate previous results;
+disable/Stop/restart clears the job. The resolved-directory check handles the emulator preference
+path after the first full-path-equality refusal. Synthetic envelope markers are not cryptography.
+
+`desktopCaptureOnly` additionally decodes saved v2 GZIP `marks.json` and `analysis.json`, confirming
+the exact bug note in the master mark and exported clip. `dataUiOnly` and the full Android runner
+pass existing shared Control Room/Room/DataStore/recording/bridge/OSS/privacy/replay/traffic cases.
+Local checks pass 240 units (183/37/17/3), Compose/Android/sample lint with zero errors, sample and
+independent consumer build/release-isolation gates, 42 Python tests and five desktop JS suites/syntax
+plus web-reader/CLI. SDK public facade/no-op subscription and `.sal` format stay unchanged.
+
+Live visual acceptance for the new desktop diagnostics/Data tools views is unverified: desktop UI
+access reported locked Mac/no browser. Prior mirror/capture browser checks below remain separate.
+Use the documented disposable `desktopDataGuiSeconds` fixture; see [commands](../CONTRIBUTING.md#focused-device-checks).
+Physical phones, other runtimes/encryption/serializers, full-hour endurance and real consuming-app
+ANR/HD behavior remain separate acceptance work.
+
 ## Desktop capture addendum — 2026-10-05
 
 The focused `desktopCaptureOnly` runner passes on API 36 with the actual SDK socket protocol and

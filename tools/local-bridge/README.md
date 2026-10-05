@@ -5,7 +5,8 @@ tags, text, roles and actions, and link selections between the phone and browser
 QaLens XPath, highlight components and invoke public tap/type/scroll actions. Read a selected
 component's attributes and tree position, save deduplicated JSON,
 and run your own processors. Control the phone mirror, record sessions/bug clips and capture masked
-screenshots from Landing. Python standard library only; no Appium server or extra Android
+screenshots from Landing. Search live network/logs, compare decoded app values and run read-only SQL
+from Data tools. Python standard library only; no Appium server or extra Android
 library is required. Release builds still use `qalens-noop`.
 
 Start with [ONBOARDING.md](../../ONBOARDING.md) for the SDK/web/Python overview. This guide owns
@@ -33,6 +34,7 @@ Open **http://127.0.0.1:8765**. **Landing** discovers authorized phones and inst
 Choose the phone/app, click **Connect**, then **Approve desktop** on the phone. No token copying,
 custom host Settings or sample-app code is needed. The SDK Control Room asks for access to Compose
 inspection/actions, observations, completed recordings and explicit recording/clip/screenshot commands.
+It also discloses decoded values, explicit preference/SQLite reads and shared saved-query management.
 Approval does not start recording. HD also needs host opt-in and Android's separate consent. Approval
 returns to the host app. Connecting remembers a profile and preserves app data.
 
@@ -180,6 +182,75 @@ update. Verify the app state before repeating an uncertain input. A rotation/nav
 after the latest sample remains subject to sampling latency. **Fast mirror** opens installed scrcpy
 in its own window when available; the embedded sampled preview is not a video stream.
 
+### Live diagnostics
+
+Open **Live diagnostics · Network, Logs & App values** below the mirror workspace. It reads a
+snapshot when opened or switched; **Follow live** refreshes the selected view every two seconds.
+**Pause live** freezes the display. Closed panels, other pages and hidden browser tabs do not poll.
+Search stays local to the bounded snapshot. Network/Logs offer **Errors only**; network failures
+use status/error fields, while log severity is inferred from message/tag text because the existing
+SDK log model has no structured severity. Follow scrolls only when already at the bottom, preserving
+manual browsing. Network details show request time/status/duration/connectivity/byte counts and
+host-approved redacted body previews. Desktop never enables body capture for you.
+
+The bridge offers the last 100 retained dashboard network requests and last 100 retained logs.
+Omission counters describe older entries still in the dashboard, not every earlier queue eviction.
+This is recent debugging evidence, not an uninterrupted recording or all phone logcat traffic.
+Connect the existing OkHttp/Chucker/log adapters in the host; an empty view cannot prove success.
+
+**App values** uses the host's cached decoded fields, including `observeDataStoreValues` and
+`registerDataSource` snapshots. Search source/key/value, pin up to ten fields, and compare current
+values with the first read or **Set comparison baseline**. Changed rows show their previous value;
+new/missing fields are described without claiming a database deletion. WAITING/LIVE/PAUSED/STOPPED/
+ERROR source status and last-received time distinguish a hook from a live update guarantee.
+Pins/baselines/rows stay in memory and reset on connection loss/change or detected config/privacy
+change. They do not create files or force a host provider/database read on main.
+When a hook masks a field without changing global config, its previous plaintext baseline is
+also removed; comparison must not reveal a value the current snapshot has masked.
+
+Values are bounded to 30 sources, 100 fields per source and 300 fields / 100,000 key/value characters
+overall; omitted counts are explicit. Global rules and credential-like keys are masked before
+preview truncation. Custom Room/Proto/encrypted stores expose fields through their existing decoded
+owner. A `.preferences_pb` file is binary, not necessarily encrypted; an IDE decoder does not give
+QaLens the app's serializer or keys. File-only stores have metadata and integration guidance under
+Data tools. See [host data hooks](../../docs/APP_DATA.md).
+
+### SQL workbench and storage
+
+**Data tools** lists the connected app's SQLite databases and queries shared with **Control Room**.
+Choose a database, **List tables**, load a quoted table query or type `SELECT` / `WITH … SELECT`,
+then **Run read query**. The PC uses a distinct Android `OPEN_READONLY` connection, accepts only
+wrapped result-producing reads, confines resolved files to the app's own database directory and
+does not expose PRAGMA/ATTACH/writes. Control Room's existing explicit write tools stay separate.
+Room needs no new dependency; nonstandard/encrypted SQLite formats need decoded host snapshots.
+
+Reads run on an IO worker as one asynchronous job; the bridge can continue serving other commands.
+**Cancel query**, leaving the page, hiding the tab or SDK Stop/disable requests cancellation.
+A ten-second watchdog signals cancellation; the next read waits for that worker to finish. Native
+SQLite/file-open behavior can delay completion, so Cancel is not a fixed completion-time guarantee.
+Only one current job/result is retained, expiring after five minutes or bridge Stop. Stale job IDs,
+device switches and late start/status replies cannot populate another phone's results. No command
+is automatically retried. A lost client response can leave a read until the native watchdog runs.
+
+Results show at most 100 rows, 30 columns, 512-character cells and 60,000 cell characters overall;
+the UI reports bounded/truncated previews and scrolls both axes. Binary values get a placeholder.
+Credential-like column names and current text rules mask cells before truncation; aliases and
+ordinary business data still require deliberate queries/host policy. Config changes invalidate old
+results; run the query again. SQL source/literals are not added to the recording breadcrumb.
+
+**Save on phone** stores the name/database/SQL in the existing app-local saved query list (50 maximum
+from desktop). These appear in Control Room on entry or **Rescan** and `.appsal` export. Names cannot
+silently overwrite a query; Load does not execute it, and existing writes still fail in desktop.
+Masked saved SQL cannot be loaded as executable text. **Delete saved query** removes only the current
+matching content ID. Do not put secrets in saved literals. Desktop never persists rows/live values.
+
+**Show storage files** is explicit. Standard preference files offer a redacted snapshot and exclude
+`qalens*` settings; recognized AndroidX encrypted envelopes show decoded-hook guidance, not ciphertext.
+Other encryption schemes cannot be reliably inferred. Standard DataStore files show names/sizes
+only; custom locations may be absent. File targets use opaque IDs from a fresh catalog and resolved
+directory checks; there is no arbitrary path/file reader. Rebuild/reinstall the host SDK, restart
+Python and refresh the browser when adopting these endpoints; older SDKs get update guidance.
+
 ### Recording, clips and screenshots
 
 Use **Frames** for the existing permission-free masked recorder, or **HD** when the host has enabled
@@ -195,6 +266,11 @@ recording. The clip ends at the mark, is capped by captured history, and exports
 it is not immediately playable mid-recording. At most 20 marks per session, with existing evidence/
 media budgets and omission reporting. Failed deferred clip processing can leave fewer exported clips
 than marks. See [recording clips](../../docs/RECORDING_CLIPS.md).
+
+Enter **What went wrong?** before Mark clip to attach a note (up to 256 characters). Current host
+redaction applies; the note becomes a BUG mark in the master timeline and the clip's label in
+`analysis.json`. It does not stop capture or change archive format. Empty notes use the duration
+label. Successful marks clear the submitted note; a newly edited note or failed request is retained.
 
 **Watch latest**, a phone recording's **Watch**, and PC library replay reuse the existing web player.
 **Replay after Stop** is an explicit opt-in for that browser connection: wait for the exact master
@@ -325,7 +401,11 @@ This trusts the local OS/adb environment; it is not a remotely exposed or multi-
 | `GET /api/selection` | `/v1/selection`: cached selected ID, no Compose walk |
 | `POST /api/selectors` | `/v1/selectors`: `{id}` → suggestions, match counts and redacted QaLens XML |
 | `POST /api/query` | `/v1/query`: `{xpath}` → current visible matches and omission counts |
-| `GET /api/events` | `/v1/events`: last 100 observations/network entries and cached data |
+| `GET /api/events` | `/v1/events`: last 100 observations/logs/network entries, time/error/preview details and bounded cached data |
+| `GET /api/data` | `/v1/data`: redacted cached fields/source status, omissions and privacy revision |
+| `POST /api/data` | `/v1/data`: `{action:"files"}` for metadata; `{action:"preferences",id}` for an explicit snapshot |
+| `GET /api/sql` | `/v1/sql`: database opaque IDs/display names, shared saved-query IDs/SQL and limits |
+| `POST /api/sql` | `/v1/sql`: `{action:"start",database:<id>,sql}`, `{action:"status"|"cancel",id}`, `{action:"save",database:<id>,name,sql}` or `{action:"delete",id}` |
 | `POST /api/command` | `/v1/command`: one of `{action,id}`, `{action,tag}`, `{action,xpath}`; tap/type/scroll/select |
 | `POST /api/component` | `/v1/component`: `{id}` or `{tag}`, returns a component preview |
 | `GET /api/inbox` | `/v1/components/inbox` + `/ack`: bounded phone selections → PC previews |
@@ -337,8 +417,10 @@ This trusts the local OS/adb environment; it is not a remotely exposed or multi-
 
 Duplicate tags return 409; absent/hidden/off-screen targets 404; unsupported/disabled/declined actions
 409. Scroll deltas are pixels <=10,000 magnitude; type text <=4096 characters. Refresh live IDs
-before use. Recent diagnostics contain no network bodies and use cached, host-registered data;
-providers/Room are not queried on demand. Empty tracks do not establish complete coverage.
+before use. Recent diagnostics include body previews only when the host already enables
+`captureNetworkBodies`; they are redacted and bounded to 2,048 characters on the bridge. Cached
+values do not invoke providers or query Room on demand. SQL is a separate explicit read. Empty
+tracks do not establish complete coverage.
 
 Device headers/body: 8 KiB / 16 KiB; snapshot <=1000 nodes (`omittedNodes`); responses <=4 MiB.
 PC component import <=256 KiB + envelope, other bodies <=16 KiB. Live semantics stay on main;

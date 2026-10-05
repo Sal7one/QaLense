@@ -31,10 +31,12 @@ python3 tools/local-bridge/test_desktop.py
 python3 tools/local-bridge/test_controls.py
 node --check tools/local-bridge/app.js
 node --check tools/local-bridge/mirror-controls.js
+node --check tools/local-bridge/diagnostics.js
 node tools/local-bridge/test_recording_transfer.js
 node tools/local-bridge/test_polling.js
 node tools/local-bridge/test_selectors.js
 node tools/local-bridge/test_mirror.js
+node tools/local-bridge/test_diagnostics.js
 ```
 
 The consumer fixture resolves normal `com.qalens:*` coordinates through `includeBuild`; it catches
@@ -93,12 +95,31 @@ adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e desktopCaptureOnly true 
 ```
 
 Require `OK: Desktop recording/clip commands` and no `FAIL:`. It exercises frame Start/Stop/clip
-exports, host HD rejection, awaiting-consent cancellation, authenticated commands, PixelCopy PNG
+exports and bug-note master/clip tracks, host HD rejection, awaiting-consent cancellation, authenticated commands, PixelCopy PNG
 decoding/password masks, secure windows, exact overlay visibility and screenshot completion racing
 phone recording Start/Stop. It is separate from the full runner. For actual browser HD QA, the same
 runner accepts `-e desktopGuiHoldSeconds 300`: a temporary sample-only HD opt-in, normal app UI and
 ordinary phone pairing/OS consent. It restores HD policy/access on expiry and does not assert
 browser results itself. See the [desktop guide](tools/local-bridge/README.md#mobile-gestures-and-verification).
+
+Desktop live data and read-only SQL have a separate real-protocol runner:
+
+```sh
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e desktopDataOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: Desktop live evidence/decoded DataStore` and no `FAIL:`. It owns a real Preferences
+DataStore and WAL SQLite database, verifies initial/foreground decoded updates, body/log masking,
+standard preference/envelope coverage, read-only/write/multi-statement/path rejection, bounded
+rows/blobs, shared saved-query identity, cancellation/timeout, responsive bridge/main, privacy
+invalidation and Stop/disable/restart. No original consuming app or cryptography is exercised.
+For manual browser QA, `-e desktopDataGuiSeconds 300` holds normal sample UI with the decoded store,
+synthetic logs/network updates every eight seconds and a disposable database/preferences. Connect
+and approve normally; verify Follow/Pause, search/Errors only, pin/comparison, SQL tables/results/
+saved queries/cancel and optional file guidance. Expiry restores config/queries and removes only
+fixture stores/files. This is test-APK code, absent from the SDK/release. It does not assert the
+browser UI itself. Keep GUI checks distinct from protocol and no-op build evidence.
 
 Control Room SQL and real decoded Preferences DataStore have a focused UI runner:
 

@@ -127,7 +127,15 @@ cancels pending dispatch. Already running synchronous host handlers cannot be sa
 
 `tools/local-bridge/server.py` binds PC loopback, creates/removes only its own adb forward and proxies
 fixed authenticated endpoints to the desktop tree/bounds, component and recording UI. JSON/redaction remain off main;
-cached observations never query host databases/providers on demand. This is live debug automation,
+cached observations never query host databases/providers on demand. Explicit desktop SQL is a
+separate IO job using a read-only app-owned SQLite connection: bounded rows/cells, cancellation,
+ten-second cancellation watchdog, one retained result and five-minute expiry. Its start/status/cancel
+requests release the socket; Stop/disable clears the result and signals the worker. Database/prefs
+targets use opaque catalog IDs and resolved own-directory boundaries. Explicit preference snapshots
+mask full values; DataStore files remain metadata. Cached decoded values/status come from the host's
+existing Flow/provider and have global budgets. `diagnostics.js` owns memory-only Follow/Pause,
+search, pinned comparisons and SQL UI; no copied viewer, provider invocation or arbitrary file reader.
+This is live debug automation,
 not an archive-format change or a company service. The release no-op exposes identical facade APIs
 without transport work. Pairing tokens are memory-only and host-owned.
 
