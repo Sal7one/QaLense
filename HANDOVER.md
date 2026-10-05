@@ -4,8 +4,8 @@ Updated 2026-10-05. Read this before changing the repository. [ONBOARDING.md](ON
 the user/integrator overview; [AI integration](docs/AI_INTEGRATION.md) is the host-agent work order;
 [next.md](next.md) is the only current backlog;
 [CONTRIBUTING.md](CONTRIBUTING.md) owns portable build/device commands. This handover records
-the current engineering baseline, including Control Room app values, the simplified overlay and
-recording-control fixes below. Git and CHANGELOG retain earlier history.
+the current engineering baseline, including Compose host compatibility, overlay navigation,
+Control Room app values and recording-control fixes below. Git and CHANGELOG retain earlier history.
 Check the working tree, remote branches and CI before assuming publication or validation state.
 
 ## Product and priorities
@@ -47,6 +47,43 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Compose host compatibility and quick actions — 2026-10-05
+
+The reported Control Room failure was reproduced in the independent consumer with the SDK
+compiled against Foundation 1.7.6 and the host packaging runtime 1.8.2: `FlowRow` `NoSuchMethodError`
+at 330/304/564. Foundation changed that experimental binary signature. Rescue, saved recording
+and configuration groups now use a small stable Compose UI `Layout`, with relative placement for
+RTL; no host dependency override or experimental `FlowRow` call remains. Small Control Room
+buttons have a real 48 dp minimum touch size so expanded touch bounds do not overlap between rows.
+The consumer's optional `qaComposeRuntime` changes only its debug/test runtime resolution, keeping
+the SDK compile baseline unchanged; CI compiles the native consumer fixture, not a device run.
+
+Quick actions is wider and has a fixed Review evidence link above the scrolling list; Review
+has a wide Quick actions return control. Report/Refresh use centered compact labels and minimum
+48 dp height. Inspect elements and Inspect tags are distinct destinations; tags have an inset-safe
+named Done button and system Back. Frame and HD recording are two equal side-by-side buttons.
+HD stays disabled without host unmasked-video opt-in and still requires Android consent. Stop and
+saving states remain explicit. No SDK API, `.sal` schema or production privacy default changed.
+
+The focused `quickVideoOnly` test uses the actual quick HD button, real test-approved Android
+consent, native REC Stop and a decoded saved MP4. Its consent helper connects accessibility before
+starting concurrent checks and scrolls the OS dialog when necessary. These are disposable test
+controls, absent from the SDK. [Mobile overlay](docs/MOBILE_OVERLAY.md), the
+[consumer fixture](integration-tests/consumer/README.md) and
+[Android matrix](docs/ANDROID_VERIFICATION.md) own the commands and executed coverage.
+
+Local checks pass 238 units (183/35/17/3), Compose/sample lint with zero errors, sample
+debug/test/release/isolation and independent consumer debug/release/isolation plus newer-runtime
+debug/test builds. The newer-runtime consumer, overlay workflow and quick-button HD decoder all
+pass on API 36 at normal display and 360×640 dp / 150% font / three-button navigation. SQL/data UI
+passes both displays; bridge/privacy/LTR/RTL/two-finger checks also pass the small setup. Private
+screenshots were inspected and display/font/navigation restored. The full Android runner passes
+retention/privacy/Room/DataStore/OSS/inspection/bridge/SQL/macros/replay/webhook and continuous
+traffic; the load case measured 2,452 background iterations and an 8 ms worst main heartbeat.
+These synthetic checks do not certify host responsiveness, other Compose/OS versions, physical
+TalkBack or the separate consuming-app HD crash. Web/Python/backend/endurance checks were not
+rerun for this Android UI change.
 
 ### Control Room SQL and app data — 2026-10-05
 
@@ -436,7 +473,9 @@ claim is made for crash/power-loss recovery of unsaved journals.
 ## Build and publication state
 
 Tested toolchain: JDK 17, Kotlin 2.0.21, AGP 8.7.3, compile/target SDK 35, minimum SDK 23,
-Compose BOM 2024.12.01 / runtime 1.7.8, Gradle 9.1.0. Android modules use JUnit4.
+Compose BOM 2024.12.01 / sample runtime 1.7.8, Gradle 9.1.0. Android modules use JUnit4.
+The active SDK's Foundation compile dependency resolves to 1.7.6; the independent Control Room
+fixture also passes with consumer runtime 1.8.2 without recompiling the SDK against that version.
 The wrapper and CI request the tested Gradle version; other versions are not automatically verified.
 Use the [contributor commands](CONTRIBUTING.md); set host paths through local environment variables.
 Serialize Gradle processes sharing this checkout. Earlier work used atomic
@@ -454,8 +493,8 @@ merging; this handover does not authorize merging a branch. Default coordinates 
 `com.qalens:<module>:0.9.0` with a `-PqalensVersion` override. `qalensDist` builds a local Maven
 repository; `scripts/release_internal.sh --verify` packages/checks it. Public artifact publication
 and an authenticated company backend are separate work.
-GitHub CI for `ecc2d21` completed successfully in
-[run 37259923113](https://github.com/Sal7one/QaLense/actions/runs/37259923113). That result covers
+GitHub CI for `af8713e` completed successfully in
+[run 37263246027](https://github.com/Sal7one/QaLense/actions/runs/37263246027). That result covers
 that implementation revision; inspect the current HEAD's run separately.
 
 ## Documentation ownership

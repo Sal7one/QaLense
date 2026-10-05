@@ -34,6 +34,8 @@ jobs:
           :sample-app:assembleDebugAndroidTest :sample-app:verifyReleaseIsolation
       - name: External consumer integration
         run: gradle -p integration-tests/consumer assembleDebug assembleRelease verifyReleaseIsolation
+      - name: Compile newer-runtime consumer device fixture
+        run: gradle -p integration-tests/consumer -PqaComposeRuntime=1.8.2 assembleDebug assembleDebugAndroidTest
       - name: Web reader and CLI regression tests
         run: node web/test/read.test.js
       - name: Local PC bridge regression tests

@@ -49,6 +49,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var pcPairingOnly = false
     private var pcUiOnly = false
     private var workflowOnly = false
+    private var quickVideoOnly = false
     private var dataUiOnly = false
     private var replayOnly = false
     private var videoRecoveryOnly = false
@@ -70,6 +71,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         pcPairingOnly = arguments?.getString("pcPairingOnly") == "true"
         pcUiOnly = arguments?.getString("pcUiOnly") == "true"
         workflowOnly = arguments?.getString("workflowOnly") == "true"
+        quickVideoOnly = arguments?.getString("quickVideoOnly") == "true"
         dataUiOnly = arguments?.getString("dataUiOnly") == "true"
         replayOnly = arguments?.getString("replayOnly") == "true"
         videoRecoveryOnly = arguments?.getString("videoRecoveryOnly") == "true"
@@ -101,9 +103,15 @@ class RecordingRetentionInstrumentation : Instrumentation() {
                 result.putString("stream", "\nOK: Overlay tag search selects the host component and copies validated QaLens XPath; linked browser checkpoints pass when enabled.\n")
                 finish(android.app.Activity.RESULT_OK, result); return
             }
-            if (controlVideoOnly || videoOnly || videoDenyOnly || videoRecoveryOnly) {
+            if (controlVideoOnly || videoOnly || videoDenyOnly || videoRecoveryOnly || quickVideoOnly) {
                 consent = ProjectionConsentChecks.start(this, projectionConsent)
             } else require(projectionConsent == null) { "projectionConsent requires a focused video mode" }
+            if (quickVideoOnly) {
+                TesterWorkflowChecks(this).quickVideo()
+                consent?.get(1, java.util.concurrent.TimeUnit.SECONDS)
+                result.putString("stream", "\nOK: Quick actions HD button starts consent-approved video; REC Stop saves a decodable HD archive.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             if (videoRecoveryOnly) {
                 RecordingClipChecks(this).backgroundVideoStop()
                 consent?.get(1, java.util.concurrent.TimeUnit.SECONDS)

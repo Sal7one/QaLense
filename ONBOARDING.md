@@ -181,9 +181,13 @@ results. See the [app data guide](docs/APP_DATA.md) for integration and QA accep
 
 ## Record and mark a bug
 
-Open the QA bubble for **Record a session**, **Screenshot**, **Mark a bug** or **Inspect elements**.
+Open the QA bubble for side-by-side **Record / Record HD**, **Screenshot**, **Mark a bug**,
+**Inspect elements** or **Inspect tags**. HD requires the app's unmasked-video opt-in and Android
+consent. Tags draws visible automation tags on the app; tap a component to copy, then Done to exit.
 **Review evidence** provides Activity/Network/Logs/Elements/Device; **Connect to PC** opens
 connection guidance, and **Control Room** provides recordings and configuration.
+Quick actions keeps **‹ Review evidence** above its scrolling list; evidence keeps a wider
+**‹ Quick actions** control, so neither screen requires scrolling to return.
 Mark a bug adds a timestamped breadcrumb and screenshot; it does not create a ticket.
 See the [mobile overlay guide](docs/MOBILE_OVERLAY.md) for the current menus. Recording saves
 locally first. Stop from the REC control or the available recording controls, then replay/share/send.

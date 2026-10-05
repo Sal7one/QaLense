@@ -58,6 +58,14 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
             quickCapture()
             diagnosticPanels()
             val archive = macroCapture(activity)
+            // The synthetic macro leaves its host text field focused. Finish that editing
+            // task before checking the separate upload UI on a short, large-font viewport.
+            if (automation.windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }) {
+                check(automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+                await("Macro keyboard did not dismiss") {
+                    automation.windows.none { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                }
+            }
             configRoundTrip()
             profileUpload(archive)
             replay(archive)
@@ -106,6 +114,15 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
             thread = "fixture", throwable = "Synthetic overlay failure", stackTrace = "SyntheticStack.fixture(Overlay.kt:1)")) }
         click("Review evidence")
         await("Review evidence did not open") { !QaLens.state.value.minimalPanel && find("Close diagnostics")?.isVisibleToUser == true }
+        assertActionSize("Back to quick actions", minWidth = 140, maxHeight = 76)
+        assertActionSize("Copy bug report", minWidth = 140, maxHeight = 76)
+        assertActionSize("Refresh", minWidth = 72, maxHeight = 76)
+        click("Back to quick actions")
+        await("Visible evidence Back did not restore quick actions") { QaLens.state.value.minimalPanel }
+        // Review remains fixed above the scrolled list, so QA can return without scrolling.
+        find("Quick action list")?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+        check(find("Review evidence")?.isVisibleToUser == true)
+        click("Review evidence")
         await("Captured failure was lost from the consolidated activity view") { find("Synthetic overlay failure") != null }
         click("Show stack trace")
         await("Captured stack could not be expanded") { find("SyntheticStack.fixture(Overlay.kt:1)") != null }
@@ -143,6 +160,20 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
         test.runOnMainSync { QaLens.openPanel() }
         check(test.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
         await("Back did not return to quick actions") { QaLens.state.value.minimalPanel && QaLens.state.value.isPanelOpen }
+        click("Inspect elements")
+        await("Quick Inspect elements did not open its own mode") { QaLens.state.value.isInspectMode && !QaLens.state.value.isTagMode }
+        click("Done inspecting")
+        test.runOnMainSync { QaLens.openPanel() }
+        click("Inspect tags")
+        await("Quick Inspect tags did not open its own mode") { QaLens.state.value.isTagMode && !QaLens.state.value.isInspectMode }
+        preview("tags")
+        click("Done inspecting tags")
+        await("Tag Done did not restore app input") { !QaLens.state.value.isTagMode }
+        test.runOnMainSync { QaLens.openPanel() }
+        click("Inspect tags")
+        check(test.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+        await("System Back did not exit tags") { !QaLens.state.value.isTagMode }
+        test.runOnMainSync { QaLens.openPanel() }
         click("Connect to PC")
         await("PC connection screen missing") { find("Manual pairing") != null }
         check(find("PC inspector device port") == null && find("Copy pairing token") == null) { "Manual pairing fields leaked onto the simple connection screen" }
@@ -167,7 +198,19 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
         }
         val archives = QaLens.state.value.recordings.map { it.path }.toSet()
         test.runOnMainSync { QaLens.openPanel() }
-        click("Record a session")
+        await("Frame/HD quick actions did not render") { find("Record frames") != null && find("Record HD video") != null }
+        val frame = checkNotNull(find("Record frames"))
+        val hd = checkNotNull(find("Record HD video"))
+        val a = android.graphics.Rect(); val b = android.graphics.Rect()
+        frame.getBoundsInScreen(a); hd.getBoundsInScreen(b)
+        check(a.top == b.top && a.right <= b.left) { "Frame/HD buttons are not side by side" }
+        var hdAction = hd
+        while (!hdAction.isClickable && hdAction.parent != null) hdAction = hdAction.parent
+        check(!QaLens.config.value.allowUnmaskedVideo && !hdAction.isEnabled &&
+            hdAction.actionList.none { it.id == AccessibilityNodeInfo.ACTION_CLICK }) {
+            "Disabled HD button still permits an accessibility click"
+        }
+        click("Record frames")
         await("Quick Record did not start") { QaLens.state.value.isRecording }
         Thread.sleep(1500)
         // Capture deliberately hides the Compose sheet. QA stops using the visible REC chip.
@@ -176,6 +219,66 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
             !QaLens.state.value.isSavingRecording && QaLens.state.value.recordings.any { it.path !in archives }
         }
         dismissShare()
+    }
+
+    /** Actual quick-action HD button and decoder, with explicit test-only OS approval. */
+    fun quickVideo() {
+        val context = test.targetContext
+        val config = QaLens.config.value
+        val minimal = QaLens.state.value.minimalPanel
+        val video = File(context.cacheDir, "qalens-quick-hd-fixture.mp4")
+        val automation = test.uiAutomation
+        val originalFlags = automation.serviceInfo.flags
+        automation.serviceInfo = automation.serviceInfo.apply {
+            flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        }
+        try {
+            test.startActivitySync(Intent(context, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+            test.runOnMainSync {
+                QaLens.configure { enabled = true; allowUnmaskedVideo = true }
+                QaLens.setPanelMinimal(true); QaLens.openPanel()
+            }
+            val before = QaLens.state.value.recordings.map { it.path }.toSet()
+            await("Recording choices missing") { find("Record frames") != null && find("Record HD video") != null }
+            click("Record HD video")
+            await("Quick HD did not start", 20_000) { QaLens.state.value.isRecording }
+            Thread.sleep(4_000)
+            click("Stop recording, elapsed", contains = true)
+            await("Quick HD did not save", 30_000) {
+                !QaLens.state.value.isSavingRecording && QaLens.state.value.recordings.any { it.path !in before }
+            }
+            val archive = QaLens.state.value.recordings.first { it.path !in before }
+            java.util.zip.ZipFile(archive.path).use { zip ->
+                val entry = checkNotNull(zip.getEntry("video.mp4")) { "Quick HD saved frames instead of HD video" }
+                zip.getInputStream(entry).use { input -> video.outputStream().use { input.copyTo(it) } }
+            }
+            val decoder = android.media.MediaMetadataRetriever()
+            try {
+                decoder.setDataSource(video.path)
+                checkNotNull(decoder.getFrameAtTime(0)) { "Quick HD video did not decode" }.recycle()
+            } finally { decoder.release() }
+            dismissShare()
+        } finally {
+            test.runOnMainSync {
+                QaLens.panicRestore()
+                QaLens.configure { enabled = config.enabled; allowUnmaskedVideo = config.allowUnmaskedVideo }
+                QaLens.setPanelMinimal(minimal)
+            }
+            video.delete()
+            automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags }
+        }
+    }
+
+    private fun assertActionSize(label: String, minWidth: Int, maxHeight: Int) {
+        val bounds = android.graphics.Rect()
+        var button = checkNotNull(find(label))
+        while (!button.isClickable && button.parent != null) button = button.parent
+        button.getBoundsInScreen(bounds)
+        val density = test.targetContext.resources.displayMetrics.density
+        check(bounds.width() >= minWidth * density && bounds.height() in (48 * density).toInt()..(maxHeight * density).toInt()) {
+            "Unreadable or oversized overlay action $label: $bounds"
+        }
     }
 
     private fun macroCapture(activity: MainActivity): File {

@@ -136,16 +136,15 @@ internal fun QaLensInspectorPanel(
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            PanelButton("‹ Actions", accessibilityLabel = "Back to quick actions") { QaLens.setPanelMinimal(true) }
+            PanelButton("‹ Quick actions", accessibilityLabel = "Back to quick actions", modifier = Modifier.width(148.dp)) { QaLens.setPanelMinimal(true) }
             Spacer(Modifier.weight(1f))
             PanelButton("Close", accessibilityLabel = "Close diagnostics", onClick = onClose)
         }
         Text("Review evidence", color = PanelText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Text(state.screen.displayName, color = PanelMuted, fontSize = 12.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PanelButton("Copy bug report", tint = PanelAccent) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PanelButton("Copy bug report", tint = PanelAccent, modifier = Modifier.weight(2f)) {
                 copyAsync("QaLens Bug") {
                     val current = QaLens.state.value
                     val cfg = QaLens.config.value
@@ -154,7 +153,7 @@ internal fun QaLensInspectorPanel(
                     }
                 }
             }
-            PanelButton("Refresh", onClick = onRefresh)
+            PanelButton("Refresh", modifier = Modifier.weight(1f), onClick = onRefresh)
         }
         Spacer(Modifier.height(8.dp))
 
@@ -851,10 +850,10 @@ private fun formatClock(millis: Long): String =
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 @Composable
-private fun PanelButton(label: String, tint: Color = PanelMuted, accessibilityLabel: String? = null, onClick: () -> Unit) {
-    Text(
-        text = label, color = tint, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-        modifier = Modifier
+private fun PanelButton(label: String, tint: Color = PanelMuted, accessibilityLabel: String? = null,
+    modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
             .semantics { accessibilityLabel?.let { contentDescription = it } }
             .clickable(role = Role.Button, onClick = onClick)
             .background(
@@ -863,8 +862,13 @@ private fun PanelButton(label: String, tint: Color = PanelMuted, accessibilityLa
             )
             .border(1.dp, tint.copy(alpha = 0.25f), MaterialTheme.shapes.small)
             .heightIn(min = 48.dp)
-            .padding(horizontal = 10.dp, vertical = 12.dp)
-    )
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = tint, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            maxLines = 2, overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    }
 }
 
 @Composable

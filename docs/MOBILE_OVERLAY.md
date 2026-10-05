@@ -8,10 +8,12 @@ app, without sample-app menus. Configuration and saved recordings live in **Cont
 
 | Action | What happens |
 |---|---|
-| Record a session | Start masked sampled frames and observed activity. The overlay hides during recording; the REC control provides Stop and recent clips. |
+| Record | Start masked sampled frames and observed activity without projection consent. |
+| Record HD | Beside Record; start full-screen video with Android consent when the host permits unmasked video. Disabled otherwise, with the reason shown. |
 | Screenshot | Save an annotated screenshot of the current view. |
 | Mark a bug | Add a timestamped starred breadcrumb and save a screenshot. This does not file a ticket or describe the defect for you. |
 | Inspect elements | Select a visible Compose element on the app; read attributes, tags, supported actions and copy selectors. |
+| Inspect tags | Display all visible automation tags and missing-tag indicators; tap a tagged component to copy its tag. Done or system Back exits. |
 | Review evidence | Browse the five evidence views below; copy a report or observed steps. |
 | Connect to PC | See the desktop connection instructions. Use the desktop's phone/app discovery and approve its request on this phone. Manual pairing is a separate optional section. |
 | Control Room | Replay/share/delete saved recordings; configure HD, team sharing, profiles, macros and explicit data tools. |
@@ -21,7 +23,10 @@ It reports sending, success and failure states. Captures save locally first; exp
 configured retry uploads and opted-in desktop collection have their own destinations. Nothing
 about opening the overlay grants desktop access or changes capture privacy.
 
-The header's Close remains visible while the action list scrolls. Inspection has a movable dock;
+Close and **‹ Review evidence** remain visible above the scrolling quick-action list. Evidence has
+a wider **‹ Quick actions** control for returning directly; Copy bug report/Refresh have compact
+centered labels with 48 dp minimum touch height. Frame/HD buttons remain side by side; capture hides
+the sheet and the REC control provides Stop and recent clips. Inspection has a movable dock;
 two-finger drags scroll the host app while single taps select elements. **Done** or system Back
 exits inspection and returns input to the app. **Search selectors & tags**
 in that dock searches tags, text, roles and supported actions. **Actions & XPath selectors** on a
@@ -44,7 +49,7 @@ a component opens its inspection details on the app. Choosing a different view c
 Element filters are collapsed initially; active filters keep their count when collapsed. Expanded
 options scroll with results so they cannot consume the whole result viewport. Back from
 View checks returns to element search. Elsewhere Back clears an active evidence query first, then
-returns to quick actions. Back again closes the overlay. The **‹ Actions** control also returns directly. Host-provided
+returns to quick actions. Back again closes the overlay. **‹ Quick actions** also returns directly. Host-provided
 `QaLensTabProvider` views remain available after the five built-ins.
 
 Automatic element findings can miss problems; no findings is not a clean bill of health. Retained
@@ -75,7 +80,9 @@ setting applies to the optional Watch HUD. Full-height evidence is not docked to
 
 Use the [contributor focused modes](../CONTRIBUTING.md#focused-device-checks): `workflowOnly`
 checks actual navigation, searchable/copyable evidence, all built-in views, a host extension,
-screenshots/marks/recording, Control Room macro execution, upload and replay. `selectorsOnly`
+both inspection modes/exits, fixed navigation, button dimensions, frame recording,
+screenshots/marks, Control Room macro execution, upload and replay. `quickVideoOnly` checks the
+actual HD quick button with explicit test-only consent and decodes the saved video. `selectorsOnly`
 checks real search/selection/XPath copy; `pcUiOnly` checks manual pairing/rotation/stop through SDK
 UI; `overlayLoadOnly` checks evidence views while logs/network keep arriving. Require each
 mode's `OK:` output and no `FAIL:`; an adb exit code alone is insufficient.

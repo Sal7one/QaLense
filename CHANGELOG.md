@@ -2,6 +2,21 @@
 
 ## Unreleased — post-0.9.0
 
+### Compose host compatibility and quick actions — 2026-10-05
+
+- Fix the reproduced Control Room `FlowRow` `NoSuchMethodError` with newer host Foundation:
+  replace all three experimental calls with a small wrapping layout built on stable Compose UI.
+  Preserve the host's dependency versions and action wrapping, including RTL placement. Reserve
+  actual 48 dp touch size for Control Room small buttons to avoid overlapping expanded tap bounds.
+- Widen quick actions and the evidence return control; keep Review evidence visible above the
+  scrolling action list. Center report/Refresh labels with compact 48 dp minimum touch targets.
+- Restore distinct Inspect elements and Inspect tags destinations. Give tags a named, inset-safe
+  Done button alongside system Back; keep copy-on-component-tap and two-finger scrolling.
+- Add side-by-side Record/Record HD buttons; frame capture remains masked, and HD requires host
+  opt-in plus Android consent. Preserve saving/stop controls and expose the disabled HD state.
+- Add a precompiled-SDK/newer-runtime consumer UI fixture and compile it in CI. Extend actual
+  overlay tests for navigation, action dimensions, inspection exits and quick-button HD decoding.
+
 ### Control Room SQL and decoded app values — 2026-10-05
 
 - Give SQL selection, query, Run, name and Save separate space with 48 dp actions; expose every

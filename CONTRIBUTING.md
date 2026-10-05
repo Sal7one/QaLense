@@ -145,6 +145,23 @@ adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e workflowOnly true \
 Require `OK: Quick screenshot/bug mark`. A failure preserves its synthetic sample screen in the
 target app's private cache as `qalens-test-failure.png`; do not commit generated captures.
 
+`workflowOnly` also requires both inspection modes/exits, the fixed Review/Quick actions links,
+48–76 dp evidence action heights, a wider navigation button and side-by-side Record/Record HD
+with HD disabled when the host disallows unmasked video. Actual HD from that quick button has
+a separate consent-approved disposable-emulator case:
+
+```sh
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e quickVideoOnly true \
+  -e projectionConsent approve \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: Quick actions HD button` and no `FAIL:`. Test code deliberately enables unmasked
+capture in the sample, handles the real English OS consent dialog, presses REC Stop and decodes
+the saved MP4. It restores capture settings; production still requires host opt-in and consent.
+For precompiled-SDK/newer-Compose Control Room coverage, use the
+[external consumer runtime test](integration-tests/consumer/README.md#newer-compose-runtime-smoke-test).
+
 Focused HD modes accept `-e projectionConsent approve` or `-e projectionConsent deny` to click
 the real **English sample emulator** OS dialog. This is opt-in Android-test code, absent from the
 SDK, and does not bypass production consent. Omit it and handle the dialog manually on other

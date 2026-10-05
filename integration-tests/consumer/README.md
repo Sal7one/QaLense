@@ -9,6 +9,8 @@ For a real host, follow [integration.md](../../integration.md) and the
 [AI integration runbook](../../docs/AI_INTEGRATION.md). This fixture is a build/API example, not a
 full QA app: it has no host Activity/UI, and its optional calls are partly compile-only or synthetic.
 An unused example client and an API reference do not prove runtime capture in another app.
+The focused instrumentation below opens the SDK Control Room; it is a runtime compatibility
+check, separate from a complete host integration or capture acceptance test.
 
 ## Build from the SDK checkout
 
@@ -28,12 +30,46 @@ No Python bridge, backend, emulator, Maven publication or pairing token is neede
 
 ## What is verified
 
+### Newer Compose runtime smoke test
+
+The reported Control Room `FlowRow` crash reproduced on API 36 with the old SDK compiled against
+Foundation 1.7.6 and the host runtime using 1.8.2: `NoSuchMethodError` at SDK lines 330/304/564.
+Current action groups use stable Compose UI `Layout`; all three experimental calls are removed.
+The SDK's own compile versions stay on the repository baseline.
+
+Build the consumer/test APKs with a newer debug runtime, then run on a disposable emulator:
+
+```sh
+./gradlew -p integration-tests/consumer -PqaComposeRuntime=1.8.2 assembleDebug assembleDebugAndroidTest
+adb -s YOUR_DISPOSABLE_SERIAL install -r integration-tests/consumer/build/outputs/apk/debug/qalens-external-consumer-debug.apk
+adb -s YOUR_DISPOSABLE_SERIAL install -r integration-tests/consumer/build/outputs/apk/androidTest/debug/qalens-external-consumer-debug-androidTest.apk
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w \
+  example.consumer.test/example.ControlRoomCompatibilityInstrumentation
+```
+
+Require `OK: External consumer Control Room renders` and no `FAIL:`/process crash. Repeat at
+360×640 dp / 150% font / three-button navigation, then restore those emulator settings. The
+test checks rescue, saved-recording and configuration action groups, visible nonoverlapping
+recording buttons, and preserves settings while deleting its own synthetic layout file before
+finishing. It does not play that placeholder file or send network data. The optional private cache
+image is `qalens-consumer-control.png`; do not commit captures.
+
+`qaComposeRuntime` changes only this fixture's debug/test runtime resolution for animation,
+foundation, runtime and UI groups. The SDK compile classpath, material3, host-independent APIs and
+production dependency mapping are unchanged. Confirm the evaluated versions with
+`:qalens-compose:dependencyInsight` in the SDK build and `dependencyInsight` on this consumer's
+`debugRuntimeClasspath`. Compilation alone is insufficient; CI builds the fixture, while the device
+run proves its UI launches. Other runtime/OS/toolchain combinations need their own tests.
+
+### Source and release checks
+
 | File/check | Coverage |
 |---|---|
 | [settings.gradle.kts](settings.gradle.kts) | External settings/repositories and composite substitution of published coordinates |
 | [build.gradle.kts](build.gradle.kts) | Debug active vs release no-op mapping; host-owned OkHttp/Timber; compile-only Room types |
 | [ConsumerApplication.kt](src/main/java/example/ConsumerApplication.kt) | Same configuration, install, adapters, crash helpers, root/data hook and clip/bridge calls compile in both variants |
 | `verifyReleaseIsolation` | Resolved release contains `qalens-noop` and excludes active Compose/Android/replay modules used by this fixture |
+| [ControlRoomCompatibilityInstrumentation.kt](src/androidTest/java/example/ControlRoomCompatibilityInstrumentation.kt) | Actual SDK Control Room with host runtime packaging; synthetic layout fixtures, not host capture acceptance |
 
 `qalens-core` in release is expected. The fixture does not add the optional active navigation or
 replay dependency, nor test all possible flavors. The host integration guide provides a broader

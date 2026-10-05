@@ -26,11 +26,10 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
@@ -200,7 +199,6 @@ private fun openInPlayer(context: Context, info: RecordingInfo): Boolean {
 // ── UI ──────────────────────────────────────────────────────────────────────────
 
 @Composable
-@OptIn(ExperimentalLayoutApi::class)
 private fun ControlRoom(
     notifGranted: Boolean,
     drawOverGranted: Boolean,
@@ -327,7 +325,7 @@ private fun ControlRoom(
                 )
                 Text("${(state.overlayAlpha * 100).toInt()}%", color = TxtMuted, fontSize = 11.sp)
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            QaLensActionWrap {
                 SmallButton("Open panel in app") {
                     QaLens.openPanel()
                     hostLaunchIntent(context)?.let { context.startActivity(it) }
@@ -384,7 +382,7 @@ private fun ControlRoom(
                     Text(formatDate(r.createdAtMillis), color = TxtMain, fontWeight = FontWeight.Medium, fontSize = 12.sp)
                     Text("${r.formattedSize} · ${r.name}", color = TxtMuted, fontSize = 10.sp, maxLines = 1)
                     Spacer(Modifier.height(6.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    QaLensActionWrap {
                         SmallButton("▶ Play", Accent) {
                             if (!openInPlayer(context, r)) QaLens.log("QaLens Player module not installed")
                         }
@@ -529,7 +527,7 @@ private fun ControlRoom(
                 checked = includeSecrets
             ) { includeSecrets = it }
             Spacer(Modifier.height(6.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            QaLensActionWrap {
                 SmallButton("⇪ Export & share", Accent) { exportAppSal(context, includeSecrets) }
                 SmallButton("⤓ Import .appsal", Green) {
                     (context as? QaLensControlActivity)?.pickAppSal()
@@ -590,13 +588,18 @@ private fun BigButton(label: String, tint: Color, onClick: () -> Unit) {
 
 @Composable
 private fun SmallButton(label: String, tint: Color = TxtMuted, onClick: () -> Unit) {
-    Text(
-        label, color = tint, fontSize = 12.sp,
+    Box(
         modifier = Modifier
             .background(Color.White.copy(alpha = 0.07f), RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-    )
+            .heightIn(min = 48.dp)
+            .widthIn(min = 48.dp)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = tint, fontSize = 12.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    }
 }
 
 // ── .appsal export ──────────────────────────────────────────────────────────

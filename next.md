@@ -3,6 +3,19 @@
 Updated 2026-10-05. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Completed 2026-10-05: overlay compatibility and quick actions
+
+- [x] Reproduce the exact Control Room crash in an external consumer: SDK Foundation 1.7.6 versus
+  host runtime 1.8.2, `FlowRow` failure at 330/304/564. Replace all experimental calls with stable
+  wrapping layout without changing host dependency versions.
+- [x] Widen overlay actions/navigation; center compact report/Refresh controls and keep Review
+  evidence fixed on quick actions. Restore separate elements/tags modes with visible exits.
+- [x] Add side-by-side frame/HD recording with existing privacy/OS consent contracts, plus an
+  actual quick-button HD decoding test and newer-runtime consumer fixture compiled by CI.
+- [x] Complete final normal/small/150%/three-button workflow, HD decoding, external runtime,
+  SQL/data UI and bridge gesture checks; inspect screenshots, pass full runner/build/lint/release
+  gates and document physical-device/other-runtime limits.
+
 ## Completed 2026-10-05: usable SQL and app data
 
 - [x] Reproduce the narrow SQL controls in screenshots at 360×640 dp / 150% font / three-button

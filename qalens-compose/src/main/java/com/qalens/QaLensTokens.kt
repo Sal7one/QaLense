@@ -212,7 +212,7 @@ object QaLensDimens {    /** Android minimum touch target. Every interactive ele
     val bubbleHalo: Dp = 2.dp
 
     /** The tester quick-actions sheet, sized to fit small phones. */
-    val sheetWidth: Dp = 310.dp
+    val sheetWidth: Dp = 340.dp
     val sheetRadius: Dp = 22.dp
 
     /** Fixed leading column for timestamped rows, so values line up down a track. */

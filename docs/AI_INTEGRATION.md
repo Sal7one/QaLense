@@ -228,6 +228,13 @@ do not create a competing SDK backlog. [next.md](../next.md) remains the SDK's c
 
 ## Troubleshooting
 
+The October Control Room `FlowRow` crash was reproduced as `NoSuchMethodError` at lines 330/304/564
+when the compiled SDK used Foundation 1.7 and the host supplied 1.8.2. Current SDK action groups
+use stable Compose UI layout instead. For that trace, verify the host resolves the updated SDK
+and inspect its actual runtime dependencies; a same-BOM sample build cannot prove binary
+compatibility. The [external consumer fixture](../integration-tests/consumer/README.md#newer-compose-runtime-smoke-test)
+keeps SDK compilation on the repository baseline and exercises newer runtime packaging.
+
 Start with the first failing boundary: dependency → lifecycle → host event/root → phone approval →
 transport → desktop → saved output. Use synthetic examples and redacted traces. Do not fix a
 failure by suppressing the host's errors or weakening its capture/security policy.

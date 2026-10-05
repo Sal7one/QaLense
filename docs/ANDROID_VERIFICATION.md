@@ -1,5 +1,44 @@
 # Android verification — 2026-10-04
 
+## Compose host compatibility and quick actions addendum — 2026-10-05
+
+The old SDK's Control Room crash reproduced in the independent consumer on API 36: SDK compile
+Foundation 1.7.6, consumer runtime 1.8.2, `FlowRow` `NoSuchMethodError` at lines 330/304/564.
+All three calls now use stable Compose UI `Layout`; the host and SDK dependency baselines stay
+unchanged. The focused consumer is built with `-PqaComposeRuntime=1.8.2`; dependency reports
+confirm separate SDK compile and host runtime versions. CI builds this fixture but does not run
+it on an emulator. Source-only compilation would not have found this binary failure.
+
+| Focused case | Executed checks |
+|---|---|
+| Newer-runtime consumer, normal and 360×640 dp / 150% font / three-button navigation | SDK-owned Control Room launches, rescue and configuration groups render, all saved-recording buttons are visible with at least 48 dp touch bounds and no overlap; only the owned synthetic placeholder is deleted and settings are restored before test completion |
+| `workflowOnly`, normal and small/large-font/three-button | Wide Quick actions return button; fixed Review evidence survives scrolling; centered 48–76 dp report/Refresh controls; both inspection modes, named Done/system Back and exclusive mode state; side-by-side recording choices with disabled HD when host opt-in is false; actual frame REC Stop, capture/config/macros/upload/replay/Panic |
+| `quickVideoOnly`, normal and small/large-font/three-button | Actual quick HD button after test-only host opt-in, real Android consent approval, native REC Stop, saved `video.mp4` and decoded video frame; settings restored |
+
+The small consumer test found overlapping expanded touch bounds despite separated visual buttons;
+Control Room small buttons now reserve a real 48 dp height. The fixture measures one stable
+viewport rather than comparing bounds from different scroll positions. The sample workflow
+dismisses its synthetic macro's keyboard before checking the separate upload task. The HD test
+connects accessibility before concurrent consent/UI checks and scrolls the OS dialog as needed;
+these helpers are test-only and preserve production consent. Private screenshots were inspected,
+not committed. Emulator display/font/navigation settings were restored after the small cases.
+
+Local checks pass 238 unit tests (183 core / 35 Compose / 17 replay / 3 no-op), Compose/sample
+lint with zero errors, sample debug/test/release/isolation and independent consumer release
+build/isolation plus default and newer-runtime debug/test builds. Unchanged outputs may be reused.
+No public SDK API, recording format or web/desktop/backend implementation changed. Other Compose/
+OS versions, physical-device TalkBack and the consuming app's separate HD failure still need their
+own acceptance; reproducing this Control Room crash does not establish every host failure's cause.
+See [mobile overlay](MOBILE_OVERLAY.md), [commands](../CONTRIBUTING.md#focused-device-checks)
+and the [external consumer](../integration-tests/consumer/README.md#newer-compose-runtime-smoke-test).
+
+The final full runner passes recording retention/storage, real Room/DataStore state, privacy,
+Chucker/adapters, inspection/bridge/LTR/RTL/two-finger gestures, SQL/macros/replay/webhook and
+continuous traffic. That load case observed 2,452 background iterations and an 8 ms worst main
+heartbeat, a synthetic check rather than a consuming-app responsiveness guarantee. Focused
+SQL/app-data UI passes normal and small/large-font/three-button setups; the bridge/gesture runner
+also passes the small setup. Historical desktop/backend/clip/endurance cases below were not rerun.
+
 ## Control Room data addendum — 2026-10-05
 
 The focused `dataUiOnly` runner uses actual accessible Control Room controls, six private SQLite

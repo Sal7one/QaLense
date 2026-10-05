@@ -51,6 +51,7 @@ internal fun QaLensMinimalPanel(
 ) {
     val context = LocalContext.current
     val colors = qaLensColorsFor(context)
+    val config by QaLens.config.collectAsState()
     val uploadStates by QaLensWebhook.states.collectAsState()
     val latestRecording = state.recordings.firstOrNull()
     val webhookConfigured = QaLensPrefs.webhookUrl(context).isNotBlank()
@@ -81,26 +82,29 @@ internal fun QaLensMinimalPanel(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Text(
-                "Close",
-                color = colors.fg2,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
+            Box(Modifier.heightIn(min = QaLensDimens.touchMin).width(64.dp)
                     .clickable(role = Role.Button, onClick = onClose)
-                    .padding(horizontal = 8.dp, vertical = 8.dp)
-            )
+                    .padding(6.dp), contentAlignment = Alignment.Center) {
+                Text("Close", color = colors.fg2, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Box(Modifier.fillMaxWidth().heightIn(min = QaLensDimens.touchMin)
+            .background(colors.panel2, RoundedCornerShape(QaLensDimens.rMd))
+            .semantics { contentDescription = "Review evidence" }
+            .clickable(role = Role.Button) { QaLens.setPanelMinimal(false) }.padding(8.dp),
+            contentAlignment = Alignment.Center) {
+            Text("‹ Review evidence", color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
 
         Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
             .semantics { contentDescription = "Quick action list" }) {
             Spacer(Modifier.height(16.dp))
 
-            QuickAction(
+            if (state.isSavingRecording || state.isRecording) QuickAction(
                 title = when {
                     state.isSavingRecording -> "Saving session…"
                     state.isRecording -> "Stop & save recording"
-                    else -> "Record a session"
+                    else -> "Stop & save recording"
                 },
                 detail = when {
                     state.isSavingRecording -> "Keep using the app while it saves"
@@ -114,6 +118,22 @@ internal fun QaLensMinimalPanel(
             ) {
                 onClose()
                 QaLens.toggleRecording()
+            }
+            else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.weight(1f)) {
+                        CompactAction("Record", "Masked frames", "●", colors.ok, colors,
+                            accessibilityLabel = "Record frames") { onClose(); QaLens.startRecording(video = false) }
+                    }
+                    Box(Modifier.weight(1f)) {
+                        CompactAction("Record HD", "Full screen video", "●", colors.info, colors,
+                            enabled = config.allowUnmaskedVideo, accessibilityLabel = "Record HD video") {
+                            onClose(); QaLens.startRecording(video = true)
+                        }
+                    }
+                }
+                if (!config.allowUnmaskedVideo) Text("HD is disabled by this app’s privacy settings.",
+                    color = colors.fg2, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
 
             Spacer(Modifier.height(10.dp))
@@ -152,10 +172,13 @@ internal fun QaLensMinimalPanel(
                 QaLens.setWatchMode(false)
                 QaLens.setInspectMode(true)
             }
-            Spacer(Modifier.height(14.dp))
-            Destination("Review evidence", "Activity, network, logs, elements and device", colors) {
-                QaLens.setPanelMinimal(false)
+            Spacer(Modifier.height(10.dp))
+            QuickAction("Inspect tags", "Show automation tags; tap a component to copy", "#", colors.accent, colors) {
+                onClose()
+                QaLens.setWatchMode(false)
+                QaLens.setTagMode(true)
             }
+            Spacer(Modifier.height(14.dp))
             QaLensPcInspectorLauncher(colors)
             Destination("Control Room", "Saved recordings, HD capture and team settings", colors) {
                 onClose()
@@ -222,21 +245,24 @@ private fun QuickAction(
 }
 
 @Composable
-private fun CompactAction(label: String, detail: String, symbol: String, tint: Color, colors: QaLensOverlayColors, onClick: () -> Unit) {
+private fun CompactAction(label: String, detail: String, symbol: String, tint: Color, colors: QaLensOverlayColors,
+    enabled: Boolean = true, accessibilityLabel: String = label, onClick: () -> Unit) {
     Column(
         Modifier.fillMaxWidth()
             .background(colors.panel2, RoundedCornerShape(QaLensDimens.rMd))
-            .semantics { contentDescription = label }
-            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = accessibilityLabel }
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .heightIn(min = 64.dp)
             .padding(horizontal = 8.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(symbol, modifier = Modifier.clearAndSetSemantics {}, color = tint, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        val alpha = if (enabled) 1f else .5f
+        Text(symbol, modifier = Modifier.clearAndSetSemantics {}, color = tint.copy(alpha = alpha), fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(3.dp))
-        Text(label, color = colors.fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Text(detail, color = colors.fg2, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        Text(label, color = colors.fg.copy(alpha = alpha), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text(detail, color = colors.fg2.copy(alpha = alpha), fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }

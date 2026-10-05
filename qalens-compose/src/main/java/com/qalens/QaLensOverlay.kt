@@ -426,29 +426,29 @@ private fun TagCanvas(nodes: List<InspectNode>, colors: QaLensOverlayColors) {
             )
         }
 
-        // Legend + summary pill at the bottom — tapping it EXITS tag mode (QA must never be
-        // stuck in an overlay mode with no visible way out).
+        // Keep a named exit reachable even with large text and three-button navigation.
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp)
-                .background(colors.panel, CircleShape)
-                .pointerInput(Unit) { detectTapGestures(onTap = { QaLens.setTagMode(false) }) }
-                .padding(horizontal = 14.dp, vertical = 7.dp),
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(12.dp)
+                .background(colors.panel, RoundedCornerShape(QaLensDimens.rMd))
+                .padding(start = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "TAG MODE · ${tagged.size} tagged · ${untaggedInteractive.size} untagged · tap a tag to copy",
+                text = "Tags · ${tagged.size} tagged · ${untaggedInteractive.size} untagged\nTap a component to copy its tag",
                 color = colors.fg,
-                fontSize = 11.sp
+                fontSize = 11.sp,
+                modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.width(10.dp))
-            Text(
-                text = "✕ EXIT",
-                color = colors.err,
-                fontSize = 11.sp,
-                style = MaterialTheme.typography.labelMedium
-            )
+            Box(Modifier.width(72.dp).heightIn(min = QaLensDimens.touchMin)
+                .semantics { contentDescription = "Done inspecting tags" }
+                .clickable(role = Role.Button) { QaLens.setTagMode(false) }.padding(6.dp),
+                contentAlignment = Alignment.Center) {
+                Text("Done", color = colors.accent, fontSize = 12.sp)
+            }
         }
     }
 }
