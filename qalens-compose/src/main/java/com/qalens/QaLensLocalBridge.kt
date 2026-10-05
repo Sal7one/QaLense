@@ -101,6 +101,15 @@ internal object QaLensLocalBridge {
         var status = 200
         val body = try {
             val request = QaLensBridgeProtocol.read(socket.getInputStream(), token)
+            if (request.method == "POST" && request.path == "/v1/screenshot") {
+                val bytes = screenshot(readJson(request.body), generation)
+                requireSession(generation)
+                socket.getOutputStream().apply {
+                    write(("HTTP/1.1 200 Bridge\r\nContent-Type: image/png\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n").toByteArray())
+                    write(bytes); flush()
+                }
+                return
+            }
             if (request.method == "GET" && request.path.startsWith("/v1/recordings/")) {
                 if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
                 val name = request.path.removePrefix("/v1/recordings/")
@@ -120,7 +129,8 @@ internal object QaLensLocalBridge {
                 request.method == "GET" && request.path == "/v1/recordings" -> {
                     if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
                     val context = QaLens.appContext ?: throw QaLensBridgeFailure(503, "No app context")
-                    mapOf("ok" to true, "recording" to QaLens.state.value.isRecording,
+                    val controls = onSession(generation) { QaLensSessionRecorder.desktopStatus() }
+                    mapOf("ok" to true, "controls" to controls, "recording" to QaLens.state.value.isRecording,
                         "saving" to QaLens.state.value.isSavingRecording,
                         "items" to (QaLensSessionRecorder.recordingsDir(context).listFiles()
                             ?.filter { it.isFile && it.name.matches(Regex("(?:session|clip)_[A-Za-z0-9_]+\\.sal")) }
@@ -155,6 +165,8 @@ internal object QaLensLocalBridge {
                     mapOf("ok" to true)
                 }
                 request.method == "POST" && request.path == "/v1/component" -> component(readJson(request.body), generation)
+                request.method == "POST" && request.path == "/v1/recording" -> recording(readJson(request.body), generation)
+                request.method == "POST" && request.path == "/v1/inspection" -> inspection(readJson(request.body), generation)
                 request.method == "POST" && request.path == "/v1/command" -> {
                     val command = try { JSONObject(request.body) } catch (_: Exception) { throw QaLensBridgeFailure(400, "Invalid JSON") }
                     command(command, generation)
@@ -188,7 +200,12 @@ internal object QaLensLocalBridge {
         if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
     }
 
-    private suspend fun <T> onHost(generation: Long, block: (android.app.Activity) -> T): T =
+    private suspend fun <T> onSession(generation: Long, block: suspend () -> T): T =
+        withTimeoutOrNull(1_500) {
+            withContext(Dispatchers.Main.immediate) { requireSession(generation); block() }
+        } ?: throw QaLensBridgeFailure(504, "Host is busy; command cancelled before dispatch if still queued")
+
+    private suspend fun <T> onHost(generation: Long, block: suspend (android.app.Activity) -> T): T =
         withTimeoutOrNull(1_500) {
             withContext(Dispatchers.Main.immediate) {
                 if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
@@ -197,6 +214,87 @@ internal object QaLensLocalBridge {
                 block(activity)
             }
         } ?: throw QaLensBridgeFailure(504, "Host is busy; command cancelled before dispatch if still queued")
+
+    private suspend fun recording(input: JSONObject, generation: Long): Map<String, Any?> {
+        val action = input.opt("action") as? String ?: throw QaLensBridgeFailure(400, "Supply a recording action")
+        if (action !in listOf("start", "stop", "clip")) throw QaLensBridgeFailure(400, "Use start, stop or clip")
+        val video = input.opt("video") ?: false
+        if (video !is Boolean) throw QaLensBridgeFailure(400, "video must be a boolean")
+        val seconds = input.opt("seconds")
+        val label = input.opt("label") ?: "Bug clip"
+        if (action == "clip" && (seconds !is Int || seconds !in 1..300 || label !is String || label.length > 256))
+            throw QaLensBridgeFailure(400, "Clip requires 1–300 integer seconds and a label up to 256 characters")
+        return onSession(generation) {
+            val before = QaLensSessionRecorder.desktopStatus()
+            when (action) {
+                "start" -> {
+                    if (before["phase"] != "idle") throw QaLensBridgeFailure(409, "A recording is active or still saving")
+                    if (video && !QaLens.config.value.allowUnmaskedVideo) throw QaLensBridgeFailure(403, "Host has not enabled unmasked HD video; choose Frames")
+                    val activity = QaLens.currentActivity?.takeIf { QaLensActivityInstaller.isResumed(it) && !it.isFinishing }
+                        ?: throw QaLensBridgeFailure(503, "Return to the app before starting recording")
+                    QaLens.setInspectMode(false); QaLens.setTagMode(false); QaLens.setWatchMode(false); QaLens.closePanel()
+                    QaLensSessionRecorder.start(activity, video)
+                }
+                "stop" -> {
+                    if (before["phase"] !in listOf("capturing", "awaiting_consent")) throw QaLensBridgeFailure(409, "No active recording to stop")
+                    QaLensSessionRecorder.stop(share = false)
+                }
+                "clip" -> {
+                    if (before["canClip"] != true) throw QaLensBridgeFailure(409, "Start recording first; at most 20 clips per session")
+                    QaLensSessionRecorder.markClip(seconds as Int, label as String)
+                }
+            }
+            mapOf("ok" to true, "accepted" to true, "controls" to QaLensSessionRecorder.desktopStatus(),
+                "notice" to if (action == "clip") "Clip marked; exported after recording stops" else "Recording $action requested")
+        }
+    }
+
+    private suspend fun inspection(input: JSONObject, generation: Long): Map<String, Any?> {
+        val enabled = input.opt("enabled") as? Boolean ?: throw QaLensBridgeFailure(400, "enabled must be a boolean")
+        return onHost(generation) {
+            if (enabled && QaLens.state.value.isRecording) throw QaLensBridgeFailure(409, "Stop recording before inspecting")
+            if (enabled && !QaLens.config.value.enableSemanticsReflection) throw QaLensBridgeFailure(403, "Host disabled inspection")
+            QaLens.closePanel(); QaLens.setTagMode(false); QaLens.setWatchMode(false); QaLens.setInspectMode(enabled)
+            mapOf("ok" to true, "enabled" to enabled)
+        }
+    }
+
+    private suspend fun screenshot(input: JSONObject, generation: Long): ByteArray {
+        val include = input.opt("includeOverlay") as? Boolean ?: throw QaLensBridgeFailure(400, "includeOverlay must be a boolean")
+        val epoch = QaLens.captureEpoch
+        val owner = java.util.concurrent.atomic.AtomicReference<android.graphics.Bitmap?>()
+        return try {
+            val bitmap = onHost(generation) { activity ->
+                suspendCancellableCoroutine<android.graphics.Bitmap> { continuation ->
+                    // The existing capture masks private semantics and restores the exact view visibility,
+                    // including failed/cancelled captures. Never persistently toggle host preferences.
+                    QaLensScreenCapture.captureFrame(activity, manageOverlay = !include) { frame ->
+                        if (frame == null) {
+                            if (continuation.isActive) continuation.resumeWith(Result.failure(QaLensBridgeFailure(409, "Screenshot unavailable; window may be secure or not ready")))
+                        } else if (continuation.isActive) {
+                            owner.set(frame)
+                            continuation.resume(frame) { _, lost, _ -> if (owner.compareAndSet(lost, null)) lost.recycle() }
+                        } else frame.recycle()
+                    }
+                }
+            }
+            currentCoroutineContext().ensureActive()
+            val output = object : java.io.ByteArrayOutputStream() {
+                override fun write(buffer: ByteArray, offset: Int, length: Int) {
+                    if (count + length > 16 * 1024 * 1024) throw QaLensBridgeFailure(413, "Screenshot exceeds 16 MiB")
+                    super.write(buffer, offset, length)
+                }
+                override fun write(value: Int) {
+                    if (count >= 16 * 1024 * 1024) throw QaLensBridgeFailure(413, "Screenshot exceeds 16 MiB")
+                    super.write(value)
+                }
+            }
+            if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)) throw QaLensBridgeFailure(500, "Screenshot encoding failed")
+            requireSession(generation)
+            if (epoch != QaLens.captureEpoch) throw QaLensBridgeFailure(409, "Capture policy changed; screenshot discarded")
+            output.toByteArray()
+        } finally { owner.getAndSet(null)?.recycle() }
+    }
 
     private fun live(activity: android.app.Activity): Pair<List<InspectNode>, Map<String, SemanticsNode>> {
         if (!QaLens.config.value.enableSemanticsReflection)

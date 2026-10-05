@@ -1,6 +1,6 @@
 # QaLens architecture
 
-Describes the Android client and desktop/clip paths through 2026-10-02.
+Describes the Android client and desktop/clip paths through 2026-10-05.
 Start with [HANDOVER.md](../HANDOVER.md) for dated verification and [next.md](../next.md) for
 unresolved work.
 
@@ -133,8 +133,18 @@ without transport work. Pairing tokens are memory-only and host-owned.
 
 `workbench.py` owns profiles, explicit component persistence and trusted pipeline jobs. `desktop.py`
 owns shared viewer assets, bounded recording/Downloads transfers and installed scrcpy lifecycle.
+Landing has resizable mirror/selection/tree panes. `mirror-controls.js` shares aspect-ratio geometry
+for inspection, touch/wheel and pane layout. Explicit whole-phone adb preview issues two short-lived
+frame leases; only Control accepts finite normalized touch input. Mode/stop/connection changes and
+known rotation revoke leases. Preview is read-only; Inspect highlights without a host action.
+The SDK's internal recording/inspection/screenshot endpoints retain phone approval, main dispatch
+deadlines, recorder privacy/OS consent and existing masked PixelCopy with overlay restoration. PNG
+encoding stays on IO. The GUI detects these capabilities, polls capture state, marks deferred clips
+and can explicitly copy the exact saved master into replay. No public facade or archive schema changes.
 The browser shell embeds both existing viewers through same-origin parent messages into their
-existing reader paths. Finished archive polling is opt-in and resets with connection changes/errors.
+existing reader paths. Capture status polls metadata while Landing/Recordings is visible. Automatic
+archive copying is opt-in and resets with connection changes/errors; Replay after Stop is a separate,
+explicit choice for that exact session.
 Desktop files persist privately; pairing tokens and unsaved component previews do not.
 
 The decor overlay is a `QaLensOverlayHost` containing its Compose surface. It routes two-finger

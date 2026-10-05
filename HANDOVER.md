@@ -48,6 +48,51 @@ assuming a named class or public signature is unchanged.
 
 ## Latest local verification
 
+### Desktop mirror and capture workspace — 2026-10-05
+
+Landing now places mirror → selected element → smaller semantics tree in independently adjustable
+panes, with a shared height handle, keyboard resizing, local layout preference and Reset layout.
+Responsive layouts keep mirror/selection adjacent at medium width and stack at compact width.
+Control is the default: explicit Start mirror enables whole-phone adb tap/drag/wheel/long-press;
+Preview pauses input. Inspect shows all visible Compose outlines and selects without a host click.
+Linked tree/phone selections enter inspection, with a visible return to Control. Letterbox margins
+are not targets. Two short-lived frame leases, finite normalized coordinates, connection/mode guards
+and single-flight input reject stale dispatch; known rotation revokes prior dimensions. Sampling is
+about 1 fps, stops when hidden/leaving Landing and stays in memory; installed scrcpy is optional.
+
+Desktop Start/Stop/10/20/60/custom clip/Watch use the existing SDK recorder and shared web player.
+Internal bridge capabilities add recording/inspection commands and masked app-window screenshot
+PNG; no new public API, no-op collection or `.sal` format. HD retains host opt-in and Android consent;
+pending consent is distinct from recording and is cancelable without starting a service. Clips keep
+capture running and export after Stop. Replay after Stop is opt-in and waits for the exact master;
+navigation/device/error cancels it. Browser shutdown does not stop the phone recording. Screenshots
+default to hiding/restoring the in-window overlay; Include overlay retains current visibility.
+Existing masks/secure-window refusal apply, PNG encoding stays on IO, cancellation recycles bitmaps
+and interrupted transfers fail cleanly. Capture now owns only its own visible-overlay change so
+completion cannot undo a concurrent phone recording Start/Stop. Update/reinstall the host SDK and
+restart Python for these capabilities; the desktop explains older SDKs and reconnection separately.
+
+Verification passes 238 unit tests (183/35/17/3), Compose/sample lint with zero errors, sample
+debug/test/release/isolation and independent consumer debug/release/isolation. The full API 36
+Android runner and focused `desktopCaptureOnly` pass actual recorder/clip export, HD rejection/
+pending/cancel, PixelCopy decoding/password masks, secure windows, exact overlay restoration and
+concurrent screenshot/recording races. The test's reused singleTop activity needed asynchronous
+resume instead of `startActivitySync`; the fixed fixture verifies foreground readiness by a read.
+Python passes 40 tests (including five new HTTP/input cases); interrupted PNG/error/auth checks
+pass after final transport changes. Four bridge JavaScript suites, syntax and web reader/CLI pass.
+
+Actual desktop browser + emulator checks pass phone approval, mirror tap/navigation/wheel scrolling, Inspect outlines/
+selection and center attributes, Control/Preview routing, pointer/keyboard resizing/persistence and
+1440/900/621px layouts without page overflow. HD Start → real OS approval → ten-second mark while
+recording → Stop → exact-master automatic replay and separate clip replay decode video at 862×1920.
+Clean/Include overlay screenshot pixels are inspected. Copy image reports an accepted clipboard
+write; binary pasting into another application is not verified. Browser PNG download completion
+remains unconfirmed in Codex's in-app browser; do not present it as executed filesystem delivery. Physical
+phones, Windows, installed scrcpy/latency, other host/OS/Compose versions, hour-long endurance and
+the consuming app's separate ANR/HD behavior remain unverified. The disposable GUI HD fixture is
+test-only, restores opt-in/access on expiry and is absent from SDK/release builds. Commands and
+workflow details are in the [desktop guide](tools/local-bridge/README.md#landing-workspace-and-phone-control).
+
 ### Desktop startup recovery — 2026-10-05
 
 The old CLI's raw permission and occupied-port tracebacks reproduce with disposable storage and

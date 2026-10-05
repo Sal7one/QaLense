@@ -162,8 +162,10 @@ No sample Settings, backend, pip/npm, Appium or Robot integration is needed. Man
 is an advanced compatibility path, not onboarding.
 
 Verify phone selection → browser attributes and browser selection → SDK highlight with
-**Link phone & web selection** enabled. Selection is inspect-only; host tap/type/scroll remain
-explicit actions. Refresh updates same-element attributes. Search, supported actions, selector
+**Link phone & web selection** enabled. Tree/Inspect selection is inspect-only; Control-mode mirror
+taps/drags/wheel/long-press operate the whole phone through adb. Preview mode pauses input. Check
+letterboxing, known rotation, stale-frame/device guards, Inspect outlines/selection and Control
+return against the real host. Refresh updates same-element attributes. Search, supported actions, selector
 builder/match checks and XML/JSON downloads are in Landing. **Send to PC**/Receive is a separate
 captured export path; explicit Save JSON persists a hashed document. Merely selecting a live node
 does not save a component file.
@@ -174,6 +176,15 @@ collection is independently opt-in and copies newly completed masters/clips afte
 preview is separately opt-in, whole-phone, unmasked, memory-only and includes other apps.
 Leaving/hiding Landing stops browser sampling; this does not sanitize a downloaded file.
 See [desktop persistence and limits](../tools/local-bridge/README.md).
+
+Verify Landing Start/Stop through the SDK recorder, Frames privacy masks, HD host opt-in and OS
+consent/pending/cancel, clip marking without stopping, completed master/clip replay, and clean versus
+Include overlay screenshots with visibility restored. Screenshot PNGs follow the masked app-window
+policy; the sampled mirror is whole-phone/unmasked. Capability detection disables new capture
+controls on an older SDK; an offline/reconnecting phone is a transport issue, not proof of SDK age.
+Clip export still occurs after normal Stop. Replay after Stop is explicitly opted in and waits for
+the exact master; disconnect/device change/navigation cancels it. Closing the desktop never silently
+stops/discards an ongoing phone recording. Do not couple these paths to sample-app settings or code.
 
 Keep the installed host and Python/browser protocol versions aligned. Rebuild/reinstall the host
 QA APK when changing the SDK artifact; restart Python and refresh the browser when updating it.

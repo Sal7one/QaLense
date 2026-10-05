@@ -214,7 +214,7 @@ private fun ControlRoom(
             modifier = Modifier.qaHiddenFromReports(),
             onDismissRequest = { QaLensPcPairing.clear() },
             title = { Text("Connect QaLens desktop?") },
-            text = { Text("Your authorized adb computer requested access to this app’s Compose tree, component attributes, observations and saved recordings. It can run UI actions. Screen preview and automatic recording copy are separate choices on the PC. Approve only for your QA session; Stop PC inspector revokes access.") },
+            text = { Text("Your authorized adb computer requested access to this app’s Compose tree, component attributes, observations and saved recordings. It can run UI actions and request recordings, bug clips and masked screenshots. HD still requires Android consent. Screen mirror and automatic recording copy are separate choices on the PC. Approve only for your QA session; Stop PC inspector revokes access.") },
             confirmButton = { TextButton(onClick = {
                 if (QaLensPcPairing.approve(request)) {
                     hostLaunchIntent(context)?.let { runCatching { context.startActivity(it) } }

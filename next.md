@@ -3,6 +3,23 @@
 Updated 2026-10-05. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Completed 2026-10-05: desktop mirror and capture workspace
+
+- [x] Put resizable mirror/selected-element/tree panes in that order, with a smaller tree, shared
+  height handle, keyboard resizing, remembered layout, reset and medium/compact layouts.
+- [x] Default to Control: actual whole-phone tap/drag/wheel/long-press and Back/Home/Wake. Add
+  read-only Preview and Inspect outlines/selection; keep linked selection distinct from host actions.
+- [x] Guard input with current frame/connection/mode, bounded coordinates/durations and no retries;
+  stop sampling in hidden/background pages and offer optional installed scrcpy for faster mirroring.
+- [x] Add desktop recorder Start/Stop, preset/custom recent clip marks, Watch latest and opt-in
+  exact-master Replay after Stop. Preserve host HD opt-in/Android consent and export clips after Stop.
+- [x] Add masked app-window screenshots with optional overlay, review/save/copy, secure-window
+  refusal and visibility/cancellation/transport handling. Fix concurrent screenshot/recording races.
+- [x] Verify protocol/browser/native regressions, actual consent-approved HD master/clip decoding,
+  screenshots/layout, build/lint/isolation and full Android runner; update host-agent guidance.
+- Physical phones, other platforms/runtimes, installed scrcpy and hour-long recording still need
+  their own acceptance. Browser PNG download completion is unconfirmed in Codex's browser.
+
 ## Completed 2026-10-05: desktop startup recovery
 
 - [x] Reproduce permission and occupied-port tracebacks with disposable storage/listeners; replace

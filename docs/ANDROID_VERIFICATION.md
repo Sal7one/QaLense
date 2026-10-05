@@ -1,5 +1,33 @@
 # Android verification — 2026-10-04
 
+## Desktop capture addendum — 2026-10-05
+
+The focused `desktopCaptureOnly` runner passes on API 36 with the actual SDK socket protocol and
+recorder. It verifies authentication, typed/rejected commands, frame Start/Stop and separate marked
+clip export, host HD rejection and pending-consent cancellation without capture, PixelCopy PNG
+decoding/password masks, secure-window refusal and exact visible/invisible overlay restoration.
+Additional captures completing during phone recording Start/Stop preserve recorder visibility.
+The fixture resumes its singleTop host asynchronously after the share chooser and checks readiness
+with a bridge read; synchronous instrumentation launch would wait for an activity Android reuses.
+
+Real desktop browser → Python → adb → SDK checks separately pass Android approval, mirror Control
+tap/navigation/wheel scrolling, Inspect outlines/selection and selected attributes, Control/Preview routing, pointer/
+keyboard pane resizing and 1440/900/621px layouts. With the temporary sample-only GUI HD fixture,
+desktop Start opens actual OS consent; test approval starts capture, a ten-second mark keeps it
+running and Stop exports the master/clip. Exact-master automatic replay and separate clip replay
+decode 862×1920 video in the shared web player. Clean and Include overlay screenshot pixels are
+inspected; Codex browser PNG download completion is unconfirmed. The fixture restores HD opt-in/
+bridge access on expiry; neither pairing nor consent helpers are part of a consuming SDK app.
+
+The final full Android regression runner passes retention/storage/Compose/bridge/privacy/OSS/
+Room/DataStore/SQL/macros/replay/webhook and continuous traffic. Local checks pass 238 units
+(183/35/17/3), Compose/sample lint with zero errors, sample debug/test/release/isolation and
+independent consumer debug/release/isolation, plus 40 Python tests, four bridge JS suites/syntax
+and web-reader/CLI regressions. No public facade or `.sal` schema change. Physical phones, Windows,
+installed scrcpy, other runtimes, full-hour endurance and reported consuming-app ANR/HD failures
+remain separate acceptance work. See [desktop verification](../tools/local-bridge/README.md#mobile-gestures-and-verification)
+and [focused commands](../CONTRIBUTING.md#focused-device-checks).
+
 ## Compose host compatibility and quick actions addendum — 2026-10-05
 
 The old SDK's Control Room crash reproduced in the independent consumer on API 36: SDK compile

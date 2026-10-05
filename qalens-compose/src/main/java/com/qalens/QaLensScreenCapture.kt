@@ -77,11 +77,13 @@ internal object QaLensScreenCapture {
         val sourceWidth = decor.width
         val sourceHeight = decor.height
         if (sourceWidth <= 0 || sourceHeight <= 0) { onResult(null); return }
-        val overlay = if (manageOverlay) decor.findViewWithTag<View>(OVERLAY_TAG) else null
+        // Own only a visibility change made by this capture. An already-hidden recorder overlay
+        // must not be restored to INVISIBLE after a concurrent phone Stop has made it visible.
+        val overlay = if (manageOverlay) decor.findViewWithTag<View>(OVERLAY_TAG)?.takeIf { it.visibility == View.VISIBLE } else null
         val previousVisibility = overlay?.visibility
         overlay?.visibility = View.INVISIBLE
         val finish: (Bitmap?) -> Unit = { bmp ->
-            if (previousVisibility != null) overlay?.visibility = previousVisibility
+            if (previousVisibility != null && !QaLens.state.value.isRecording) overlay?.visibility = previousVisibility
             val after = if (bmp != null) maskBounds(activity) else emptyList()
             if (bmp != null && (!QaLens.config.value.enabled || epoch != QaLens.captureEpoch ||
                     activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0 || after == null ||

@@ -42,6 +42,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var videoOnly = false
     private var longSession = false
     private var bridgeOnly = false
+    private var desktopCaptureOnly = false
+    private var desktopGuiHoldSeconds = 0
     private var overlayLoadOnly = false
     private var controlOnly = false
     private var controlVideoOnly = false
@@ -64,6 +66,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         videoOnly = arguments?.getString("videoOnly") == "true"
         longSession = arguments?.getString("longSession") == "true"
         bridgeOnly = arguments?.getString("bridgeOnly") == "true"
+        desktopCaptureOnly = arguments?.getString("desktopCaptureOnly") == "true"
+        desktopGuiHoldSeconds = arguments?.getString("desktopGuiHoldSeconds")?.toIntOrNull() ?: 0
         overlayLoadOnly = arguments?.getString("overlayLoadOnly") == "true"
         controlOnly = arguments?.getString("controlOnly") == "true"
         controlVideoOnly = arguments?.getString("controlVideoOnly") == "true"
@@ -88,6 +92,16 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         val result = Bundle()
         var consent: java.util.concurrent.FutureTask<Unit>? = null
         try {
+            if (desktopGuiHoldSeconds > 0) {
+                DesktopCaptureChecks(this).holdGui(desktopGuiHoldSeconds)
+                result.putString("stream", "\nOK: Disposable desktop GUI fixture finished and restored HD policy.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (desktopCaptureOnly) {
+                DesktopCaptureChecks(this).run()
+                result.putString("stream", "\nOK: Desktop recording/clip commands, HD opt-in/pending consent/cancel, masked PNG capture and exact overlay restoration/security pass.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             if (dataUiOnly) {
                 AppDataUiChecks(this).run()
                 result.putString("stream", "\nOK: Control Room SQL picker/actions/results/cancellation and decoded DataStore values/redaction/foreground updates/pause/resume/stop pass.\n")

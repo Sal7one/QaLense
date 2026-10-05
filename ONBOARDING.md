@@ -242,8 +242,9 @@ python3 tools/local-bridge/server.py --gui
 # Open http://127.0.0.1:8765
 ```
 
-The desktop opens **Landing** with connection, screen mirror, semantics tree and selected element
-attributes together. Recordings, Saved elements, Automation, Replay and Device tools are one click
+The desktop opens **Landing** with connection and capture controls above adjustable panes:
+**screen mirror → selected element → semantics tree**. Drag the separators/bottom height handle;
+Reset layout restores defaults. Recordings, Saved elements, Automation, Replay and Device tools are one click
 away; Back/browser history work between pages. Both existing web players are embedded, and leaving
 replay pauses video. Phone tools need adb, an authorized device/emulator and the active QA build.
 After updating, rebuild the QA app and restart Python before testing.
@@ -261,13 +262,16 @@ See [startup recovery](tools/local-bridge/README.md#startup-recovery).
    outages within this approved session. A restart, device switch or revoked token requires approval
    again. **Stop PC inspector** on the phone revokes access; no app data is reset.
 3. Keep **Link phone & web selection** checked. Select in the phone inspector and its details load
-   in the browser; choose a tree element or preview rectangle and the phone highlights it.
+   in the browser; choose a tree element or **Inspect** mirror rectangle and the phone highlights it.
    Selection never taps the app. **Attributes**, **Selectors**, **Semantics**, **Tree position** and
    **Diagnostics** separate the details; tap/type/scroll use explicit buttons. Refresh after changes.
    Search tags/text/roles/actions and filter by action, role or tag presence.
-4. **Start preview** shows sampled live phone pixels (up to 1 fps), including other apps. It is
+4. **Start mirror** shows sampled live phone pixels (about 1 fps), including other apps. It is
    explicit, memory-only, unmasked and stops when leaving Landing/hiding the tab/disconnecting.
-   Click a matching visible Compose element to inspect it; actions require separate buttons.
+   **Control** is the default: tap, drag, wheel scroll and long-press operate the phone through adb.
+   **Preview** pauses input; **Inspect elements** shows all visible Compose outlines and selects
+   without clicking the host. Selecting a linked tree item enters inspection; Control/Done returns
+   to touch. **Fast mirror** opens installed scrcpy for lower-latency viewing in its own window.
 5. On the phone use **Inspect elements → Search selectors & tags**, or
    **Review evidence → Elements → Search**. Select a result; **Actions & XPath selectors** offers copyable
    selectors with match counts. In the browser **Selectors** adds a builder, live match checking and
@@ -288,7 +292,19 @@ Device tools offer Back/Home/Wake/Settings, explicit app launch, optional instal
 own window, and file push/pull through Downloads. Files are limited to 32 MiB; push replaces a
 same-name file, and pull writes under PC `transfers/`. The desktop does not install scrcpy.
 
-In **Recordings**, check completed phone archives, **Copy to PC**, then **Open replay**. Landing’s **Collect finished recordings** is off by default. Polling runs while the desktop page is visible, so keep it open for collection.
+Landing also offers **Start recording / Stop**, Frames or host-enabled HD with Android consent,
+10/20/60-second or custom 1–300-second **Mark clip**, and **Watch latest**. Clips keep capture running
+and become separate files after normal Stop; HD may start at a preceding keyframe. **Replay after
+Stop** explicitly waits for this master to save, copies it and opens the shared web player. These
+controls require the updated SDK in the consuming app; no sample-only code is needed.
+
+**Take screenshot** temporarily hides/restores the in-window overlay by default; **Include overlay**
+keeps its current visibility. This is a masked foreground app-window PNG, while the mirror is an
+unmasked whole-phone sample. Review, Save PNG or Copy image where supported; no automatic gallery
+or PC workspace save. Secure windows reject capture. Phone recording continues if the browser closes.
+
+In **Recordings**, check completed phone archives, **Copy to PC** or **Watch** to open replay.
+Landing’s **Collect finished recordings** is off by default. Polling runs while the desktop page is visible, so keep it open for collection.
 Enabling takes the existing phone library as a baseline and copies new
 completed files, including clips after stop. Temporary discovery/copy failures keep it enabled and
 retry with a bounded delay. Device switches, disconnects and revoked pairing stop it.

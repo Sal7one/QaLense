@@ -28,10 +28,13 @@ python3 tools/local-bridge/test_startup.py
 python3 tools/local-bridge/test_workbench.py
 python3 tools/local-bridge/test_connection.py
 python3 tools/local-bridge/test_desktop.py
+python3 tools/local-bridge/test_controls.py
 node --check tools/local-bridge/app.js
+node --check tools/local-bridge/mirror-controls.js
 node tools/local-bridge/test_recording_transfer.js
 node tools/local-bridge/test_polling.js
 node tools/local-bridge/test_selectors.js
+node tools/local-bridge/test_mirror.js
 ```
 
 The consumer fixture resolves normal `com.qalens:*` coordinates through `includeBuild`; it catches
@@ -81,6 +84,21 @@ against current system/IME insets; run with gesture and three-button navigation.
 [PC bridge guide](tools/local-bridge/README.md) describes pairing and adb-forward ownership.
 
 ## Focused device checks
+
+Desktop recording and screenshots have a focused real-protocol runner:
+
+```sh
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e desktopCaptureOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: Desktop recording/clip commands` and no `FAIL:`. It exercises frame Start/Stop/clip
+exports, host HD rejection, awaiting-consent cancellation, authenticated commands, PixelCopy PNG
+decoding/password masks, secure windows, exact overlay visibility and screenshot completion racing
+phone recording Start/Stop. It is separate from the full runner. For actual browser HD QA, the same
+runner accepts `-e desktopGuiHoldSeconds 300`: a temporary sample-only HD opt-in, normal app UI and
+ordinary phone pairing/OS consent. It restores HD policy/access on expiry and does not assert
+browser results itself. See the [desktop guide](tools/local-bridge/README.md#mobile-gestures-and-verification).
 
 Control Room SQL and real decoded Preferences DataStore have a focused UI runner:
 

@@ -15,10 +15,11 @@ import shlex
 import signal
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.client import IncompleteRead
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from workbench import Workbench, MAX_DOCUMENT, StorageUnavailable
-from desktop import WEB_ROOT, WEB_ASSETS, MAX_TRANSFER
+from desktop import WEB_ROOT, WEB_ASSETS, MAX_TRANSFER, png_size
 from urllib.parse import urlsplit, parse_qs
 import mimetypes
 from urllib.error import HTTPError, URLError
@@ -49,7 +50,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass  # Never log payloads or credentials.
 
-    def reply(self, status, payload, content_type="application/json; charset=utf-8"):
+    def reply(self, status, payload, content_type="application/json; charset=utf-8", headers=None):
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -57,6 +58,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "close")
         self.send_header("X-Content-Type-Options", "nosniff")
+        for key, value in (headers or {}).items(): self.send_header(key, value)
         # Existing replay permits explicit user-configured backend sends; shell APIs remain same-origin.
         connect = "'self' http: https:" if self.path.startswith("/web/") else "'self'"
         self.send_header("Content-Security-Policy", f"default-src 'self'; script-src 'self'; style-src 'self'; connect-src {connect}; frame-src 'self'; media-src 'self' blob:; img-src 'self' blob: data:; font-src 'self' data:; style-src-attr 'unsafe-inline'; frame-ancestors 'self'")
@@ -84,6 +86,7 @@ class Handler(BaseHTTPRequestHandler):
             if name not in WEB_ASSETS: return self.reply(404, {"ok": False, "error": "Unknown viewer asset"})
             return self.reply(200, (WEB_ROOT / name).read_bytes(), mimetypes.guess_type(name)[0] or "application/octet-stream")
         assets = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/recording-transfer.js": ("recording-transfer.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8")}
+        assets["/mirror-controls.js"] = ("mirror-controls.js", "text/javascript; charset=utf-8")
         if self.command == "GET" and self.path in assets:
             name, mime = assets[self.path]
             return self.reply(200, Path(__file__).with_name(name).read_bytes(), mime)
@@ -91,6 +94,7 @@ class Handler(BaseHTTPRequestHandler):
         if bench and self.command == "GET" and self.path == "/api/bootstrap":
             return self.reply(200, {"ok": True, "session": bench.session})
         endpoints = {("GET", "/api/recordings/device"): "/v1/recordings", ("GET", "/api/snapshot"): "/v1/snapshot", ("GET", "/api/selection"): "/v1/selection", ("POST", "/api/selectors"): "/v1/selectors", ("POST", "/api/query"): "/v1/query", ("GET", "/api/events"): "/v1/events", ("POST", "/api/command"): "/v1/command", ("POST", "/api/component"): "/v1/component", ("GET", "/api/inbox"): "/v1/components/inbox"}
+        endpoints.update({("POST", "/api/recording"): "/v1/recording", ("POST", "/api/inspection"): "/v1/inspection", ("POST", "/api/screenshot"): "/v1/screenshot"})
         route = endpoints.get((self.command, self.path))
         binary = parsed.path == "/api/recordings/file"
         if not route and not (bench and (self.path in WORKBENCH_ROUTES or binary)):
@@ -101,7 +105,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(401, {"ok": False, "error": "Reload the desktop page to renew its session. Scripts require a valid pairing token."})
         if self.path == "/api/screen" and self.command == "GET" and bench:
             try:
-                return self.reply(200, bench.desktop.screen(self.headers.get("X-Qalens-Connection", "")), "image/png")
+                pixels, frame_id = bench.desktop.screen(self.headers.get("X-Qalens-Connection", ""), with_meta=True)
+                return self.reply(200, pixels, "image/png", {"X-Qalens-Frame": frame_id})
             except (ValueError, OSError, subprocess.TimeoutExpired) as error:
                 return self.reply(400, {"ok": False, "error": str(error)[:256]})
         if binary and self.command == "GET" and bench:
@@ -155,7 +160,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(409, {"ok": False, "error": "Device connection changed; refresh the tree before selecting a target"})
                 if not desktop and not hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode()):
                     return self.reply(401, {"ok": False, "error": "Device pairing changed; connect again"})
+                if self.path == "/api/screenshot":
+                    code, pixels, mime = self.proxy_screenshot(body)
+                    return self.reply(code, pixels, mime)
                 code, payload = self.proxy(route, body, self.command)
+                if code == 200 and bench and self.path in {"/api/recording", "/api/inspection"}: payload["connectionId"] = bench.connection_id
                 if code == 200 and bench and self.path in {"/api/snapshot", "/api/selection", "/api/selectors", "/api/query", "/api/recordings/device"}: payload["connectionId"] = bench.connection_id
                 if code == 200 and bench and self.path == "/api/component":
                     payload = {"ok": True, "document": bench.preview(payload)}
@@ -190,6 +199,25 @@ class Handler(BaseHTTPRequestHandler):
         except (URLError, TimeoutError, ConnectionError, ValueError):
             return 502, {"ok": False, "error": "Phone unavailable. Check USB and return to the app. UI actions are never retried automatically."}
 
+    def proxy_screenshot(self, body):
+        request = Request(f"http://127.0.0.1:{self.server.device_port}/v1/screenshot", data=body,
+                          headers={"Authorization": f"Bearer {self.server.token}", "Content-Type": "application/json"}, method="POST")
+        try:
+            try: response = urlopen(request, timeout=5)
+            except HTTPError as error: response = error
+            with response:
+                if response.code != 200:
+                    payload = json.loads(response.read(MAX_RESPONSE + 1))
+                    return response.code, payload, "application/json; charset=utf-8"
+                pixels = response.read(16 * 1024 * 1024 + 1)
+                if len(pixels) > 16 * 1024 * 1024: raise ValueError("Screenshot exceeds 16 MiB")
+                declared = response.headers.get("Content-Length")
+                if declared is not None and int(declared) != len(pixels): raise ValueError("Screenshot transfer interrupted")
+                png_size(pixels)
+                return 200, pixels, "image/png"
+        except (URLError, OSError, IncompleteRead, ValueError):
+            return 502, {"ok": False, "error": "Screenshot unavailable. Update the app's QaLens SDK if needed, return to the app and try again."}, "application/json; charset=utf-8"
+
     def workbench_request(self, body):
         bench = self.server.workbench
         if self.command == "GET":
@@ -206,6 +234,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("POST required")
         if self.path == "/api/adb": return bench.desktop.task(body)
         if self.path == "/api/preview": return bench.desktop.preview(body)
+        if self.path == "/api/input": return bench.desktop.input(body)
         if self.path == "/api/connection/check": return bench.check_connection(self.server, body.get("reconnect", True) is True)
         if self.path == "/api/apps": return {"ok": True, "apps": bench.apps(body.get("serial"))}
         if self.path == "/api/preferences": return {"ok": True, "preferences": bench.save_preferences(body)}
@@ -243,7 +272,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 WORKBENCH_ROUTES = {"/api/workbench", "/api/saved", "/api/previews", "/api/devices", "/api/packages",
-                    "/api/apps", "/api/pair", "/api/connection/check", "/api/preview", "/api/screen", "/api/preferences",
+                    "/api/apps", "/api/pair", "/api/connection/check", "/api/preview", "/api/screen", "/api/input", "/api/preferences",
                     "/api/profile", "/api/profile/delete", "/api/connect", "/api/disconnect", "/api/launch",
                     "/api/adb", "/api/file/push", "/api/recordings/local", "/api/recordings/receive", "/api/import", "/api/save", "/api/document", "/api/run", "/api/artifacts", "/api/artifact"}
 

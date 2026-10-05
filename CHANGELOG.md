@@ -2,6 +2,21 @@
 
 ## Unreleased — post-0.9.0
 
+### Desktop mirror and capture workspace — 2026-10-05
+
+- Arrange Landing as resizable mirror, selected attributes and smaller semantics tree. Add height
+  adjustment, keyboard controls, remembered layout/reset and responsive window layouts.
+- Default to mirror Control with adb tap/swipe/wheel/long-press; add read-only Preview, Inspect
+  outlines/selection and explicit return to Control. Reject stale frames/connections/modes and
+  letterbox targets, pause hidden-page sampling and offer optional installed scrcpy.
+- Add Start/Stop, Frames/host-approved HD, recent clip presets/custom seconds, Watch latest and
+  opt-in exact-session replay after saving through the existing recorder and web player.
+- Add masked app-window screenshot review/save/copy with optional overlay and secure-window
+  refusal. Preserve overlay visibility during concurrent recording Start/Stop, bound binary
+  transfers, recycle canceled captures and explain offline/older-SDK capability states.
+- Extend authenticated internal SDK bridge capabilities, phone approval disclosure, HTTP/JS/native
+  regressions and integration documentation; retain public/no-op API and recording format.
+
 ### Desktop startup recovery — 2026-10-05
 
 - Replace raw permission/bind tracebacks with clear startup errors, nonzero exit status and quoted

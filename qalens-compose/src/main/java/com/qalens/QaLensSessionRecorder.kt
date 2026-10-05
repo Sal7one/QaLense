@@ -56,6 +56,16 @@ internal object QaLensSessionRecorder {
     /** True while a recording uses the floating system-window chip (overlay stays fully hidden). */
     val usesSystemChip: Boolean get() = systemChipMode
     internal val captureStartedAt: Long get() = startMs
+    // Read on main. Desktop commands use the same recorder and consent lifecycle as phone controls.
+    internal fun desktopStatus(): Map<String, Any?> = mapOf(
+        "phase" to lifecycle.phase.name.lowercase(), "mode" to if (videoMode) "hd" else "frames",
+        "startedAtMillis" to startMs.takeIf { recording }, "markedClips" to clipCount,
+        "sessionName" to "session_$startMs.sal",
+        "canClip" to (lifecycle.phase == RecordingLifecycle.Phase.CAPTURING && clipCount < 20),
+        "allowVideo" to QaLens.config.value.allowUnmaskedVideo,
+        "inspection" to QaLens.state.value.isInspectMode,
+        "capabilities" to listOf("recording-control", "inspection-control", "masked-screenshot")
+    )
     private val mediaLock = Any()
     @Volatile private var frameCounter = 0
     private val frameIndex = linkedMapOf<Long, String>()

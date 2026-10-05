@@ -5,10 +5,16 @@ let selectionGeneration = 0, previewGeneration = 0, previewEnabled = false, prev
 let snapshot = null, selected = null, busy = false, session = '', workbench = null, component = null, previews = [], activeProfile = null, polling = false, savedHashes = new Set();
 let selectorBundle = null, queryGeneration = 0, selectionPolling = false, lastPhoneSelection = null, choosing = 0;
 let highlightQueue = Promise.resolve();
+let mirrorMode = 'control', mirrorInspect = false, mirrorInputBusy = false, mirrorPointer = null, mirrorFrame = null;
+let captureState = null, captureConnection = null, capturePolling = false, phoneArchiveList = [], pendingReplay = null;
+let screenshotUrl = '', screenshotBlob = null;
+let mirrorModeGeneration = 0;
+let lastPreviewRequest = 0, treeRefreshTimer = null;
+let captureChecked = false, captureIssue = '';
 const status = text => { $('status').textContent = text; };
-async function api(path, command) {
+async function api(path, command, connectionId = workbench?.connectionId) {
   const headers = {'X-Qalens-Session': session};
-  if (workbench?.connectionId) headers['X-Qalens-Connection'] = workbench.connectionId;
+  if (connectionId) headers['X-Qalens-Connection'] = connectionId;
   if (command) headers['Content-Type'] = 'application/json';
   const response = await fetch(`/api/${path}`, {method: command ? 'POST' : 'GET', headers, body: command ? JSON.stringify(command) : undefined, cache: 'no-store'});
   const result = await response.json();
@@ -25,6 +31,7 @@ const pageNames = {landing: 'Landing', devices: 'Device tools', library: 'Saved 
 function tab(id, push = true) {
   if (!pageNames[id]) { id = 'landing'; if (!push) history.replaceState(history.state, '', '#landing'); }
   if (id !== 'landing' && previewEnabled) void stopPreview();
+  if (!['landing', 'recordings'].includes(id)) pendingReplay = null;
   if (push && location.hash !== `#${id}`) history.pushState({qalens: true}, '', `#${id}`);
   document.querySelectorAll('.page').forEach(page => { page.hidden = page.id !== id; });
   document.querySelectorAll('[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === id));
@@ -79,6 +86,9 @@ function render() {
     while (ancestor && !seen.has(ancestor) && depth < 12) { seen.add(ancestor); depth++; ancestor = parents.get(ancestor); }
     const element = button(`${node.tag ? `[${node.tag}] ` : ''}${node.label} · ${node.actions.join(', ') || node.role || 'node'}`, () => choose(node), $('tree'), `node${selected?.id === node.id ? ' selected' : ''}`);
     element.style.paddingInlineStart = `${10 + depth * 12}px`;
+  }
+  // Inspection exposes the whole visible tree even while the side tree is filtered.
+  for (const node of snapshot.nodes) {
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect'), b = node.bounds;
     rect.setAttribute('x', b.left + (snapshot.viewport.originX || 0)); rect.setAttribute('y', b.top + (snapshot.viewport.originY || 0)); rect.setAttribute('width', b.right-b.left); rect.setAttribute('height', b.bottom-b.top); rect.setAttribute('class', selected?.id === node.id ? 'selected' : '');
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = node.tag || node.label;
@@ -104,7 +114,11 @@ async function choose(node, origin = 'pc') {
         const highlight = highlightQueue.catch(() => {}).then(async () => {
           if (generation !== selectionGeneration || connectionId !== workbench?.connectionId || !$('link-selections').checked) return;
           await api('command', {action: 'select', id: node.id});
-          if (generation === selectionGeneration) lastPhoneSelection = node.id;
+          if (generation === selectionGeneration) {
+            lastPhoneSelection = node.id;
+            ++mirrorModeGeneration; mirrorInspect = true; mirrorPointer = null; mirrorFrame = null; mirrorUi();
+            if (previewEnabled) await api('preview', {enabled: true, mode: 'inspect', connectionId});
+          }
         });
         highlightQueue = highlight; await highlight;
       }
@@ -178,6 +192,7 @@ function renderPreviews() {
 async function loadWorkbench() {
   workbench = await api('workbench');
   const connection = workbench.connection;
+  if (captureConnection !== workbench.connectionId || !workbench.connected) resetCapture();
   recordingTransfer.checkConnection(workbench.connectionId, workbench.connected);
   document.querySelector('[data-adb="mirror"]').title = workbench.scrcpyAvailable ? 'Start installed scrcpy' : 'Install scrcpy to enable this tool';
   $('auto-connect').checked = workbench.preferences.autoConnect;
@@ -416,14 +431,21 @@ async function copyRecording(name, connectionId = workbench.connectionId) {
   await localRecordings(); return result;
 }
 async function phoneRecordings(connectionId = workbench.connectionId) {
+  const modeGeneration = mirrorModeGeneration;
   const result = await api('recordings/device');
   if (result.connectionId !== connectionId || workbench.connectionId !== connectionId) { const error = Error('Device changed during recording discovery; refresh before copying'); error.status = 409; throw error; }
   $('recording-state').textContent = result.recording ? 'Phone is recording. Bug clips save after the session stops.' : result.saving ? 'Phone is saving; waiting for completed files.' : 'Phone is ready. Completed archives appear below.';
+  captureConnection = connectionId; captureState = result.controls || null; captureChecked = true; captureIssue = ''; phoneArchiveList = result.items; captureUi();
+  if (modeGeneration === mirrorModeGeneration && typeof captureState?.inspection === 'boolean' && mirrorInspect !== captureState.inspection) {
+    ++mirrorModeGeneration; mirrorInspect = captureState.inspection; mirrorPointer = null; mirrorFrame = null; mirrorUi();
+    if (previewEnabled) { ++previewGeneration; await api('preview', {enabled: true, mode: mirrorInspect ? 'inspect' : mirrorMode, connectionId}); }
+  }
   $('phone-recordings').replaceChildren();
   for (const entry of result.items) {
     const line = documentElement('div', 'toolbar'); $('phone-recordings').append(line);
     const label = documentElement('span', ''); label.textContent = `${entry.name} · ${(entry.size / 1048576).toFixed(1)} MiB`; line.append(label);
     button('Copy to PC', () => perform(() => copyRecording(entry.name, connectionId)), line);
+    button('Watch', () => perform(async () => { const copied = await copyRecording(entry.name, connectionId); if (connectionId === workbench.connectionId) await openRecording(copied.id); }), line);
   }
   return result;
 }
@@ -529,61 +551,166 @@ $('copy-tag').onclick = () => perform(async () => {
   if (!tag) return;
   await navigator.clipboard.writeText(tag); status('Test tag copied.');
 });
+function mirrorUi() {
+  const control = mirrorMode === 'control' && !mirrorInspect;
+  $('mode-control').classList.toggle('active', control);
+  $('mode-preview').classList.toggle('active', mirrorMode === 'preview' && !mirrorInspect);
+  $('mode-inspect').classList.toggle('active', mirrorInspect);
+  for (const [id, active] of [['mode-control', control], ['mode-preview', mirrorMode === 'preview' && !mirrorInspect], ['mode-inspect', mirrorInspect]]) $(id).setAttribute?.('aria-pressed', String(active));
+  $('phone-canvas').classList.toggle('control', control);
+  $('phone-canvas').classList.toggle('inspect', mirrorInspect);
+  $('map').classList.toggle('inspecting', mirrorInspect);
+  $('map').hidden = !previewEnabled;
+  $('mode-inspect').textContent = mirrorInspect ? 'Done inspecting' : 'Inspect elements';
+  $('mirror-note').textContent = mirrorInspect ? 'Click any outlined Compose element to inspect it. Host taps are paused. Tree search does not hide outlines.' : control ? 'Click, drag, wheel scroll or hold to long press. The whole phone is visible; frames stay in memory.' : 'Read-only preview. Touch and navigation controls are paused. Enable Inspect to select elements.';
+  connectionButtons();
+}
+async function setMirrorMode(mode, inspect = false) {
+  const connectionId = workbench?.connectionId;
+  ++mirrorModeGeneration;
+  mirrorPointer = null; mirrorFrame = null;
+  // Wait for an already-dispatched highlight before closing inspection. Queued highlights are
+  // superseded, and never reopen the phone inspector after Control is restored.
+  ++selectionGeneration;
+  await highlightQueue.catch(() => {});
+  if (connectionId !== workbench?.connectionId) throw Error('Connection changed. Choose the mirror mode again.');
+  if (workbench?.connected) {
+    try { await api('inspection', {enabled: inspect}, connectionId); }
+    catch (error) { if (error.status !== 404) throw error; status('This app uses an older SDK. Update QaLens for desktop inspection mode control.'); }
+  }
+  if (connectionId !== workbench?.connectionId) throw Error('Connection changed. Choose the mirror mode again.');
+  mirrorMode = mode; mirrorInspect = inspect; mirrorUi();
+  if (previewEnabled) { ++previewGeneration; await api('preview', {enabled: true, mode: inspect ? 'inspect' : mode, connectionId: workbench.connectionId}); await previewFrame(); }
+}
+$('mode-control').onclick = () => perform(() => setMirrorMode('control'));
+$('mode-preview').onclick = () => perform(() => setMirrorMode('preview'));
+$('mode-inspect').onclick = () => perform(async () => {
+  const enabled = !mirrorInspect;
+  if (enabled) await refresh();
+  await setMirrorMode(mirrorMode, enabled);
+});
 async function stopPreview() {
-  previewGeneration++; previewEnabled = false; $('preview-toggle').textContent = 'Start preview';
+  previewGeneration++; previewEnabled = false; mirrorPointer = null; mirrorFrame = null; $('preview-toggle').textContent = 'Start mirror';
   $('screen-image').hidden = true; $('screen-image').removeAttribute('src');
   if (previewUrl) URL.revokeObjectURL(previewUrl); previewUrl = '';
-  $('mirror-empty').hidden = false; $('map').classList.remove('selectable');
-  $('mirror-state').textContent = 'Preview off · no screen frames are captured';
+  $('mirror-empty').hidden = false; $('map').classList.remove('selectable'); $('map').hidden = true;
+  $('mirror-state').textContent = 'Mirror off · no screen frames are captured';
   if (workbench?.connection && session) { try { await api('preview', {enabled: false, connectionId: workbench.connectionId}); } catch (_) { /* Local UI always stops sampling. */ } }
+  connectionButtons();
 }
 $('preview-toggle').onclick = () => perform(async () => {
   if (previewEnabled) { await stopPreview(); return; }
-  await api('preview', {enabled: true, connectionId: workbench?.connectionId});
-  previewGeneration++; previewEnabled = true; $('preview-toggle').textContent = 'Stop preview';
-  $('mirror-state').textContent = 'Live preview · up to 1 frame/sec · memory only';
-  await previewFrame();
+  await setMirrorMode(mirrorMode, mirrorInspect);
+  await api('preview', {enabled: true, mode: mirrorInspect ? 'inspect' : mirrorMode, connectionId: workbench?.connectionId});
+  previewGeneration++; previewEnabled = true; $('preview-toggle').textContent = 'Stop mirror';
+  await previewFrame(); mirrorUi();
 });
 async function previewFrame() {
-  if (!previewEnabled || previewBusy || document.hidden || location.hash !== '#landing') return;
+  if (!previewEnabled || previewBusy || mirrorPointer || mirrorInputBusy || document.hidden || location.hash !== '#landing' || Date.now() - lastPreviewRequest < 1000) return;
   previewBusy = true;
+  lastPreviewRequest = Date.now();
   const id = workbench?.connectionId, generation = previewGeneration;
   try {
     const response = await fetch('/api/screen', {headers: {'X-Qalens-Session': session, 'X-Qalens-Connection': id}, cache: 'no-store'});
     if (!response.ok) throw Error((await response.json()).error);
-    const blob = await response.blob();
+    const frameId = response.headers.get('X-Qalens-Frame'), blob = await response.blob();
     if (!previewEnabled || id !== workbench?.connectionId || generation !== previewGeneration) return;
-    const previous = previewUrl; previewUrl = URL.createObjectURL(blob);
-    $('screen-image').src = previewUrl; $('screen-image').hidden = false; $('mirror-empty').hidden = true;
-    $('map').classList.add('selectable'); if (previous) URL.revokeObjectURL(previous);
-    $('mirror-state').textContent = 'Live preview · click to inspect · memory only';
-  } catch (error) { if (previewEnabled && generation === previewGeneration) $('mirror-state').textContent = `${error.message} · preview will retry`; }
+    const previous = previewUrl, url = URL.createObjectURL(blob); previewUrl = url;
+    // Publish the lease only after the exact frame decoded. A pending/new URL is not touchable.
+    mirrorFrame = null;
+    $('screen-image').onload = () => {
+      if (url !== previewUrl || generation !== previewGeneration || id !== workbench?.connectionId || !previewEnabled) return;
+      mirrorFrame = {id: frameId, connectionId: id, width: $('screen-image').naturalWidth, height: $('screen-image').naturalHeight, at: Date.now()};
+      $('screen-image').hidden = false; $('mirror-empty').hidden = true; $('map').hidden = false;
+      $('mirror-state').textContent = `${mirrorInspect ? 'Inspect' : mirrorMode === 'control' ? 'Control' : 'Preview'} · about 1 frame/sec · memory only`;
+    };
+    $('screen-image').onerror = () => { mirrorFrame = null; $('mirror-state').textContent = 'Frame could not be decoded; wait for the next frame.'; };
+    $('screen-image').src = url;
+    if (previous) URL.revokeObjectURL(previous);
+  } catch (error) { if (previewEnabled && generation === previewGeneration) { mirrorFrame = null; $('mirror-state').textContent = `${error.message} · waiting for a fresh frame`; } }
   finally { previewBusy = false; }
 }
 setInterval(() => { void previewFrame(); }, 1200);
-$('map').onclick = async event => {
-  if (!snapshot || liveSelecting || busy) return;
+function mirrorPoint(event, outside = false, frame = mirrorFrame) {
+  if (!previewEnabled || !frame || frame.connectionId !== workbench?.connectionId || Date.now() - frame.at > 5500) return null;
+  return QaLensMirror.point($('phone-canvas').getBoundingClientRect(), frame.width, frame.height, event.clientX, event.clientY, outside);
+}
+async function inspectPoint(point, frame) {
+  if (!mirrorInspect || liveSelecting || busy) return;
   liveSelecting = true;
-  try { await refresh(); } catch (error) { status(error.message); liveSelecting = false; return; }
-  liveSelecting = false;
-  const viewport = snapshot.screenViewport || snapshot.viewport, image = $('screen-image');
-  if (!previewEnabled || image.naturalWidth !== viewport.width || image.naturalHeight !== viewport.height) { status('Refresh the tree with the app in front to align selection with this screen.'); return; }
-  const box = $('map').getBoundingClientRect(), scale = Math.min(box.width / viewport.width, box.height / viewport.height);
-  const x = (event.clientX - box.left - (box.width - viewport.width * scale) / 2) / scale - (snapshot.viewport.originX || 0);
-  const y = (event.clientY - box.top - (box.height - viewport.height * scale) / 2) / scale - (snapshot.viewport.originY || 0);
-  const candidates = snapshot.nodes.filter(n => x >= n.bounds.left && x <= n.bounds.right && y >= n.bounds.top && y <= n.bounds.bottom);
-  candidates.sort((a,b) => (a.bounds.right-a.bounds.left)*(a.bounds.bottom-a.bounds.top) - (b.bounds.right-b.bounds.left)*(b.bounds.bottom-b.bounds.top));
-  if (candidates[0]) await choose(candidates[0]); else status('No public Compose element at that position.');
-};
-document.addEventListener('visibilitychange', () => { if (document.hidden) void stopPreview(); });
-window.addEventListener('pagehide', () => { previewEnabled = false; if (previewUrl) URL.revokeObjectURL(previewUrl); });
+  const connectionId = workbench.connectionId;
+  try {
+    await refresh();
+    if (!mirrorInspect || connectionId !== workbench.connectionId || !snapshot || snapshot.connectionId !== connectionId) return;
+    const viewport = snapshot.screenViewport || snapshot.viewport;
+    if (frame.width !== viewport.width || frame.height !== viewport.height) throw Error('Screen rotated. Wait for a fresh frame and inspect again.');
+    const x = point.x * frame.width - (snapshot.viewport.originX || 0), y = point.y * frame.height - (snapshot.viewport.originY || 0);
+    const candidates = snapshot.nodes.filter(n => x >= n.bounds.left && x <= n.bounds.right && y >= n.bounds.top && y <= n.bounds.bottom);
+    candidates.sort((a,b) => (a.bounds.right-a.bounds.left)*(a.bounds.bottom-a.bounds.top) - (b.bounds.right-b.bounds.left)*(b.bounds.bottom-b.bounds.top));
+    if (candidates[0]) await choose(candidates[0]); else status('No public Compose element at that position.');
+  } catch (error) { status(error.message); }
+  finally { liveSelecting = false; }
+}
+async function sendMirrorGesture(gesture, frame) {
+  if (!gesture || busy || mirrorInputBusy || mirrorInspect || mirrorMode !== 'control' || !previewEnabled || frame.connectionId !== workbench?.connectionId || document.hidden) return;
+  mirrorInputBusy = true; connectionButtons();
+  try {
+    await api('input', {...gesture, frameId: frame.id, connectionId: frame.connectionId});
+    if (frame.connectionId !== workbench?.connectionId) return;
+    status(`${gesture.action === 'long-press' ? 'Long press' : gesture.action === 'swipe' ? 'Swipe' : 'Tap'} sent to phone.`);
+    // Refresh the tree after input; the phone may have navigated. No retry of the action itself.
+    clearTimeout(treeRefreshTimer);
+    treeRefreshTimer = setTimeout(async () => {
+      if (frame.connectionId !== workbench?.connectionId || busy || choosing || document.hidden || location.hash !== '#landing') return;
+      try { await refresh(); } catch (_) { $('screen').textContent = 'Return to the QaLens app, then Refresh the tree.'; }
+    }, 350);
+  } catch (error) { status(`${error.message} Touch was not retried.`); }
+  finally { mirrorInputBusy = false; connectionButtons(); void previewFrame(); }
+}
+const canvas = $('phone-canvas');
+canvas.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || busy || mirrorInputBusy || liveSelecting || mirrorPointer || (!mirrorInspect && mirrorMode !== 'control')) return;
+  const point = mirrorPoint(event); if (!point) return;
+  event.preventDefault(); canvas.focus({preventScroll: true}); canvas.setPointerCapture(event.pointerId);
+  mirrorPointer = {pointerId: event.pointerId, point, frame: mirrorFrame, at: Date.now()}; canvas.classList.add('gesturing');
+});
+canvas.addEventListener('pointerup', event => {
+  const start = mirrorPointer; mirrorPointer = null; canvas.classList.remove('gesturing');
+  if (!start || event.pointerId !== start.pointerId) return;
+  const end = mirrorPoint(event, true, start.frame); if (!end) return;
+  if (mirrorInspect) {
+    if (Math.hypot((end.x - start.point.x) * start.frame.width, (end.y - start.point.y) * start.frame.height) < 15) void inspectPoint(end, start.frame);
+  } else void sendMirrorGesture(QaLensMirror.gesture(start.point, end, Date.now() - start.at, start.frame.width, start.frame.height), start.frame);
+});
+for (const event of ['pointercancel', 'lostpointercapture']) canvas.addEventListener(event, () => { mirrorPointer = null; canvas.classList.remove('gesturing'); });
+canvas.addEventListener('wheel', event => {
+  const point = mirrorPoint(event);
+  if (!point || mirrorInspect || mirrorMode !== 'control' || mirrorPointer) return;
+  event.preventDefault();
+  const scale = event.deltaMode === 1 ? 32 : event.deltaMode === 2 ? mirrorFrame.height : 1;
+  void sendMirrorGesture(QaLensMirror.wheel(point, event.deltaX * scale, event.deltaY * scale, mirrorFrame.width, mirrorFrame.height), mirrorFrame);
+}, {passive: false});
+canvas.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || !previewEnabled || !workbench?.connected || mirrorMode !== 'control' || mirrorInspect || busy || mirrorInputBusy) return;
+  event.preventDefault(); void perform(async () => { const result = await api('adb', {action: 'back', connectionId: workbench.connectionId}); status(result.notice); });
+});
+canvas.addEventListener('contextmenu', event => event.preventDefault());
+$('fast-mirror').onclick = () => perform(async () => { status((await api('adb', {action: 'mirror', connectionId: workbench.connectionId})).notice); });
+// The former map click path is deliberately replaced by pointer routing on the complete canvas.
+$('map').onclick = null;
+document.addEventListener('visibilitychange', () => { if (document.hidden) { mirrorPointer = null; void stopPreview(); } });
+window.addEventListener('pagehide', () => { previewEnabled = false; mirrorPointer = null; if (previewUrl) URL.revokeObjectURL(previewUrl); if (screenshotUrl) URL.revokeObjectURL(screenshotUrl); });
 
 function connectionButtons() {
-  const ready = !!workbench?.connected;
+  const ready = !!workbench?.connected && (!workbench.phase || workbench.phase === 'connected');
   $('disconnect').disabled = !workbench?.connection && !ready || busy;
-  $('preview-toggle').disabled = !ready || busy;
+  $('preview-toggle').disabled = !ready || busy || mirrorInputBusy;
+  for (const id of ['mode-control', 'mode-preview', 'mode-inspect']) $(id).disabled = !ready || busy || mirrorInputBusy || (id === 'mode-inspect' && (captureState?.phase === 'capturing' || captureState?.phase === 'awaiting_consent'));
+  $('fast-mirror').disabled = !ready || busy || !workbench?.scrcpyAvailable;
   $('receive').disabled = !ready;
   $('auto-recordings').disabled = !ready;
+  for (const item of document.querySelectorAll('#landing [data-adb]')) item.disabled = !ready || busy || mirrorInputBusy || mirrorInspect || mirrorMode !== 'control';
+  captureUi();
 }
 
 $('auto-connect').onchange = () => perform(async () => {
@@ -619,3 +746,114 @@ function clearComponent() {
   $('component-json').textContent = 'No component selected';
   componentButtons();
 }
+
+function resetCapture() {
+  captureState = null; captureChecked = false; captureIssue = ''; captureConnection = workbench?.connectionId || null; phoneArchiveList = []; pendingReplay = null;
+  $('watch-after-stop').checked = false; captureUi();
+}
+function captureUi() {
+  const ready = !!workbench?.connected && (!workbench.phase || workbench.phase === 'connected') && captureConnection === workbench.connectionId;
+  const capable = ready && captureState?.capabilities?.includes('recording-control');
+  const phase = captureState?.phase, active = phase === 'capturing', awaiting = phase === 'awaiting_consent';
+  const video = $('record-mode').value === 'hd';
+  $('record-start').disabled = !capable || busy || mirrorInputBusy || phase !== 'idle' || (video && !captureState.allowVideo);
+  $('record-stop').disabled = !capable || busy || mirrorInputBusy || (!active && !awaiting);
+  $('record-stop').textContent = awaiting ? 'Cancel HD request' : '■ Stop';
+  $('record-clip').disabled = !capable || busy || mirrorInputBusy || !captureState.canClip;
+  $('record-mode').disabled = !capable || busy || phase !== 'idle';
+  for (const option of $('record-mode').options || []) if (option.value === 'hd') option.disabled = !captureState?.allowVideo;
+  $('screenshot').disabled = !ready || busy || mirrorInputBusy || !captureState?.capabilities?.includes('masked-screenshot');
+  $('watch-latest').disabled = busy || mirrorInputBusy || !!pendingReplay;
+  const text = !ready ? (workbench?.phase === 'reconnecting' ? 'Reconnecting · capture controls paused' : 'Connect to use capture controls') : captureIssue ? 'Phone unavailable · capture controls paused' : !capable ? (captureChecked ? 'Update the app’s QaLens SDK for capture controls' : 'Checking capture support…') : awaiting ? 'Approve HD on the phone · no capture yet' : active ? `Recording ${captureState.mode === 'hd' ? 'HD' : 'frames'} · ${captureState.markedClips} clip(s) marked` : phase === 'saving' ? 'Saving recording & clips…' : 'Ready to record';
+  $('capture-state').textContent = text; $('capture-state').className = `capture-state ${active ? 'recording' : phase === 'saving' || awaiting ? 'saving' : ''}`;
+  if (pendingReplay) $('capture-note').textContent = 'Waiting for this session to finish saving, then copying it to replay…';
+  else $('capture-note').textContent = captureIssue ? captureIssue : !capable && ready && captureChecked ? 'Mirror and tree still work. New capture controls need the updated SDK in the app.' : video && !captureState?.allowVideo && ready ? 'This host has not enabled unmasked HD video. Choose Frames for privacy-masked capture.' : 'Capture starts only when you click. Clips export after Stop. Screenshots mask private semantics; HD video has no masks.';
+}
+async function captureCommand(action) {
+  const connectionId = workbench.connectionId;
+  const command = {action};
+  if (action === 'start') {
+    pendingReplay = null;
+    await setMirrorMode(mirrorMode, false);
+    command.video = $('record-mode').value === 'hd';
+  }
+  if (connectionId !== workbench?.connectionId) throw Error('Connection changed. Request recording again on the intended phone.');
+  if (action === 'clip') {
+    const value = $('clip-duration').value === 'custom' ? $('clip-custom').value : $('clip-duration').value;
+    const seconds = Number(value);
+    if (!Number.isInteger(seconds) || seconds < 1 || seconds > 300) throw Error('Choose 1–300 whole seconds for the clip.');
+    command.seconds = seconds; command.label = `Bug clip · last ${seconds}s`;
+  }
+  const before = captureState;
+  const result = await api('recording', command, connectionId);
+  if (connectionId !== workbench.connectionId || result.connectionId !== connectionId) return;
+  captureState = result.controls; captureConnection = connectionId;
+  if (action === 'stop' && before?.phase === 'capturing' && $('watch-after-stop').checked) {
+    pendingReplay = {connectionId, name: before.sessionName, deadline: Date.now() + 120000};
+  }
+  status(action === 'clip' ? `Last ${command.seconds}s marked. Recording continues; clip export happens after Stop.` : result.notice);
+  captureUi(); await phoneRecordings(connectionId);
+}
+$('record-start').onclick = () => perform(() => captureCommand('start'));
+$('record-stop').onclick = () => perform(() => captureCommand('stop'));
+$('record-clip').onclick = () => perform(() => captureCommand('clip'));
+$('record-mode').onchange = captureUi;
+$('clip-duration').onchange = () => { $('clip-custom-label').hidden = $('clip-duration').value !== 'custom'; };
+$('watch-after-stop').onchange = () => { if (!$('watch-after-stop').checked) { pendingReplay = null; captureUi(); } };
+async function pollCapture() {
+  if (!session || !workbench?.connected || busy || capturePolling || mirrorInputBusy || document.hidden || !['landing', 'recordings'].includes(location.hash.slice(1))) return;
+  capturePolling = true; const connectionId = workbench.connectionId;
+  try {
+    await phoneRecordings(connectionId);
+    if (pendingReplay && pendingReplay.connectionId === connectionId && captureState?.phase === 'idle') {
+      const pending = pendingReplay, saved = phoneArchiveList.find(item => item.name === pending.name);
+      if (saved) {
+        pendingReplay = null;
+        await perform(async () => { const copied = await copyRecording(saved.name, connectionId); if (workbench.connectionId === connectionId && $('watch-after-stop').checked) await openRecording(copied.id); });
+      }
+    }
+    if (pendingReplay && Date.now() > pendingReplay.deadline) { pendingReplay = null; status('Saving took longer than expected. Check Recordings and choose Watch when the session appears.'); }
+  } catch (error) {
+    if (connectionId !== workbench?.connectionId) return;
+    captureState = null; captureIssue = error.message; captureUi();
+    if (pendingReplay) { pendingReplay = null; status(`${error.message} Automatic replay cancelled; reconnect and choose Watch.`); }
+  } finally { capturePolling = false; }
+}
+setInterval(() => { void pollCapture(); }, 2000);
+$('watch-latest').onclick = () => perform(async () => {
+  if (workbench?.connected) {
+    const connectionId = workbench.connectionId, phone = await phoneRecordings(connectionId);
+    if (phone.saving) throw Error('Recording is still saving. Wait for Ready, then choose Watch latest.');
+    if (phone.items.length) {
+      const copied = await copyRecording(phone.items[0].name, connectionId);
+      if (connectionId === workbench.connectionId) await openRecording(copied.id);
+      return;
+    }
+  }
+  const local = await api('recordings/local');
+  if (!local.items.length) throw Error('No finished recordings yet. Stop a recording, then choose Watch latest.');
+  await openRecording(local.items[0].id);
+});
+function saveScreenshot() {
+  if (!screenshotUrl) return;
+  const link = document.createElement('a'); link.href = screenshotUrl; link.download = `qalens-${Date.now()}.png`; document.body.append(link); link.click(); link.remove();
+}
+$('screenshot').onclick = () => perform(async () => {
+  const connectionId = workbench.connectionId, includeOverlay = $('screenshot-overlay').checked;
+  const response = await fetch('/api/screenshot', {method: 'POST', headers: {'X-Qalens-Session': session, 'X-Qalens-Connection': connectionId, 'Content-Type': 'application/json'}, body: JSON.stringify({includeOverlay}), cache: 'no-store'});
+  if (!response.ok) throw Error((await response.json()).error);
+  const blob = await response.blob();
+  if (connectionId !== workbench.connectionId) return;
+  if (screenshotUrl) URL.revokeObjectURL(screenshotUrl);
+  screenshotBlob = blob; screenshotUrl = URL.createObjectURL(blob); $('screenshot-image').src = screenshotUrl;
+  $('screenshot-description').textContent = includeOverlay ? 'App window with the current QaLens overlay. Private semantics are masked.' : 'App window with QaLens overlay hidden during capture and restored afterwards. Private semantics are masked.';
+  $('screenshot-review').showModal(); status('Screenshot ready. Review, copy or save the PNG.');
+});
+$('screenshot-save').onclick = saveScreenshot;
+$('screenshot-close').onclick = () => $('screenshot-review').close();
+$('screenshot-copy').onclick = () => perform(async () => {
+  if (!screenshotBlob || typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) throw Error('Image clipboard is unavailable in this browser. Use Save PNG.');
+  await navigator.clipboard.write([new ClipboardItem({'image/png': screenshotBlob})]); status('Screenshot copied.');
+});
+try { if (typeof QaLensMirror !== 'undefined') QaLensMirror.installLayout(document, window.localStorage); } catch (_) { /* Storage restrictions do not block capture/inspection. */ }
+mirrorUi(); captureUi();
