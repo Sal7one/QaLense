@@ -9,6 +9,7 @@ import secrets
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from urllib.error import HTTPError, URLError
@@ -18,6 +19,23 @@ KILL = getattr(signal, "SIGKILL", signal.SIGTERM)
 MAX_DOCUMENT = 256 * 1024
 HASH = re.compile(r"[0-9a-f]{64}")
 PACKAGE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+")
+
+
+class StorageUnavailable(OSError):
+    """A specific workspace directory could not be created or written."""
+    def __init__(self, directory, error):
+        super().__init__(error.errno, error.strerror or str(error), str(directory))
+
+
+def prepare_directory(directory):
+    """Check actual writes, including existing directories; access()/mkdir alone are insufficient."""
+    try:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=".qalens-write-check-") as probe:
+            probe.write(b"QaLens")
+            probe.flush()
+    except OSError as error:
+        raise StorageUnavailable(directory, error) from error
 
 
 def canonical(document):
@@ -96,10 +114,10 @@ def profile(input):
 
 class Workbench:
     def __init__(self, data_dir, adb=None, pipeline_config=None):
-        self.root = Path(data_dir).expanduser()
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.root = Path(data_dir).expanduser().absolute()
+        prepare_directory(self.root)
         for name in ("components", "runs"):
-            (self.root / name).mkdir(exist_ok=True, mode=0o700)
+            prepare_directory(self.root / name)
         self.adb = adb
         self.lock = threading.RLock()
         self.preview_dropped = 0

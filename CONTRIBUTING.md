@@ -24,6 +24,7 @@ checks are separate.
 node web/test/read.test.js
 python3 backend/tests/test_backend.py
 python3 tools/local-bridge/test_server.py
+python3 tools/local-bridge/test_startup.py
 python3 tools/local-bridge/test_workbench.py
 python3 tools/local-bridge/test_connection.py
 python3 tools/local-bridge/test_desktop.py

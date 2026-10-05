@@ -2,6 +2,16 @@
 
 ## Unreleased — post-0.9.0
 
+### Desktop startup recovery — 2026-10-05
+
+- Replace raw permission/bind tracebacks with clear startup errors, nonzero exit status and quoted
+  recovery commands. Write-check every workspace directory, including existing read-only folders,
+  while preserving saved data and permissions. Explain file-versus-directory and config failures.
+- Support `--port 0` for OS-selected loopback ports and print the actual HTTP URL. Keep fixed ports
+  explicit; report occupied ports before terminal credentials or adb forwarding. Preserve scoped
+  forward cleanup on shutdown and leave existing listeners intact.
+- Add real subprocess/permission/listener/GUI/forward-cleanup tests to CI and document recovery.
+
 ### Compose host compatibility and quick actions — 2026-10-05
 
 - Fix the reproduced Control Room `FlowRow` `NoSuchMethodError` with newer host Foundation:

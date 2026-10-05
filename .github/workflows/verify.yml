@@ -41,6 +41,7 @@ jobs:
       - name: Local PC bridge regression tests
         run: |
           python3 tools/local-bridge/test_server.py
+          python3 tools/local-bridge/test_startup.py
           python3 tools/local-bridge/test_workbench.py
           python3 tools/local-bridge/test_connection.py
           python3 tools/local-bridge/test_desktop.py

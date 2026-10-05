@@ -3,6 +3,15 @@
 Updated 2026-10-05. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Completed 2026-10-05: desktop startup recovery
+
+- [x] Reproduce permission and occupied-port tracebacks with disposable storage/listeners; replace
+  them with precise startup messages, nonzero exits and quoted recovery commands.
+- [x] Write-check existing workspace folders, preserve permissions/data, support `--port 0` and
+  bind before credentials/adb. Verify real GUI startup, stop and scoped terminal forward cleanup.
+- [x] Add CLI regressions to CI and update desktop/onboarding recovery guidance. POSIX permissions
+  are tested on a non-root account; Windows ACL behavior still needs platform validation.
+
 ## Completed 2026-10-05: overlay compatibility and quick actions
 
 - [x] Reproduce the exact Control Room crash in an external consumer: SDK Foundation 1.7.6 versus

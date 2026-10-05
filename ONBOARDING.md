@@ -248,6 +248,11 @@ away; Back/browser history work between pages. Both existing web players are emb
 replay pauses video. Phone tools need adb, an authorized device/emulator and the active QA build.
 After updating, rebuild the QA app and restart Python before testing.
 
+If startup reports an occupied port, use the existing QaLens instance or add `--port 0` and open
+the printed HTTP URL. Unwritable storage reports the blocked folder and a restart command using a
+different data folder; restore access to the original folder to keep using its saved profiles/files.
+See [startup recovery](tools/local-bridge/README.md#startup-recovery).
+
 1. Connect by USB and approve Android USB debugging. Landing discovers phones and QaLens apps;
    choose the intended app and **Connect**. **Approve desktop** in the phone’s SDK Control Room.
    Credentials are generated and handled internally. This works in consuming QA apps without

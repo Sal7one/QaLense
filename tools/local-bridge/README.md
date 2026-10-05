@@ -81,6 +81,31 @@ for the browser port or `--device-port` for a custom SDK port. `--no-adb` uses a
 at `--device-port`. `QALENS_BRIDGE_TOKEN` can replace the terminal prompt; never commit it. Ctrl-C
 or Disconnect removes only a forward created by this workbench, preserving other adb forwards.
 
+### Startup recovery
+
+The launcher reports startup problems without a Python traceback and exits with a nonzero status.
+It checks actual writes in the data root and `components`, `runs`, `recordings` and `transfers`,
+including folders that already exist. A storage error identifies the blocked folder and prints a
+quoted restart command using a separate folder under your home directory. Use that command for a
+new workspace, or restore ownership/read/write access to the original folder to retain its profiles
+and saved files. A previous run with sudo can leave folders owned by another account; run the
+desktop as your normal user. The checks preserve existing permissions and saved data.
+
+If the browser port is occupied, the error identifies the port and shows the existing URL if that
+process is already QaLens. Use that instance, stop it with Ctrl-C and restart, or choose a free port:
+
+```sh
+python3 tools/local-bridge/server.py --gui --port 0
+```
+
+Open the **HTTP URL printed by the launcher**; the actual port replaces `0`. An explicit fixed port
+still fails clearly when occupied. Port selection does not change the phone's `--device-port` or
+workspace. Saved desktop profiles/files remain in `--data-dir`; browser viewer preferences/recents
+are tied to the URL's origin and can differ on another port. Port binding happens before terminal
+token prompting or adb forwarding. Startup does not terminate an existing process or modify its
+listener. The focused CLI regressions are `python3 tools/local-bridge/test_startup.py`; actual
+permission-denial cases require a non-root POSIX account.
+
 ## Phone → preview → file
 
 1. Pair with **Link phone & web selection** checked (the default). Select in the SDK inspector or

@@ -3,6 +3,7 @@
 Python standard library only. Component files require explicit Save; tokens stay in memory.
 """
 import argparse
+import errno
 import getpass
 import hmac
 import json
@@ -10,12 +11,13 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import signal
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
-from workbench import Workbench, MAX_DOCUMENT
+from workbench import Workbench, MAX_DOCUMENT, StorageUnavailable
 from desktop import WEB_ROOT, WEB_ASSETS, MAX_TRANSFER
 from urllib.parse import urlsplit, parse_qs
 import mimetypes
@@ -247,59 +249,102 @@ WORKBENCH_ROUTES = {"/api/workbench", "/api/saved", "/api/previews", "/api/devic
 
 
 
-def main():
+def restart_command(argv, *overrides):
+    command = [sys.executable, str(Path(__file__).resolve()), *argv, *overrides]
+    if os.name == "nt":
+        return "& " + " ".join("'" + arg.replace("'", "''") + "'" for arg in command)
+    return shlex.join(command)
+
+
+def storage_error(error, argv):
+    path = Path(error.filename)
+    message = f"QaLens could not start: storage is unavailable at {path}\n"
+    if error.errno in (errno.EACCES, errno.EPERM):
+        message += "Your account cannot write to this folder. This can happen after a previous run with sudo.\n"
+    elif error.errno in (errno.EEXIST, errno.ENOTDIR):
+        message += "A directory is required; this path or a parent is a file.\n"
+    else:
+        message += f"Storage error: {error.strerror}\n"
+    alternative = Path.home() / "QaLens-data"
+    try:
+        if alternative.exists() or alternative == path or alternative in path.parents:
+            alternative = Path.home() / f"QaLens-data-{os.getpid()}"
+    except OSError:
+        alternative = Path.home() / f"QaLens-data-{os.getpid()}"
+    shell = " (PowerShell)" if os.name == "nt" else ""
+    message += f"Use a writable folder owned by your account{shell}:\n  " + restart_command(argv, "--data-dir", str(alternative)) + "\n"
+    message += "To keep using your existing saved data, restore access to the original folder and restart.\n"
+    return message
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", help="adb device serial (required if more than one device is connected)")
-    parser.add_argument("--port", type=int, default=8765, help="PC UI port")
+    parser.add_argument("--port", type=int, default=8765, help="PC UI port (default: 8765; 0 chooses an available port)")
     parser.add_argument("--device-port", type=int, default=8766, help="QaLens device port")
     parser.add_argument("--adb", default=shutil.which("adb"), help="adb executable")
     parser.add_argument("--no-adb", action="store_true", help="Use an existing forward at --device-port")
     parser.add_argument("--gui", action="store_true", help="Start unpaired; choose a device and profile in the browser")
     parser.add_argument("--data-dir", default="~/.qalens/bridge", help="Explicitly saved components, profiles and pipeline results")
     parser.add_argument("--pipeline-config", help="Trusted local JSON pipeline configuration (never editable through HTTP)")
-    args = parser.parse_args()
-    token = None if args.gui else os.environ.get("QALENS_BRIDGE_TOKEN") or getpass.getpass("Device pairing token: ")
-    if not args.gui and not re.fullmatch(r"[A-Za-z0-9_-]{24,128}", token):
-        parser.error("Use the device's random 24–128 character token")
-    if not (1024 <= args.port <= 65535 and 1024 <= args.device_port <= 65535):
-        parser.error("Ports must be 1024–65535")
+    args = parser.parse_args(argv)
+    if not ((args.port == 0 or 1024 <= args.port <= 65535) and 1024 <= args.device_port <= 65535):
+        parser.error("PC port must be 0 or 1024–65535; device port must be 1024–65535")
     def stop_on_signal(_signal, _frame):
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM, stop_on_signal)
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, stop_on_signal)
-    forward = None
-    adb = []
     try:
-        if args.gui:
-            device_port = None
-        elif not args.no_adb:
-            if not args.adb:
-                parser.error("Install adb or pass --adb /path/to/adb")
-            rows = subprocess.check_output([args.adb, "devices"], text=True).splitlines()[1:]
-            devices = [row.split()[0] for row in rows if len(row.split()) > 1 and row.split()[1] == "device"]
-            serial = args.serial or (devices[0] if len(devices) == 1 else None)
-            if serial not in devices:
-                parser.error("Choose a connected, authorized device with --serial")
-            adb = [args.adb, "-s", serial]
-            forward = subprocess.check_output(adb + ["forward", "tcp:0", f"tcp:{args.device_port}"], text=True).strip()
-            device_port = int(forward)
-        else:
-            device_port = args.device_port
-        bench = Workbench(args.data_dir, args.adb, args.pipeline_config)
-        with BridgeServer(("127.0.0.1", args.port), device_port, token, bench) as server:
-            if forward:
-                bench.owned_forward = (serial, device_port)
-                forward = None
-            print(f"QaLens workbench: http://127.0.0.1:{server.server_port} (Ctrl-C stops and removes this forward)", flush=True)
-            try: server.serve_forever()
-            finally: bench.close(server)
+        try:
+            bench = Workbench(args.data_dir, args.adb, args.pipeline_config)
+        except StorageUnavailable as error:
+            parser.exit(1, storage_error(error, argv))
+        except (OSError, ValueError) as error:
+            parser.exit(1, f"QaLens could not start: workspace setup failed: {error}\nCheck --pipeline-config if supplied.\n")
+        # Bind before prompting for credentials or creating any device forward.
+        try:
+            server = BridgeServer(("127.0.0.1", args.port), None, None, bench)
+        except OSError as error:
+            if error.errno == errno.EADDRINUSE:
+                shell = " (PowerShell)" if os.name == "nt" else ""
+                parser.exit(1, f"QaLens could not start: port {args.port} is already in use.\n"
+                    f"If QaLens is already running, open http://127.0.0.1:{args.port} in your browser.\n"
+                    f"Otherwise, choose an available port automatically{shell}:\n  " + restart_command(argv, "--port", "0") + "\n")
+            parser.exit(1, f"QaLens could not start: cannot listen on 127.0.0.1:{args.port}: {error.strerror}\n")
+        with server:
+            try:
+                token = None if args.gui else os.environ.get("QALENS_BRIDGE_TOKEN") or getpass.getpass("Device pairing token: ")
+                if not args.gui and not re.fullmatch(r"[A-Za-z0-9_-]{24,128}", token):
+                    parser.error("Use the device's random 24–128 character token")
+                if not args.gui and not args.no_adb:
+                    if not args.adb:
+                        parser.error("Install adb or pass --adb /path/to/adb")
+                    rows = subprocess.check_output([args.adb, "devices"], text=True, timeout=10).splitlines()[1:]
+                    devices = [row.split()[0] for row in rows if len(row.split()) > 1 and row.split()[1] == "device"]
+                    serial = args.serial or (devices[0] if len(devices) == 1 else None)
+                    if serial not in devices:
+                        parser.error("Choose a connected, authorized device with --serial")
+                    adb = [args.adb, "-s", serial]
+                    device_port = int(subprocess.check_output(adb + ["forward", "tcp:0", f"tcp:{args.device_port}"], text=True, timeout=10).strip())
+                    bench.owned_forward = (serial, device_port)
+                else:
+                    device_port = None if args.gui else args.device_port
+                server.device_port = device_port
+                server.token = token
+                if token:
+                    bench.phase = "connected"; bench.approved = True
+                print(f"QaLens workbench: http://127.0.0.1:{server.server_port} (Ctrl-C stops this instance)", flush=True)
+                server.serve_forever()
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                parser.exit(1, f"QaLens could not start: device setup failed: {error}\nCheck adb and the connected device.\n")
+            finally:
+                bench.close(server)
     except KeyboardInterrupt:
         pass
-    finally:
-        if forward:
-            subprocess.run(adb + ["forward", "--remove", f"tcp:{forward}"], check=False, stdout=subprocess.DEVNULL)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

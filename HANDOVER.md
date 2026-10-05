@@ -48,6 +48,32 @@ assuming a named class or public signature is unchanged.
 
 ## Latest local verification
 
+### Desktop startup recovery — 2026-10-05
+
+The old CLI's raw permission and occupied-port tracebacks reproduce with disposable storage and
+listeners. Workspace initialization now performs a private temporary write in the root and each
+components/runs/recordings/transfers directory, including existing folders; probes are removed.
+Failures identify the blocked directory, preserve permissions/saved data and print a quoted
+restart command for a separate folder under the user's home. Restoring the original folder's
+access retains its profiles/files; switching folders explicitly chooses a separate workspace.
+File-versus-directory and pipeline JSON/setup failures are distinguished from write permissions.
+
+`--port 0` selects an available loopback port and prints the actual HTTP URL. Fixed ports retain
+their explicit meaning; an occupied port gives the existing URL and a free-port restart command.
+The listener binds before terminal credentials/adb forwarding. SIGTERM/Ctrl-C close the listener
+and retain scoped forward removal; startup never kills another process. Browser viewer state is
+origin-scoped, while desktop profiles/files stay in the chosen data directory.
+
+Local verification passes 35 Python regressions (5 server / 8 startup / 7 workbench / 8 connection /
+7 desktop) and the three bridge JavaScript wiring suites plus syntax checks. Startup cases launch
+actual CLI processes/GUI HTTP APIs and test real non-root macOS permissions, existing read-only
+children, file collisions, copied recovery commands, occupied sockets, malformed pipeline JSON,
+clean signals/rebinding and a synthetic adb forward's exact ownership/cleanup without token leaks.
+Windows ACL/PowerShell recovery and a real phone through the reordered terminal startup remain
+unverified; the permission/shell tests skip unsupported platforms/root. Android, web-reader/backend
+and physical-device suites were not rerun for this Python startup change. Commands and recovery
+are in the [desktop guide](tools/local-bridge/README.md#startup-recovery).
+
 ### Compose host compatibility and quick actions — 2026-10-05
 
 The reported Control Room failure was reproduced in the independent consumer with the SDK
@@ -493,8 +519,8 @@ merging; this handover does not authorize merging a branch. Default coordinates 
 `com.qalens:<module>:0.9.0` with a `-PqalensVersion` override. `qalensDist` builds a local Maven
 repository; `scripts/release_internal.sh --verify` packages/checks it. Public artifact publication
 and an authenticated company backend are separate work.
-GitHub CI for `af8713e` completed successfully in
-[run 37263246027](https://github.com/Sal7one/QaLense/actions/runs/37263246027). That result covers
+GitHub CI for `929b96f` completed successfully in
+[run 37298957603](https://github.com/Sal7one/QaLense/actions/runs/37298957603). That result covers
 that implementation revision; inspect the current HEAD's run separately.
 
 ## Documentation ownership

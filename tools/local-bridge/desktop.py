@@ -15,6 +15,7 @@ import zipfile
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from http.client import IncompleteRead
+from workbench import prepare_directory
 
 MAX_ARCHIVE = 400 * 1024 * 1024
 MAX_TRANSFER = 32 * 1024 * 1024
@@ -55,7 +56,7 @@ class Desktop:
         self.bench = bench
         self.recordings = bench.root / "recordings"
         self.transfers = bench.root / "transfers"
-        for path in (self.recordings, self.transfers): path.mkdir(mode=0o700, exist_ok=True)
+        for path in (self.recordings, self.transfers): prepare_directory(path)
         self.mirror = None
         self.preview_active = False
         self.preview_generation = 0
