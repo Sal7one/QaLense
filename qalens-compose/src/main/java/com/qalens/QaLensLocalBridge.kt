@@ -284,7 +284,7 @@ internal object QaLensLocalBridge {
 
     fun sendComponent(id: String) {
         val generation = epoch
-        if (!status.value.startsWith("Listening")) { QaLensBridgeComponents.report("Start PC inspector in Control Room or overlay More tools first"); return }
+        if (!status.value.startsWith("Listening")) { QaLensBridgeComponents.report("Connect through Quick actions → Connect to PC, or Control Room → Desktop connection first"); return }
         QaLensBridgeComponents.report("Reading component…")
         scope.launch {
             try {

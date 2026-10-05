@@ -18,8 +18,9 @@ acceptance and a completion template.
 ## What it does
 
 - Floating QA panel, separate Control Room, Compose inspect/tag modes and accessibility checks.
-- Route history, build checks, deterministic readiness scoring, likely-owner classification and
-  reproduction timelines. Empty or incomplete evidence does not establish a healthy app.
+- Observed activity timelines, installed build/device facts, request/log tracks and concrete
+  element findings. Optional score/classification report APIs remain heuristic; incomplete
+  evidence does not establish a healthy app.
 - Optional OkHttp metadata, Timber logs, Room/DataStore changes, feature flags, application data,
   crash reporter bridges and generic network sinks. Supported Chucker coexistence keeps both tools.
 - Text bug reports, screenshots, frame/video session recording, macros and background SQL tools.
@@ -94,6 +95,7 @@ button requires HTTP serving. `web/index.html` remains the classic fallback and 
 | Implement or inspect recordings | [SAL format](docs/SAL_FORMAT.md), [retention](docs/RECORDING_RETENTION.md), [clips](docs/RECORDING_CLIPS.md) |
 | Pair phones, inspect components and process saved files | [Desktop guide](tools/local-bridge/README.md) |
 | Run replay/upload tools | [Web](web/README.md), [backend](backend/README.md), [demo](DEMO.md) |
+| Use capture actions, evidence views and PC connection | [Mobile overlay](docs/MOBILE_OVERLAY.md) |
 | Use synchronized Android playback and event following | [Mobile replay](docs/MOBILE_REPLAY.md) |
 | Build, verify or distribute locally | [Contributing](CONTRIBUTING.md) |
 | Review history | [Changelog](CHANGELOG.md), Git history |

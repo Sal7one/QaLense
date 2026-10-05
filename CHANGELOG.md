@@ -2,6 +2,25 @@
 
 ## Unreleased — post-0.9.0
 
+### Task-based mobile overlay — 2026-10-05
+
+- Replace 12 diagnostic tabs with Activity/Network/Logs/Elements/Device and retain host-provided
+  extensions. Remove health scores, guessed owner/completeness cards, bookmark editor and duplicate
+  report/tool/recording controls from the overlay; preserve public APIs and recording tracks.
+- Give capture, element inspection, evidence review, PC connection and Control Room clear routes.
+  Keep Close visible above a scrollable action list, respect safe insets and add inspector Done/Back.
+  Clear evidence search on view changes; Back clears a query before returning to quick actions.
+- Keep observed failure summaries/expandable redacted stacks, reports, concrete findings and
+  integration facts. Use the host-selected palette for evidence and background work/lazy rows.
+  Collapse element filters initially, scroll expanded options with results on short screens and
+  explain loading, no matches and unavailable inspection.
+- Open PC connection guidance separately; place manual credentials behind Manual pairing without
+  changing approval, token lifetime or privacy. Move named macros to Control Room and wait for a
+  resumed host before running their UI/capture actions; report launch/resume failures.
+- Extend actual Android workflows for Back, search/selection, filters, report/stack copy, host tabs
+  and Control Room macros. Verify continuous traffic, LTR/RTL/two-finger gestures and release
+  isolation; document the current menus and remaining device/host validation limits.
+
 ### Mobile replay clock and event following — 2026-10-05
 
 - Replay Timeline/Network/Logs chronologically with a current row that follows playback and seeking;

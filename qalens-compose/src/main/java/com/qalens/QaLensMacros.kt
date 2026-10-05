@@ -18,7 +18,7 @@ internal data class MacroRunResult(val passed: Boolean, val assertionFailures: I
 
 /**
  * Runs QA macros — named step lists from the `.appsal` config, fired with one tap from the
- * tester sheet's More tools section or the Control Room. Step DSL (one step per line, case-insensitive):
+ * Control Room. Step DSL (one step per line, case-insensitive):
  *
  *   deeplink <uri>         open a deep link
  *   wait <ms>              pause
@@ -41,7 +41,29 @@ internal object QaLensMacros {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     @Volatile private var running = false
     private var job: kotlinx.coroutines.Job? = null
-    fun cancel() { job?.cancel() }
+    private var pendingHost: kotlinx.coroutines.Job? = null
+    fun cancel() { pendingHost?.cancel(); pendingHost = null; job?.cancel() }
+
+    /** Control Room is an SDK Activity: return to a resumed host before driving its UI/capture. */
+    fun runFromControlRoom(macro: AppSalMacro, openHost: () -> Unit): String? {
+        if (!QaLens.config.value.enabled) return "QaLens is disabled in this app."
+        if (running || pendingHost?.isActive == true) return "A macro is already running or waiting for the app."
+        return runCatching {
+            openHost()
+            pendingHost = scope.launch {
+                val ready = awaitOutcome(10_000) {
+                    QaLens.currentActivity?.let { !it.isFinishing && !it.isDestroyed && QaLensActivityInstaller.isResumed(it) } == true
+                }
+                pendingHost = null
+                if (ready) { QaLens.closePanel(); run(macro) }
+                else if (QaLens.config.value.enabled) {
+                    lastRun[macro.name] = MacroRunResult(false, 0)
+                    QaLens.pushError(ErrorKind.OTHER, "Macro did not start: the host app did not resume.")
+                }
+            }
+            null
+        }.getOrElse { "Could not open the app. Open it manually and try again." }
+    }
 
     /** In-memory record of each macro's most recent run (no persistence). */
     private val lastRun = mutableMapOf<String, MacroRunResult>()

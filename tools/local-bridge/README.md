@@ -137,8 +137,8 @@ an exact attribute, optional parent tag and required action. Zero/duplicate matc
 **Export tree XML** and **Export selectors JSON** are explicit browser downloads; neither linking
 nor generating suggestions writes application data to disk.
 
-The Android **More tools**, full **Tools**, and movable inspector expose **Search selectors & tags**.
-Full **Automation Tags** has the same searchable list. Choose a result to highlight its live host
+Android **Inspect elements** opens the movable inspector, whose **Search selectors & tags**
+searches the visible tree. **Review evidence → Elements → Search** has the same searchable list. Choose a result to highlight its live host
 element; **Actions & XPath selectors** shows actions and copyable suggestions. Tree capture stays
 on main; redaction, matching, XML and selector generation run off main. Refresh after navigation
 or changing content. Hidden/password values remain excluded, and custom/private state is not read.

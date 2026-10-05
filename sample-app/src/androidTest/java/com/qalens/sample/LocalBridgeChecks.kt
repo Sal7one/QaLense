@@ -165,7 +165,12 @@ internal class LocalBridgeChecks(private val runner: Instrumentation) {
                 check(right.left > left.left) { "Physical right drag failed direction=$direction left=$left right=$right panel=${QaLens.state.value.isPanelOpen}" }
                 check(right.left >= 0 && right.right <= width && right.bottom <= height) { "Bubble escaped viewport" }
                 val handle = bounds("Move inspector")
-                val travel = if (handle.top > height * .3f) -height * .25f else height * .25f
+                val topInset = if (android.os.Build.VERSION.SDK_INT >= 30)
+                    activity.window.decorView.rootWindowInsets?.getInsets(android.view.WindowInsets.Type.systemBars())?.top ?: 0
+                    else activity.window.decorView.rootWindowInsets?.systemWindowInsetTop ?: 0
+                // A taller dock can reach its bottom clamp above 30% of a short screen. Pick
+                // upward travel whenever there is room above it rather than dragging into that clamp.
+                val travel = if (handle.top > topInset + height * .05f) -height * .25f else height * .25f
                 drag(handle.exactCenterX(), handle.exactCenterY(), 0f, travel)
                 val moved = bounds("Move inspector")
                 check(if (travel < 0) moved.top < handle.top else moved.top > handle.top) {

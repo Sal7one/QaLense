@@ -61,7 +61,7 @@ adb -s YOUR_DISPOSABLE_SERIAL shell wm dismiss-keyguard
 adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e overlayLoadOnly true com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
 ```
 
-Require `OK: Overlay/Repro/Logs/Network remain responsive`. The case sends a 12,000-line burst,
+Require `OK: Overlay/Activity/Logs/Network remain responsive`. The case sends a 12,000-line burst,
 then keeps background/main-thread logs and network observations flowing during tab switches.
 `adb logcat -d -s QaLensLoadTest:I` shows its worst measured main-thread heartbeat delay; each
 heartbeat must complete within 2.5 seconds. This is a synthetic regression, not a real-host ANR trace
@@ -116,7 +116,7 @@ HD consent approval/denial modes. HD checks require the OS dialog to be handled 
 disposable device. Physical-device and full-hour endurance remain open.
 
 The positive tester workflow covers quick screenshots/bug marks, actual Record/REC Stop,
-all diagnostic tabs, Watch,
+the five evidence views and host extension, Back/search/report copy, PC connection guidance, Watch API mode,
 successful macro typing/tapping/assertions/capture, `.appsal` round trips, a real profile-attributed
 loopback upload, Android player controls and panic discard:
 
@@ -145,8 +145,9 @@ and denied, and inspector checks with three-button navigation and large fonts. F
 sequentially on a device, separately from the full runner.
 
 The SDK pairing controls have a separate UI regression, including a host using only `QaLensRoot`
-without Startup installation. It starts pairing from More tools, sends a component, reads the inbox
-with Control Room foreground, rotates the token, then stops from the full overlay:
+without Startup installation. It starts pairing through Connect to PC → Manual pairing, sends a
+component, reads the inbox with Control Room foreground, rotates the token, then stops from the
+overlay connection screen:
 
 ```sh
 adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e pcUiOnly true -e manualRootOnly true \

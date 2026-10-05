@@ -21,7 +21,7 @@ internal class PcInspectorUiChecks(private val test: Instrumentation) {
         test.runOnMainSync { QaLens.configure { enabled = true }; QaLens.stopLocalBridge(); QaLens.setPanelMinimal(true); QaLens.openPanel() }
         try {
             check(QaLens.localBridgeStatus.value == "Stopped")
-            click("More tools")
+            click("Connect to PC"); click("Manual pairing")
             val field = seek { it.contentDescription?.toString() == "PC inspector device port" }
             check(field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, port.toString())
@@ -51,7 +51,8 @@ internal class PcInspectorUiChecks(private val test: Instrumentation) {
             check(test.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
             await("Host did not resume after Control Room") { runCatching { call(rotated) == 200 }.getOrDefault(false) }
             test.runOnMainSync { QaLens.setPanelMinimal(false); QaLens.openPanel() }
-            click("Tools", horizontal = true)
+            click("Back to quick actions")
+            click("PC connection"); click("Manual pairing")
             check(revealToken() == rotated) { "Full overlay lost shared pairing" }
             click("Stop PC inspector")
             await("UI Stop did not close bridge") { QaLens.localBridgeStatus.value == "Stopped" }

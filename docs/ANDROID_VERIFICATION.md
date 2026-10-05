@@ -1,5 +1,38 @@
 # Android verification — 2026-10-04
 
+## Overlay cleanup addendum — 2026-10-05
+
+The current overlay has quick capture/inspection actions and five evidence views; the historical
+12-tab menu in the matrix below is superseded. See [mobile overlay](MOBILE_OVERLAY.md) for the
+actual menus, removed controls and compatibility/privacy contract.
+
+Focused API 36 checks pass on the final overlay:
+
+| Case | Executed checks |
+|---|---|
+| `workflowOnly`, normal and 360×640 dp / 150% font | Fixed Close, Back through search/checks/actions, actual search/filter results, global component selection and Done, synthetic captured stack/report copy, five built-in views and host extension; screenshots/marks/REC Stop, resumed-host Control Room macro, config/profiles, real loopback upload feedback, replay and Panic |
+| `overlayLoadOnly` | 12,000-log burst then continuous background/main-thread log/network observations during Activity/Network/Logs selection; actual selected pane and main heartbeat required |
+| `bridgeOnly` | Redacted semantics/selectors/XML, rejection/privacy/shutdown, actual tap/type/scroll, LTR/RTL bubble/dock bounds and two-finger host scrolling |
+| `selectorsOnly` | Actual overlay element search/selection and validated QaLens XPath copy |
+| `pcUiOnly` with `manualRootOnly` | SDK-owned manual pairing, component send with paused host, token rotation, Stop, disable/re-enable; no Startup or sample settings dependency |
+
+The small workflow also passes with three-button navigation. Expanded filters originally left
+the result list without usable height in that configuration; filters now scroll with results,
+and the regression requires the filtered row to be visible. Inspector gesture tests choose travel
+away from the actual safe top/bottom boundary instead of assuming a fixed fraction of screen height.
+
+The final load run observed 2,545 background iterations and a worst measured main heartbeat of
+6 ms. This is a synthetic sample check, not a frame-rate guarantee or consuming-app ANR trace.
+Workflow preview images were inspected from private cache; none are committed. The test reports
+must contain `OK:` and no `FAIL:`. Continuous updates can invalidate an accessibility node; the
+load fixture falls back to an actual touch and still requires the selected tab's content.
+
+Local verification passes 233 unit tests (183/31/17/2), Compose/sample lint with zero errors,
+sample debug/test/release and independent consumer debug/release/isolation, plus sample release
+isolation. Unchanged tasks reuse outputs. This cleanup does not rerun every historical capture,
+backend, desktop or endurance case below. Physical phones/TalkBack, other host/OS/Compose versions
+and actual consuming-app capture failures remain unverified.
+
 ## Mobile replay addendum — 2026-10-05
 
 The focused `replayOnly` API 36 runner passes on the normal emulator display and at 360×640 dp

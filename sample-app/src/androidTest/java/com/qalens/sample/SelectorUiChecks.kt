@@ -29,7 +29,7 @@ internal class SelectorUiChecks(private val test: Instrumentation) {
                 await("Browser did not request phone selection", 180_000) { signal(exchange) == "select-phone" }
                 test.runOnMainSync { QaLens.setInspectMode(false); QaLens.setPanelMinimal(true); QaLens.openPanel() }
             }
-            ui.click("More tools")
+            ui.click("Inspect elements")
             ui.click("Search selectors & tags")
             val field = seek("Editable selector search field missing") {
                 it.contentDescription?.toString() == "Search tags, text, roles and actions" && it.isEditable

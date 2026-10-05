@@ -15,6 +15,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.core.content.FileProvider
 import com.qalens.QaLens
+import com.qalens.QaLensControlActivity
+import com.qalens.QaLensTabProvider
+import com.qalens.QaLensUiState
+import com.qalens.QaLensConfig
 import com.qalens.QaLensRoot
 import com.qalens.android.AppSalMacro
 import com.qalens.android.AppSalQuery
@@ -50,6 +54,7 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
                 QaLens.configure { enabled = true; allowUnmaskedVideo = false; saveScreenshotsToGallery = false }
                 QaLens.panicRestore(); QaLens.setPanelMinimal(true); QaLens.setTagMode(false)
             }
+            overlayNavigation()
             quickCapture()
             diagnosticPanels()
             val archive = macroCapture(activity)
@@ -88,6 +93,63 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
                 QaLens.setOverlayAlpha(original.overlayAlpha)
             }
         }
+    }
+
+    private fun overlayNavigation() {
+        test.runOnMainSync { QaLens.openPanel() }
+        await("Quick actions Close missing") { find("Close")?.isVisibleToUser == true }
+        preview("home")
+        check(listOf("Screen Health", "Bookmarks", "More tools", "Developer diagnostics", "Watch app").none { find(it) != null }) {
+            "Legacy overlay clutter remains on the tester landing"
+        }
+        test.runOnMainSync { QaLens.reportCrash(com.qalens.QaLensCrash(type = com.qalens.CrashType.COROUTINE_EXCEPTION,
+            thread = "fixture", throwable = "Synthetic overlay failure", stackTrace = "SyntheticStack.fixture(Overlay.kt:1)")) }
+        click("Review evidence")
+        await("Review evidence did not open") { !QaLens.state.value.minimalPanel && find("Close diagnostics")?.isVisibleToUser == true }
+        await("Captured failure was lost from the consolidated activity view") { find("Synthetic overlay failure") != null }
+        click("Show stack trace")
+        await("Captured stack could not be expanded") { find("SyntheticStack.fixture(Overlay.kt:1)") != null }
+        click("Hide stack trace")
+        preview("evidence")
+        check(listOf("Screen Health", "Bug Bundle", "Overview", "Tools", "Bookmarks").none { find(it) != null })
+        click("Copy bug report")
+        var report = ""
+        await("Bug report copy did not populate the clipboard") {
+            test.runOnMainSync {
+                report = (test.targetContext.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                    .primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+            }
+            report.contains("QaLens") && report.contains("SyntheticStack.fixture(Overlay.kt:1)")
+        }
+        val search = checkNotNull(find("Search evidence"))
+        check(search.isEditable)
+        test.runOnMainSync { QaLens.log("overlay-workflow-search") }
+        check(search.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "overlay-workflow-search")
+        }))
+        await("Evidence search did not find the observed log") { find("1 result across all tracks") != null }
+        check(test.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+        await("Back did not clear evidence search") { find("Search evidence")?.text.isNullOrEmpty() && !QaLens.state.value.minimalPanel }
+        val componentSearch = checkNotNull(find("Search evidence", editable = true))
+        check(componentSearch.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "home.total.balance")
+        }))
+        click("COMPONENT", contains = true)
+        await("Evidence component result did not open inspection") {
+            QaLens.state.value.selectedNode?.testTag == "home.total.balance" && QaLens.state.value.isInspectMode && !QaLens.state.value.isPanelOpen
+        }
+        click("Done inspecting")
+        await("Inspector Done did not return input to the app") { !QaLens.state.value.isInspectMode }
+        test.runOnMainSync { QaLens.openPanel() }
+        check(test.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+        await("Back did not return to quick actions") { QaLens.state.value.minimalPanel && QaLens.state.value.isPanelOpen }
+        click("Connect to PC")
+        await("PC connection screen missing") { find("Manual pairing") != null }
+        check(find("PC inspector device port") == null && find("Copy pairing token") == null) { "Manual pairing fields leaked onto the simple connection screen" }
+        check(test.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+        await("Back did not dismiss PC connection") { find("Manual pairing") == null && find("Quick actions sheet") != null }
+        check(test.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+        await("Back did not close the overlay") { !QaLens.state.value.isPanelOpen && find("Quick actions sheet") == null }
     }
 
     private fun quickCapture() {
@@ -135,8 +197,9 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
             }
             QaLens.openPanel()
         }
-        click("More tools  +")
-        click("Synthetic workflow")
+        click("Control Room")
+        val ui = PcInspectorUiChecks(test)
+        ui.click("▶ Run")
         val type = Class.forName("com.qalens.QaLensMacros")
         val driver = type.getField("INSTANCE").get(null)
         val result = type.methods.first { it.name.startsWith("lastRunResult") }
@@ -152,7 +215,13 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
     }
 
     private fun diagnosticPanels() {
-        test.runOnMainSync { QaLens.setPanelMinimal(false); QaLens.openPanel() }
+        val hostTab = object : QaLensTabProvider {
+            override val title = "Host fixture"
+            @androidx.compose.runtime.Composable
+            override fun Content(state: QaLensUiState, config: QaLensConfig) { Text("Host extension rendered") }
+        }
+        test.runOnMainSync { QaLens.registerTab(hostTab); QaLens.setPanelMinimal(false); QaLens.openPanel() }
+        try {
         fun strip(): AccessibilityNodeInfo? {
             fun visit(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
                 if (node.contentDescription?.toString() == "Diagnostic tabs") return node
@@ -161,14 +230,12 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
             }
             return root()?.let(::visit)
         }
-        val panels = listOf("Overview" to "Copy integration check", "Bug Bundle" to "Evidence Completeness",
-            "Repro" to "Timeline (", "Screen Health" to "Visited Screens (", "Network" to "requests",
-            "Navigation" to "Back Stack", "Accessibility" to "rule=", "Automation Tags" to "Show Tags On Screen",
-            "Device & Build" to "App", "Tools" to "Bookmarks", "Inspect" to "Components (",
-            "Logs" to "Live dashboard window")
+        val panels = listOf("Activity" to "Timeline (", "Network" to "requests",
+            "Logs" to "Live dashboard window", "Elements" to "Search tags, text, roles and actions", "Device" to "Copy integration check",
+            "Host fixture" to "Host extension rendered")
         await("Diagnostic tab strip missing") { strip() != null }
         await("First diagnostic tab not reachable") {
-            if (find("Overview")?.isVisibleToUser == true) true else {
+            if (find("Activity")?.isVisibleToUser == true) true else {
                 strip()?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
                 Thread.sleep(250); false
             }
@@ -184,13 +251,55 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
             // An already-selected tab already displays its pane.
             if (find(label)?.isSelected != true) click(label)
             await("Diagnostic tab did not show content: $label") {
-                find(heading, contains = true) != null || (label == "Accessibility" && find("No warnings.") != null)
+                find(heading, contains = true) != null
             }
+            if (label == "Elements") {
+                val field = checkNotNull(find("Search tags, text, roles and actions", editable = true))
+                check(field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, android.os.Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "home.total.balance")
+                }))
+                await("Elements view did not show the searched host element") { find("Tag: home.total.balance") != null }
+                click("Element filters"); click("Type")
+                awaitElementResult("No matching elements.", "Element action filter did not exclude a non-editable balance")
+                click("All"); click("Tagged only")
+                awaitElementResult("Tag: home.total.balance", "Element tag filter lost the tagged balance")
+                click("Element filters")
+                await("Element filters did not collapse") { find("Element filters")?.stateDescription?.toString()?.startsWith("Collapsed") == true }
+                preview("elements")
+                click("View checks")
+                await("Observed element checks missing") { find("Checks on observed elements") != null }
+                check(test.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+                await("Back from element checks did not restore search") { find("Search tags, text, roles and actions", editable = true) != null }
+            }
+        }
+        } finally {
+            test.runOnMainSync { QaLens.closePanel(); QaLens.unregisterTab(hostTab.title) }
         }
         test.runOnMainSync { QaLens.closePanel(); QaLens.setPanelMinimal(true); QaLens.setWatchMode(true) }
         await("Watch HUD missing") { find("● WATCH") != null }
         click("■ Stop")
         await("Watch Stop did not restore normal overlay") { !QaLens.state.value.isWatchMode }
+    }
+
+    private fun preview(name: String) {
+        // Let the rendered frame catch up with the verified accessibility state.
+        Thread.sleep(200)
+        test.uiAutomation.takeScreenshot()?.let { bitmap ->
+            File(test.targetContext.cacheDir, "qalens-overlay-$name.png").outputStream().use {
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+            }
+            bitmap.recycle()
+        }
+    }
+
+    private fun awaitElementResult(label: String, message: String) {
+        await(message) {
+            if (find(label)?.isVisibleToUser == true) true else {
+                find("Element search results")?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                Thread.sleep(200)
+                false
+            }
+        }
     }
 
     private fun configRoundTrip() {
@@ -284,20 +393,24 @@ internal class TesterWorkflowChecks(private val test: Instrumentation) {
         if (Build.VERSION.SDK_INT >= 33) test.uiAutomation.clearCache()
         return test.uiAutomation.rootInActiveWindow
     }
-    private fun find(label: String, contains: Boolean = false): AccessibilityNodeInfo? {
+    private fun find(label: String, contains: Boolean = false, editable: Boolean = false): AccessibilityNodeInfo? {
         fun visit(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
             val text = node.text?.toString().orEmpty()
             val description = node.contentDescription?.toString().orEmpty()
-            if (if (contains) text.contains(label) || description.contains(label) else text == label || description == label) return node
+            if ((!editable || node.isEditable) && (if (contains) text.contains(label) || description.contains(label) else text == label || description == label)) return node
             repeat(node.childCount) { node.getChild(it)?.let { child -> visit(child)?.let { return it } } }
             return null
         }
         return root()?.let(::visit) ?: test.uiAutomation.windows.firstNotNullOfOrNull { it.root?.let(::visit) }
     }
     private fun click(label: String, contains: Boolean = false) {
+        var direction = AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
         await("Workflow control missing: $label") {
             if (find(label, contains) != null) true else {
-                find("Quick actions sheet")?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                val scroll = find("Quick action list") ?: find("Element search results")
+                if (scroll?.performAction(direction) == false) direction =
+                    if (direction == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                    else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
                 Thread.sleep(250); false
             }
         }

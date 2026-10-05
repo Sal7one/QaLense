@@ -330,7 +330,7 @@ For another transport, create `val sink = QaLens.networkSink("Ktor")` once and c
 needed. Capture switches, redaction and body opt-in apply to all adapter events. Do not mirror
 traffic already observed by QaLensOkHttpInterceptor.
 
-Open Overview → **Copy integration check**, or call `QaLens.integrationReport()`, to inspect declared
+Open Review evidence → Device → **Copy integration check**, or call `QaLens.integrationReport()`, to inspect declared
 sources and settings without exposing request contents. `analysis.json.coverage.networkSources`
 records declared adapter names; declaration alone does not prove complete capture.
 
@@ -448,7 +448,7 @@ excluded; do not remove privacy protection to make an automation query succeed.
 
 ## Step 7 — Team setup via `.appsal` (recommended)
 
-One JSON config per app package: panel style (tester quick actions vs full developer diagnostics),
+One JSON config per app package: panel style (quick actions or Review evidence),
 webhook endpoint, saved SQL queries, macros and watched prefs files. Start from
 `web/sample.appsal`, edit it in `web/index.html` → **⚙ .appsal editor**, set the app package and
 team defaults, then export and review the JSON. Keep the webhook blank until the company owns an
@@ -472,8 +472,9 @@ mark logged in by macro
 ```
 
 Targets: exact test tag first, then visible text, then content description (smallest match wins).
-The tester quick-actions sheet keeps macros under **More tools**; it shows the **5 most recently
-used** first. Verbs:
+Run named macros from **Control Room → QA Experience → Macros**. Run returns to the host app
+and waits for a resumed Activity before driving UI or capture. Missing launchers/launch failures
+are shown in Control Room; a resume timeout appears as a surfaced SDK error. Verbs:
 `deeplink <uri>` · `wait <ms>` · `tap <tag|text>` · `type <tag> <text>` · `record [video]` ·
 `stop` · `screenshot` · `mark <text>`.
 
@@ -608,8 +609,8 @@ Robot installation or custom host Settings. Return to the resumed host screen af
 live semantics/actions. Control Room can receive captured exports while the host is paused, but
 it is not a foreground host tree.
 
-Manual **PC inspector** controls remain in **Control Room → Desktop connection**, the tester
-**More tools** and full **Tools** tab for older desktops/custom ports. Start/token copy/rotation/Stop
+Manual **PC inspector** controls remain in **Control Room → Desktop connection** and
+**Quick actions → Connect to PC → Manual pairing** for older desktops/custom ports. Start/token copy/rotation/Stop
 share the listener. Tokens are hidden until shown, excluded from reports and marked sensitive on
 Android 13+ clipboard copies. **Stop PC inspector** or disable stops access; re-enable needs approval
 or an explicit start. The desktop’s screen preview is a separate explicit, whole-phone adb capture,

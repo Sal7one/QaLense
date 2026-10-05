@@ -3,6 +3,17 @@
 Updated 2026-10-05. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Completed 2026-10-05: overlay task cleanup
+
+- [x] Replace the 12-tab diagnostics panel with Activity/Network/Logs/Elements/Device and keep host
+  extensions. Remove scores, guessed owner/completeness cards, bookmark editor and duplicate tools.
+- [x] Give quick actions direct Inspect/Review evidence/Connect to PC/Control Room destinations;
+  make Close fixed and Back/search navigation predictable. Keep manual pairing off the first PC screen.
+- [x] Move named macros to Control Room and wait for host resume before capture/interaction.
+  Keep actual failure stacks, concrete findings, async processing and existing public/evidence contracts.
+- [x] Complete final small-screen, continuous-load and integration/isolation verification; document
+  actual executed coverage. Physical-phone/TalkBack and consuming-app validation remain separate.
+
 ## Completed 2026-10-05: mobile replay synchronization
 
 - [x] Use elapsed time for frame playback and decoder time only within HD coverage; handle seeks,
@@ -151,17 +162,14 @@ baselines and project context. Older changelog entries are historical, not uncom
   payloads and custom regex/provider code: input redaction runs on the caller and snapshot providers
   retain their main-thread contract. Keep recording coverage honest if further ingress limits are added.
 
-1. **Validate the simplified tester flow on devices.** The default sheet now exposes record,
-   screenshot and mark-a-bug actions; team upload appears after setup and a recording exists.
-   A Pixel emulator check covered 360 × 640 dp at 150% font, scrolling More tools, the in-app stop
-   chip, save/share sheet and a real local upload result. RTL and both overlay color schemes were
-   checked on the emulator; the quick-actions accessibility tree now has button roles and a named
-   Close control. Still run TalkBack and the complete flow on physical phones. Fix any focus, size,
-   dismissal or stale-state problem found.
-   The 2026-10-04 [Android matrix](docs/ANDROID_VERIFICATION.md) adds successful macros, all 12
-   diagnostic tabs, configuration/profiles/upload, replay/system Back, Panic and actual quick
-   Record/REC Stop at 150% font. The diagnostics header and fullscreen Back bugs found there are
-   fixed; physical-phone/TalkBack validation stays open.
+1. **Validate the task-based overlay on physical phones.** Quick actions has recording,
+   screenshots, bug marks and element inspection, with separate Review evidence, PC connection
+   and Control Room destinations. Five built-in evidence views replace the old 12-tab panel;
+   scores, bookmark editor and duplicate toolbars are retired from the overlay. Current behavior
+   and the executed API 36 matrix are in [mobile overlay](docs/MOBILE_OVERLAY.md) and
+   [Android verification](docs/ANDROID_VERIFICATION.md). Run TalkBack, actual company builds,
+   different window sizes/Compose versions and physical phones; fix focus, dismissal and stale-state
+   issues found. Emulator success does not establish the reported host failures are resolved.
 2. **Physical-device capture and recovery matrix.** Exercise video opt-in, consent denial/late
    consent, OS projection stop, rotation, backgrounding, interrupted save and disk-full handling.
    Test password/redaction-matched/custom content and multiple windows, plus the API 23 screenshot

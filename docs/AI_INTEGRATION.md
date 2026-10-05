@@ -141,7 +141,7 @@ Register dialog/popup content with `Modifier.qaInspectionRoot()`. Pair imperativ
 `registerComposeRoot(view)`/`unregisterComposeRoot(view)` with attached window ownership. The
 context must resolve to the active Activity. See [window and tag recipes](../integration.md#compose-inspection-across-host-windows).
 
-Android inspect/tag mode and Automation Tags offer search and action/tag filters. QA can inspect
+Android inspect/tag mode and Review evidence → Elements offer search and action/tag filters. QA can inspect
 supported actions and copy tags/selectors. Node IDs are root-scoped and live; save stable tag
 selectors for later work. XPath addresses QaLens's exported XML, not Appium XML. Prefer a unique
 tag or tagged-ancestor selector over visible position/text. Check match counts before acting;

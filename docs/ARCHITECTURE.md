@@ -55,7 +55,7 @@ analysis; avoid claiming a service-oriented rewrite is complete.
   Snapshot macros in core validate state; the Android named macro driver performs real semantics
   actions and waits for asynchronous outcomes. These are different APIs.
 
-Repro/Bug Bundle evidence, log grouping/filtering and global search run on background workers over
+Activity evidence, report formatting, crash previews, log grouping/filtering and global search run on background workers over
 immutable inputs. Updates are conflated and processed serially, so continuous traffic cannot keep
 restarting a computation before it finishes. The panels render visible rows lazily. Report copies
 format off main and return to main for the clipboard operation; synchronous public report APIs

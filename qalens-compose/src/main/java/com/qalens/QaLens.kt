@@ -469,7 +469,7 @@ object QaLens {
         it.copy(isInspectMode = enabled, isTagMode = if (enabled) false else it.isTagMode)
     }
 
-    /** Tester quick-actions sheet vs the full developer panel. Persisted per app install. */
+    /** Tester quick actions vs Review evidence as the starting view. Persisted per app install. */
     fun setPanelMinimal(minimal: Boolean) {
         uiStateMutable.update { it.copy(minimalPanel = minimal) }
         appContext?.let { com.qalens.android.QaLensAppSal.setPanelMode(it, if (minimal) "minimal" else "full") }
@@ -489,14 +489,14 @@ object QaLens {
         it.copy(isTagMode = enabled, isInspectMode = if (enabled) false else it.isInspectMode)
     }
 
-    /** Overlay opacity for the panel / watch HUD (clamped 0.1–1.0). Persisted. */
+    /** Opacity for the optional Watch HUD (clamped 0.1–1.0). Capture/evidence panels stay opaque. Persisted. */
     fun setOverlayAlpha(alpha: Float) {
         val clamped = alpha.coerceIn(0.1f, 1f)
         uiStateMutable.update { it.copy(overlayAlpha = clamped) }
         appContext?.let { QaLensPrefs.setOverlayAlpha(it, clamped) }
     }
 
-    /** Move the panel / watch HUD between the top and bottom edge (frees the opposite edge). Persisted. */
+    /** Move quick actions / Watch HUD between top and bottom. Review evidence uses the full height. Persisted. */
     fun toggleDock() {
         var newValue = false
         uiStateMutable.update { newValue = !it.dockBottom; it.copy(dockBottom = newValue) }
@@ -1142,7 +1142,7 @@ object QaLens {
         else mainHandler.post { appendCrash(safe, enrich = false) }
     }
 
-    /** The most recent crash/ANR captured this session, or null. Surfaced in the Overview tab. */
+    /** The most recent crash/ANR captured this session, or null. Surfaced in Review evidence → Activity. */
     fun lastCrash(): QaLensCrash? = QaLensCrashHandler.peekLastCrash() ?: uiStateMutable.value.crashes.lastOrNull()
 
     /** Called by [QaLensFrameMetrics] to append a frame-timing sample (capped at 1000). */

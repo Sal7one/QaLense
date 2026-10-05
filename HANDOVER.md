@@ -4,7 +4,7 @@ Updated 2026-10-05. Read this before changing the repository. [ONBOARDING.md](ON
 the user/integrator overview; [AI integration](docs/AI_INTEGRATION.md) is the host-agent work order;
 [next.md](next.md) is the only current backlog;
 [CONTRIBUTING.md](CONTRIBUTING.md) owns portable build/device commands. This handover records
-the current engineering baseline, including the recording-control fixes below. Git and CHANGELOG retain earlier history.
+the current engineering baseline, including the simplified overlay and recording-control fixes below. Git and CHANGELOG retain earlier history.
 Check the working tree, remote branches and CI before assuming publication or validation state.
 
 ## Product and priorities
@@ -46,6 +46,40 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Task-based overlay — 2026-10-05
+
+Quick actions now presents Record/Screenshot/Mark a bug/Inspect elements, with separate Review
+evidence, Connect to PC and Control Room routes. Close stays visible while the list scrolls;
+inspection has Done/system Back. Review has Activity/Network/Logs/Elements/Device and existing
+host extension tabs. Selecting evidence components opens their details on the app. Element filters
+are collapsed initially; Back from checks returns to search, an active evidence query clears first,
+then Back returns to actions/closes. The PC dialog leads with desktop discovery/phone approval;
+manual pairing is optional. SDK public APIs, `.appsal` keys, `.sal` schema and no-op isolation remain.
+
+Retired overlay UI includes Screen Health/scoring, owner/completeness claims, bookmark editor,
+duplicate tools/reports/recordings, opacity/Lock/Watch shortcuts and arbitrary deep-link entry.
+Captured failures and redacted expandable stacks remain in Activity; reports include retained
+stacks. Concrete element/contract findings and device/integration facts remain. Evidence uses
+the selected overlay palette and opaque surfaces. Named macros now run from Control Room only
+after a resumed host is available; missing launchers, launch failures and resume timeouts surface.
+The older menu descriptions in dated verification sections below are historical and superseded
+by [mobile overlay](docs/MOBILE_OVERLAY.md).
+
+Local checks pass 233 unit tests (183 core / 31 Compose / 17 replay / 2 no-op), Compose/sample lint
+with zero errors, sample debug/test/release and independent consumer debug/release/isolation,
+plus sample release isolation. Unchanged checks reuse outputs. The focused API 36 tester workflow
+passes normal and 360×640 dp / 150% font: actual capture/REC Stop, five views/host tab, Back,
+search/filters/inspect Done, crash stack/report copy, Control Room macro actions, upload feedback,
+configuration, replay and Panic. Three-button navigation exposed expanded filters taking the whole
+result viewport; options now scroll with results, and the same workflow checks visible matches.
+Selector search/XPath copy and SDK manual-root PC controls pass.
+Continuous 12k-burst/background/main-thread log/network navigation passes with 2,545 background
+iterations and a worst measured main heartbeat of 6 ms. Bridge privacy/actions and actual
+LTR/RTL/two-finger inspector gestures pass, including small/large-font three-button navigation.
+These synthetic measurements do not prove the
+reported consuming-app ANR resolved. Physical phones, TalkBack, other host/OS/Compose versions
+and consuming-app capture failures remain unverified. See the [Android matrix](docs/ANDROID_VERIFICATION.md).
 
 ### Mobile replay synchronization — 2026-10-05
 
@@ -294,8 +328,9 @@ claim is made for crash/power-loss recovery of unsaved journals.
 
 ## Current behavior that matters
 
-- AndroidX Startup normally installs the active SDK. The tester sheet is the default; advanced
-  diagnostics remain under More tools. Control Room/player use separate task affinities.
+- AndroidX Startup normally installs the active SDK. Quick actions is the default; Review
+  evidence has five built-in views and host extensions, and Connect to PC has its own screen.
+  Control Room/player use separate task affinities.
 - Public Compose semantics discover attached Activity roots and explicitly registered extra
   windows. Private state, native Views/WebViews and unregistered roots are outside this coverage.
   IDs are live/root-scoped; tags must be unique for exact targeting. Hidden/password values and
@@ -372,7 +407,9 @@ Use the [contributor commands](CONTRIBUTING.md); set host paths through local en
 Serialize Gradle processes sharing this checkout. Earlier work used atomic
 `mkdir /tmp/qalens-gradle-lock` plus a cleanup trap; never delete another active build's lock.
 
-At this handover baseline, `dev` contains `a04b107` (linked inspection/selectors) as well as
+At this handover baseline, `dev` contains the task-based overlay changes above and
+`9696976` (mobile replay synchronization), `56f8347` (host-agent integration guidance),
+`a04b107` (linked inspection/selectors) as well as
 `90d669f` (recording visual contexts/budgets) and
 `7059e29` (manual-root lifecycle/shared pairing/transfer recovery), plus the Landing/phone-approval
 work at `27821a7` and Android/browser audit fixes described above. Earlier bridge/component/clip
@@ -381,8 +418,8 @@ merging; this handover does not authorize merging a branch. Default coordinates 
 `com.qalens:<module>:0.9.0` with a `-PqalensVersion` override. `qalensDist` builds a local Maven
 repository; `scripts/release_internal.sh --verify` packages/checks it. Public artifact publication
 and an authenticated company backend are separate work.
-GitHub CI for `a04b107` completed successfully in
-[run 37245400393](https://github.com/Sal7one/QaLense/actions/runs/37245400393). That result covers
+GitHub CI for `9696976` completed successfully in
+[run 37256006339](https://github.com/Sal7one/QaLense/actions/runs/37256006339). That result covers
 that implementation revision; inspect the current HEAD's run separately.
 
 ## Documentation ownership
@@ -399,6 +436,7 @@ that implementation revision; inspect the current HEAD's run separately.
 | [Architecture](docs/ARCHITECTURE.md) | Module and observation/analysis/capture/lifecycle boundaries |
 | [Recording clips](docs/RECORDING_CLIPS.md), [retention](docs/RECORDING_RETENTION.md) | Timing, journal/media budgets and omissions |
 | [Android verification](docs/ANDROID_VERIFICATION.md) | Dated executed feature matrix and validation limits |
+| [Mobile overlay](docs/MOBILE_OVERLAY.md) | Capture tasks, evidence/connection navigation and retired overlay controls |
 | [Mobile replay](docs/MOBILE_REPLAY.md) | Android transport, event following, media/time coverage and focused playback checks |
 | [SAL format](docs/SAL_FORMAT.md) | Writer/reader schema, compression/checksums and compatibility |
 | [Desktop](tools/local-bridge/README.md), [web](web/README.md), [backend](backend/README.md) | Each tool's detailed operating/API/storage contract |

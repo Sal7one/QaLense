@@ -469,7 +469,7 @@ private fun ControlRoom(
         ControlCard("QA Experience") {
             SwitchRow(
                 "Tester quick actions",
-                "Record a session, capture a screenshot, or mark a bug. Extra tools stay under More tools. Off = developer diagnostics.",
+                "Start with capture and inspection actions. Review evidence opens the five evidence views. Off opens Review evidence directly.",
                 checked = state.minimalPanel
             ) { QaLens.setPanelMinimal(it) }
             Spacer(Modifier.height(10.dp))
@@ -693,6 +693,7 @@ private fun MacrosSection(context: Context) {
     var macros by remember { mutableStateOf(QaLensAppSal.macros(context)) }
     var newName by remember { mutableStateOf("") }
     var newSteps by remember { mutableStateOf("") }
+    var runError by remember { mutableStateOf<String?>(null) }
 
     Text("Macros", color = TxtMain, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
     Text(
@@ -700,6 +701,7 @@ private fun MacrosSection(context: Context) {
         color = TxtMuted, fontSize = 10.sp
     )
     Spacer(Modifier.height(6.dp))
+    runError?.let { Text(it, color = Red, fontSize = 12.sp) }
     if (macros.isEmpty()) Text("No macros yet.", color = TxtMuted, fontSize = 11.sp)
     macros.forEach { m ->
         Row(
@@ -713,7 +715,11 @@ private fun MacrosSection(context: Context) {
                 Text(m.name, color = TxtMain, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 Text(m.steps.joinToString("  →  ").take(80), color = TxtMuted, fontSize = 10.sp)
             }
-            SmallButton("▶ Run", Green) { QaLensMacros.run(m) }
+            SmallButton("▶ Run", Green) {
+                val launch = hostLaunchIntent(context)
+                runError = if (launch == null) "No host app launcher was found. Open the app to run this macro."
+                    else QaLensMacros.runFromControlRoom(m) { context.startActivity(launch) }
+            }
             Spacer(Modifier.width(6.dp))
             SmallButton("✕", Red) {
                 macros = macros.filterNot { it.name == m.name }

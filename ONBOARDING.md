@@ -156,17 +156,17 @@ newer Chucker version is compiler-compatible. Keep the legacy `networkFromChucke
 Dispose Room/DataStore hooks when their owners end. Detailed examples and privacy boundaries:
 [OSS integrations](docs/OSS_INTEGRATIONS.md).
 
-## Use developer diagnostics
+## Investigate evidence and configure tools
 
 Keep the tester sheet simple; open the deeper tools when investigating a specific failure.
 
 | Tool | Useful for | Limit to remember |
 |---|---|---|
-| Repro and Bug Bundle | Copy observed steps and reports for Jira, Slack, GitHub, Linear or Markdown | These format evidence; they do not send messages to those services |
-| Screen Health and contracts | Check accessibility, tags, build/environment expectations and screen rules | Scores are deterministic signals from observed data, not release certification |
+| Review evidence → Activity | Copy observed steps and a bug report; inspect captured failure stacks | Exports format evidence and do not file tickets or send messages |
+| Review evidence → Elements / Device | Inspect concrete element findings, registered contracts and installed build/device facts | Automatic checks can miss problems; there is no overlay health score |
 | Network and Logs | Inspect retained calls, latency, errors, filtering and timelines | Bounded histories and missing hooks can omit evidence |
 | Crash, ANR, jank, memory and connectivity | Correlate captured failures and performance observations with a session | Coverage depends on lifecycle/device callbacks; a blank track is inconclusive |
-| Macros and deep links | Drive supported Compose actions and evaluate assertions | Named Android macros and pure snapshot macros are different APIs; unsupported steps fail |
+| Control Room → Macros | Drive supported Compose actions and evaluate assertions after returning to the app | Named Android macros and pure snapshot macros are different APIs; unsupported steps fail |
 | SQL tools and preference watches | Query an explicitly registered database and inspect selected host settings | SQL can change data; use disposable fixtures and allowlisted values |
 | QA profiles and App Config | Import/export panel settings, webhook setup, macros and saved SQL | `.appsal` can contain user-entered secrets even when webhook credentials are omitted |
 
@@ -175,8 +175,11 @@ runtime controls when testing ends; previously saved or shared artifacts remain 
 
 ## Record and mark a bug
 
-Open the QA bubble for **Record a session**, **Screenshot** or **Mark a bug**. Advanced diagnostics
-are under **More tools**; the Control Room provides recordings and configuration. Recording saves
+Open the QA bubble for **Record a session**, **Screenshot**, **Mark a bug** or **Inspect elements**.
+**Review evidence** provides Activity/Network/Logs/Elements/Device; **Connect to PC** opens
+connection guidance, and **Control Room** provides recordings and configuration.
+Mark a bug adds a timestamped breadcrumb and screenshot; it does not create a ticket.
+See the [mobile overlay guide](docs/MOBILE_OVERLAY.md) for the current menus. Recording saves
 locally first. Stop from the REC control or the available recording controls, then replay/share/send.
 
 During capture, **★ Clip** beside REC offers the last 10, 20 or 60 seconds and a custom 1–300 seconds.
@@ -250,8 +253,8 @@ After updating, rebuild the QA app and restart Python before testing.
 4. **Start preview** shows sampled live phone pixels (up to 1 fps), including other apps. It is
    explicit, memory-only, unmasked and stops when leaving Landing/hiding the tab/disconnecting.
    Click a matching visible Compose element to inspect it; actions require separate buttons.
-5. On the phone use **More tools → Search selectors & tags**, or search from the movable inspector
-   and full **Automation Tags** tab. Select a result; **Actions & XPath selectors** offers copyable
+5. On the phone use **Inspect elements → Search selectors & tags**, or
+   **Review evidence → Elements → Search**. Select a result; **Actions & XPath selectors** offers copyable
    selectors with match counts. In the browser **Selectors** adds a builder, live match checking and
    explicit XML/JSON exports. XPath targets QaLens's visible Compose XML; prefer unique tags over
    changing text/tree positions. Full contract: [desktop guide](tools/local-bridge/README.md#search-and-selectors).
@@ -366,6 +369,7 @@ or an owned backend whose validated limits suit your recordings.
 | Chucker, transports, Room, DataStore, Timber and crash hooks | [OSS integrations](docs/OSS_INTEGRATIONS.md) |
 | Desktop pairing, API, files, profiles and processors | [Desktop guide](tools/local-bridge/README.md) |
 | Browser replay, config editor and CLI | [Web guide](web/README.md) |
+| Android capture actions, evidence views and connection | [Mobile overlay](docs/MOBILE_OVERLAY.md) |
 | Android player synchronization, seeking and event following | [Mobile replay](docs/MOBILE_REPLAY.md) |
 | Test upload protocol and dashboard | [Backend guide](backend/README.md) |
 | Archive schema, reader bounds and coverage | [SAL format](docs/SAL_FORMAT.md), [retention](docs/RECORDING_RETENTION.md) |

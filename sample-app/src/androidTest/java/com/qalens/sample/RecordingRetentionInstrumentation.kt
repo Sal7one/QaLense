@@ -149,7 +149,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             }
             if (overlayLoadOnly) {
                 verifyContinuousOverlayLoad()
-                result.putString("stream", "\nOK: Overlay/Repro/Logs/Network remain responsive under continuous log and network load.\n")
+                result.putString("stream", "\nOK: Overlay/Activity/Logs/Network remain responsive under continuous log and network load.\n")
                 finish(android.app.Activity.RESULT_OK, result)
                 return
             }
@@ -473,7 +473,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             fun tabStrip(): android.view.accessibility.AccessibilityNodeInfo? {
                 if (android.os.Build.VERSION.SDK_INT >= 33) uiAutomation.clearCache()
                 fun find(node: android.view.accessibility.AccessibilityNodeInfo): android.view.accessibility.AccessibilityNodeInfo? {
-                    if (node.contentDescription?.toString() == "Diagnostic tabs" && node.isScrollable) return node
+                    if (node.contentDescription?.toString() == "Diagnostic tabs") return node
                     repeat(node.childCount) { index -> node.getChild(index)?.let { find(it)?.let { found -> return found } } }
                     return null
                 }
@@ -506,10 +506,23 @@ class RecordingRetentionInstrumentation : Instrumentation() {
                     "minimal=${QaLens.state.value.minimalPanel}, overlay=${QaLens.state.value.overlayEnabled}): ${labels.take(30)}"
             }
             while (!clickable.isClickable && clickable.parent != null) clickable = clickable.parent
-            check(clickable.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
+            if (!clickable.isSelected && !clickable.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) {
+                // Continuous evidence publication can invalidate an accessibility node between
+                // lookup and dispatch. Exercise the same visible tab with a real tester tap.
+                val bounds = android.graphics.Rect()
+                clickable.getBoundsInScreen(bounds)
+                val down = android.os.SystemClock.uptimeMillis()
+                for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                    val event = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action,
+                        bounds.exactCenterX(), bounds.exactCenterY(), 0).apply {
+                        source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    }
+                    try { check(uiAutomation.injectInputEvent(event, true)) } finally { event.recycle() }
+                }
+            }
             waitUntil("$label did not produce content while logs kept arriving") {
                 heartbeat()
-                visibleText(heading, exact = false) != null
+                tab(tabStrip())?.isSelected == true && visibleText(heading, exact = false) != null
             }
             repeat(10) { heartbeat(); Thread.sleep(100) }
         }
@@ -538,7 +551,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             heartbeat()
             runOnMainSync { QaLens.openPanel() }
             Thread.sleep(300)
-            openTab("Repro", "Timeline (")
+            openTab("Activity", "Timeline (")
             openTab("Network", "requests")
             openTab("Logs", "events kept")
             check(produced.get() > 100) { "Load stopped before the tabs were exercised" }
