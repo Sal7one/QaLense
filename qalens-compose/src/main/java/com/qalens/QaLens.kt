@@ -241,13 +241,15 @@ object QaLens {
         redactAll: Boolean = false,
         provider: () -> Map<String, String>
     ) {
-        dataSourceProviders[name] = DataSourceEntry(
-            provider = provider,
-            redactKeys = redactKeys.toSet(),
-            redactPatterns = redactPatterns,
-            redactAll = redactAll
-        )
-        markAnalysisDirty()
+        onMain {
+            dataSourceProviders[name] = DataSourceEntry(
+                provider = provider,
+                redactKeys = redactKeys.toSet(),
+                redactPatterns = redactPatterns,
+                redactAll = redactAll
+            )
+            markAnalysisDirty()
+        }
     }
 
     // ── Room / DataStore change events ─────────────────────────────────────────
@@ -256,16 +258,44 @@ object QaLens {
      * Captures *that* a table changed (not row contents). Debug/QA only — call from a debug build.
      */
     private data class RoomBinding(val db: RoomDatabase, val tables: List<String>, val observer: InvalidationTracker.Observer, var active: Boolean = false)
-    private data class FlowBinding(val start: () -> kotlinx.coroutines.Job, var job: kotlinx.coroutines.Job? = null)
+    private data class FlowBinding(
+        val start: () -> kotlinx.coroutines.Job, var job: kotlinx.coroutines.Job? = null,
+        val values: DataSourceEntry? = null
+    )
     private val roomBindings = mutableListOf<RoomBinding>()
     private val flowBindings = linkedMapOf<String, FlowBinding>()
+    private val dataStoreValueStatusMutable = MutableStateFlow<Map<String, DataStoreValueStatus>>(emptyMap())
+    internal val dataStoreValueStatus = dataStoreValueStatusMutable.asStateFlow()
+
+    /** Remove only the snapshot owned by this observer; never remove a host replacement. */
+    private fun removeFlowBinding(name: String) {
+        val previous = flowBindings.remove(name)
+        previous?.job?.cancel()
+        previous?.values?.let { entry ->
+            if (dataSourceProviders[name] === entry) {
+                dataSourceProviders.remove(name)
+                uiStateMutable.update { it.copy(dataSources = it.dataSources - name) }
+                markAnalysisDirty()
+            }
+        }
+        dataStoreValueStatusMutable.update { it - name }
+    }
+
+    private fun valueSourceStatus(name: String, phase: DataStoreValuePhase, updated: Long? = null) {
+        dataStoreValueStatusMutable.update { old ->
+            old + (name to DataStoreValueStatus(phase, updated ?: old[name]?.updatedAtMillis))
+        }
+    }
 
     private fun suspendDataObservers() {
         roomBindings.filter { it.active }.forEach { binding ->
             runCatching { binding.db.invalidationTracker.removeObserver(binding.observer) }
             binding.active = false
         }
-        flowBindings.values.forEach { it.job?.cancel(); it.job = null }
+        flowBindings.forEach { (name, binding) ->
+            binding.job?.cancel(); binding.job = null
+            if (binding.values != null) valueSourceStatus(name, DataStoreValuePhase.PAUSED)
+        }
     }
 
     private fun resumeDataObservers() {
@@ -277,7 +307,12 @@ object QaLens {
                 pushError(ErrorKind.DATA_SOURCE, "Room observer registration failed: ${it.javaClass.simpleName}")
             }
         }
-        flowBindings.values.forEach { if (it.job?.isActive != true) it.job = it.start() }
+        flowBindings.forEach { (name, binding) ->
+            if (binding.job?.isActive != true) {
+                if (binding.values != null) valueSourceStatus(name, DataStoreValuePhase.WAITING)
+                binding.job = binding.start()
+            }
+        }
     }
 
     fun observeRoom(db: RoomDatabase, vararg tables: String) {
@@ -313,7 +348,7 @@ object QaLens {
      */
     fun <T> observeDataStore(name: String, flow: Flow<T>, describe: (T) -> String = { "updated" }) {
         onMain {
-            flowBindings.remove(name)?.job?.cancel()
+            removeFlowBinding(name)
             flowBindings[name] = FlowBinding(start = {
                 bgScope.launch {
                     try {
@@ -334,10 +369,69 @@ object QaLens {
         }
     }
 
-    /** Cancel a host-owned preference Flow when its owner is disposed. */
-    fun stopObservingDataStore(name: String) = onMain {
-        flowBindings.remove(name)?.job?.cancel()
+    /**
+     * Observe decoded, app-owned DataStore values for Control Room, reports and recordings.
+     * [snapshot] runs on a worker; expose only allowlisted fields. No file decoding, encryption
+     * bypass or extra DataStore dependency is involved. Up to 100 fields / 2,048 chars per value
+     * are retained. Credential-like keys, source rules and current global redaction apply.
+     * The initial emission populates values without a change event; later events contain counts,
+     * never values. Stop with [stopObservingDataStore]; disable pauses collection until re-enable.
+     */
+    fun <T> observeDataStoreValues(
+        name: String, flow: Flow<T>,
+        redactKeys: List<String> = emptyList(), redactPatterns: List<Regex> = emptyList(),
+        redactAll: Boolean = false, snapshot: (T) -> Map<String, String>
+    ) {
+        onMain {
+            removeFlowBinding(name)
+            val cache = java.util.concurrent.atomic.AtomicReference<Map<String, String>>(emptyMap())
+            val entry = DataSourceEntry(provider = { cache.get() }, redactFieldNames = true)
+            lateinit var binding: FlowBinding
+            binding = FlowBinding(values = entry, start = {
+                bgScope.launch {
+                    var first = true
+                    try {
+                        flow.collect { value ->
+                            val safe = DataValuePreview.sanitize(snapshot(value), configState.value,
+                                redactKeys.toSet(), redactPatterns, redactAll)
+                            kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+                                if (flowBindings[name] === binding && configState.value.enabled) {
+                                    cache.set(safe)
+                                    valueSourceStatus(name, DataStoreValuePhase.LIVE, System.currentTimeMillis())
+                                    if (!first) event(QaLensDataEvents.DATASTORE, "$name changed: ${safe.size} exposed fields")
+                                    first = false
+                                    markAnalysisDirty()
+                                }
+                            }
+                        }
+                        kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+                            if (flowBindings[name] === binding) valueSourceStatus(name, DataStoreValuePhase.STOPPED)
+                        }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+                            if (flowBindings[name] === binding && configState.value.enabled) {
+                                valueSourceStatus(name, DataStoreValuePhase.ERROR)
+                                pushError(ErrorKind.DATA_SOURCE, "DataStore values '$name' unavailable: ${failure.javaClass.simpleName}")
+                            }
+                        }
+                    }
+                }
+            })
+            dataSourceProviders[name] = entry
+            flowBindings[name] = binding
+            valueSourceStatus(name, DataStoreValuePhase.PAUSED)
+            markAnalysisDirty()
+            resumeDataObservers()
+        }
     }
+
+    /** Cancel a host-owned preference Flow and remove its observer-owned value preview. */
+    fun stopObservingDataStore(name: String) = onMain {
+        removeFlowBinding(name)
+    }
+
+    internal fun refreshAppData() = markAnalysisDirty()
 
     // ── A6: Generic data-source observer (Room/DataStore agnostic) ───────────
     private val dataObservers = mutableListOf<DataSourceObserver>()

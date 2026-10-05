@@ -49,6 +49,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var pcPairingOnly = false
     private var pcUiOnly = false
     private var workflowOnly = false
+    private var dataUiOnly = false
     private var replayOnly = false
     private var videoRecoveryOnly = false
     private var projectionConsent: String? = null
@@ -69,6 +70,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         pcPairingOnly = arguments?.getString("pcPairingOnly") == "true"
         pcUiOnly = arguments?.getString("pcUiOnly") == "true"
         workflowOnly = arguments?.getString("workflowOnly") == "true"
+        dataUiOnly = arguments?.getString("dataUiOnly") == "true"
         replayOnly = arguments?.getString("replayOnly") == "true"
         videoRecoveryOnly = arguments?.getString("videoRecoveryOnly") == "true"
         projectionConsent = arguments?.getString("projectionConsent")
@@ -84,6 +86,11 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         val result = Bundle()
         var consent: java.util.concurrent.FutureTask<Unit>? = null
         try {
+            if (dataUiOnly) {
+                AppDataUiChecks(this).run()
+                result.putString("stream", "\nOK: Control Room SQL picker/actions/results/cancellation and decoded DataStore values/redaction/foreground updates/pause/resume/stop pass.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             if (replayOnly) {
                 ReplayPlaybackChecks(this).run()
                 result.putString("stream", "\nOK: Android frame/video replay clock, decoded seek colors, chronological event following/manual browse, track/state sync, fullscreen, background pause, trailing evidence, legacy alignment, restart and decoder errors pass.\n")

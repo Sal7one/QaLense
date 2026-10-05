@@ -97,6 +97,7 @@ button requires HTTP serving. `web/index.html` remains the classic fallback and 
 | Run replay/upload tools | [Web](web/README.md), [backend](backend/README.md), [demo](DEMO.md) |
 | Use capture actions, evidence views and PC connection | [Mobile overlay](docs/MOBILE_OVERLAY.md) |
 | Use synchronized Android playback and event following | [Mobile replay](docs/MOBILE_REPLAY.md) |
+| Query SQLite and connect searchable decoded DataStore values | [App data](docs/APP_DATA.md) |
 | Build, verify or distribute locally | [Contributing](CONTRIBUTING.md) |
 | Review history | [Changelog](CHANGELOG.md), Git history |
 

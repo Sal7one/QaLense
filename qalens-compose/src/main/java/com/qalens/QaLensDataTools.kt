@@ -93,15 +93,16 @@ internal object QaLensDataTools {
     fun readSharedPrefs(context: Context, name: String): Map<String, String> =
         runCatching {
             context.getSharedPreferences(name, Context.MODE_PRIVATE).all
-                .mapValues { (_, v) -> v.toString().take(120) }
+                // Redact full values in the caller before truncating their displayed preview.
+                .mapValues { (_, v) -> v.toString() }
                 .toSortedMap()
         }.getOrDefault(emptyMap())
 
     // ── DataStore ─────────────────────────────────────────────────────────────
 
     /**
-     * DataStore files (name + size). Values are protobuf — not parseable without a dependency;
-     * live values come through the app's `QaLens.observeDataStore`/`registerDataSource` hooks.
+     * DataStore files (name + size). The app owns its serializer and any encryption;
+     * decoded values come through its `QaLens.observeDataStoreValues` hook or cached provider.
      */
     fun dataStoreFiles(context: Context): List<Pair<String, Long>> =
         File(context.filesDir, "datastore")

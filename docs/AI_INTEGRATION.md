@@ -110,7 +110,8 @@ Use the [OSS guide](OSS_INTEGRATIONS.md) and verify each selected path with a re
 | Another transport | Keep one `QaLens.networkSink("Name")`; record once from the completed-request/error callback; no second adapter for the same instrumented OkHttp call |
 | Timber | Plant `QaLensTimberTree()` once beside existing trees; emit a host log; do not replace or uproot the host's trees |
 | Room | `observeRoom(db, "actual_table")` on the real database; write once; see table invalidation; stop observing before its owner closes |
-| DataStore | `observeDataStore("Prefs", dataStore.data) { "settings updated" }`; change a preference after subscription; see the change label; stop when the owner goes away |
+| DataStore values | `observeDataStoreValues("Settings", dataStore.data) { prefs -> /* allowed key/value map */ }`; verify initial/foreground fields in Control Room, a real change and redacted recording state; stop with the owner |
+| DataStore changes only | `observeDataStore("Prefs", dataStore.data) { "settings updated" }`; verify a later change label; stop with the owner |
 | Current state | `registerDataSource` with a small cached allowlisted map; verify its redacted recording snapshot; no synchronous I/O in the provider |
 | Crash vendor | Public `reportCrash`/bridge contract only if requested; preserve original crash/coroutine delivery; enrichment must not re-report the crash |
 
@@ -119,8 +120,12 @@ prove that app traffic uses it. `QaLens.integrationReport()` is useful for wirin
 certificate. Default metadata omits bodies; unknown-length/SSE/large bodies stay metadata-only.
 Never consume a one-shot body, swallow an exception or change cancellation to feed QA tooling.
 
-Room observes invalidations, not SQL queries/rows. DataStore skips its initial value; an initial
-emission is not a change. Reusing a DataStore name replaces its binding. Pair each observer's
+Room observes invalidations, not SQL queries/rows. The event-only DataStore hook skips its initial
+value; the value hook maps it on a worker into a bounded cache without a change event. Use the real
+host-owned Flow and serializer, including app-owned decryption; never create a second DataStore
+for inspection. Allowlist fields and inspect credential masking/current rules, disable/re-enable,
+completion/error status and stop cleanup. [App data](APP_DATA.md) has the recipe and acceptance.
+Reusing a DataStore name replaces its binding; choose one observation API per name. Pair each observer's
 lifetime with its stop call. Snapshot registrations are process-lived: capture an app-owned cache,
 not an Activity, screen or closed database. Do not invent `unregisterDataSource`; inspect the
 current public API if a different lifetime is required.

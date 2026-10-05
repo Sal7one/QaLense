@@ -6,8 +6,8 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Stands in for a DataStore preferences store (same way SampleBackend stands in for OkHttp). It
- * exposes a [StateFlow] of preference values; QaLens.observeDataStore() turns each change into a
- * timeline event, and QaLens.registerDataSource() snapshots the current values into reports/.sal.
+ * exposes a [StateFlow] of allowed values; QaLens.observeDataStoreValues() provides a live preview
+ * and recording snapshots while emitting value-free change events.
  */
 object SamplePreferences {
     private val _flow = MutableStateFlow(

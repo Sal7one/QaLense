@@ -2,6 +2,23 @@
 
 ## Unreleased — post-0.9.0
 
+### Control Room SQL and decoded app values — 2026-10-05
+
+- Give SQL selection, query, Run, name and Save separate space with 48 dp actions; expose every
+  database, saved Run/Delete and lazy bounded rows with horizontal columns. Reset preview on
+  every run, show errors, retain cancellation and respect system bars/keyboard. Wrap adjacent
+  recording/config action groups at narrow widths instead of squeezing their last button.
+- Lead App data with searchable read-only host values and update/completion/error status.
+  Add `observeDataStoreValues` for a host-owned decoded Flow: worker mapping/redaction, cached
+  recording state, count-only change labels, credential masking and bounded fields. Preserve
+  event-only observation; pause on disable and remove only observer-owned previews on stop.
+- Keep file details optional, exclude SDK preferences, mask plain values before truncation and
+  explain recognized encrypted envelopes and metadata-only DataStore files. Bound expanded
+  results; keep stale privacy-policy previews hidden. Mirror the API in the non-collecting no-op.
+- Add focused actual SQL/DataStore/storage UI checks, preview/privacy unit tests and external
+  active/no-op consumer compilation. Document decoded Preferences/Proto/encrypted Flow wiring,
+  QA acceptance and the limits of emulator/synthetic-envelope evidence in `docs/APP_DATA.md`.
+
 ### Task-based mobile overlay — 2026-10-05
 
 - Replace 12 diagnostic tabs with Activity/Network/Logs/Elements/Device and retain host-provided

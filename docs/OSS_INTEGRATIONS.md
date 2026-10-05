@@ -53,7 +53,7 @@ The previous `networkFromChucker=true` integration was invalid: `TransactionList
 `ChuckerTransaction`, `getCollector` and `Chucker.launch` are not the public APIs it claimed.
 Keep the flag false. Setting it now emits a migration note and leaves QaLens capture enabled.
 The launcher calls public `Chucker.getLaunchIntent(context)` and checks `Chucker.isOp`, so the
-Chucker release no-op is not mistaken for an active inspector. Overview exposes **Open Chucker**
+Chucker release no-op is not mistaken for an active inspector. Review evidence → Device exposes **Open Chucker**
 when the active library is present.
 
 Sources: [Chucker 4.1 public launcher](https://github.com/ChuckerTeam/chucker/blob/4.1.0/library/src/main/kotlin/com/chuckerteam/chucker/api/Chucker.kt),
@@ -102,7 +102,15 @@ independent adapters without stable upstream request identity.
 ## Room and DataStore
 
 Pass an app-owned `RoomDatabase` and its actual table names to `QaLens.observeRoom(db, "orders")`.
-The callback records table invalidations only. `QaLens.observeDataStore("Prefs", dataStore.data)`
+The callback records table invalidations only. For live, read-only allowed settings, connect the
+existing decoded Flow with `QaLens.observeDataStoreValues("Settings", dataStore.data) { prefs ->
+mapOf("theme" to (prefs[themeKey] ?: "system")) }`. The mapper runs on a worker; cached redacted
+fields appear in Control Room → App data and recording state. Initial state is not a change;
+later events contain field counts, not values. Reuse the host's instance/serializer/decryption,
+and stop through `stopObservingDataStore("Settings")` when its owner ends. See
+[app data](APP_DATA.md) for a full recipe, privacy bounds and pause/completion/error behavior.
+
+The older `QaLens.observeDataStore("Prefs", dataStore.data)`
 observes a host-owned Flow; its optional descriptor should describe the change without serializing
 preference values. Pair those event hooks with an allowlisted `registerDataSource` provider backed
 by cached state if a recording needs current values. Providers execute on the analysis/main thread,
@@ -115,7 +123,8 @@ Repeated DataStore registration with the same name replaces its binding. It skip
 emission on first subscription and when restarted after runtime re-enable. Room registration
 deduplicates the same database/table-list binding; `stopObservingRoom(db)` removes all bindings
 for that database, while passing table names removes the matching binding. Register again when
-a closed database is replaced. Neither observer reads rows or dumps preferences for the recording.
+a closed database is replaced. Room and the event-only DataStore hook do not read rows or dump
+preferences; the separate value hook retains only fields explicitly mapped by the app.
 
 A small app-owned cache can expose state without blocking the analysis thread:
 
@@ -165,7 +174,7 @@ method from enrichment: it should attach context, not create another crash repor
 
 ## Diagnose wiring
 
-Call `QaLens.integrationReport()` or use Overview → **Copy integration check**. The report lists
+Call `QaLens.integrationReport()` or use Review evidence → Device → **Copy integration check**. The report lists
 capture settings, declared sources, Room/DataStore dashboard changes, snapshot-source counts and
 network counts without copying request contents or preference values. A source
 is declared when its interceptor/sink is constructed; this alone cannot prove it is on the correct

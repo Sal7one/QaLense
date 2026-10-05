@@ -29,6 +29,10 @@ class ConsumerApplication : Application() {
         QaLens.observeRoom(db, "entries")
         QaLens.stopObservingRoom(db, "entries")
         QaLens.observeDataStore("Prefs", values) { "updated" }
+        QaLens.observeDataStoreValues("Settings", values, redactKeys = listOf("account")) { value ->
+            mapOf("count" to value.toString())
+        }
+        QaLens.stopObservingDataStore("Settings")
         QaLens.stopObservingDataStore("Prefs")
     }
 

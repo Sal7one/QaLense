@@ -382,6 +382,14 @@ main thread: return a cached, allowlisted map, and use `redactKeys`/`redactAll` 
 values. When the host closes a database or disposes a Flow owner, call
 `QaLens.stopObservingRoom(db)` or `QaLens.stopObservingDataStore("Prefs")`.
 
+For live DataStore values, replace the event-only hook and separate cache with
+`QaLens.observeDataStoreValues("Settings", dataStore.data) { prefs ->
+mapOf("theme" to (prefs[themeKey] ?: "system")) }`, using the app's existing instance and key.
+The mapper runs on a worker; redacted cached fields appear in Control Room → App data, reports
+and recording state. The initial read creates no change event; later labels contain field counts.
+Dispose with `stopObservingDataStore("Settings")`. Never create a second DataStore or bypass
+the app's serializer/encryption. [App data](docs/APP_DATA.md) owns the full integration and UI contract.
+
 Room/DataStore changes now refresh those snapshots for recording state samples. A `.sal` archive's
 `analysis.json` reports observed Room and preference change counts and flags a data change within
 five seconds before a failed request as a temporal lead. The lead is a question to investigate,

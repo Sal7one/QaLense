@@ -147,7 +147,8 @@ counts. Declaring a source does not prove it is connected to the client that doe
 | Other transports | `QaLens.networkSink("Name")` from completed-request callbacks | Native Ktor/Cronet/Apollo adapters are not shipped; avoid double reporting |
 | Timber | `QaLensTimberTree()` beside the host trees | Keep messages small and exclude credentials |
 | Room | `QaLens.observeRoom(db, "orders")` | Records table invalidations, not SQL queries or row contents |
-| DataStore | `QaLens.observeDataStore("Prefs", dataStore.data)` | Describes later changes; does not automatically dump preferences |
+| DataStore values | `QaLens.observeDataStoreValues("Settings", dataStore.data) { ... }` | Maps allowed decoded fields on a worker; live Control Room values and recording state |
+| DataStore changes only | `QaLens.observeDataStore("Prefs", dataStore.data)` | Describes later changes without a value snapshot |
 | App state | `QaLens.registerDataSource(...)` with cached allowlisted values | Providers run on main; never perform disk/database/network work inside one |
 | Crash vendors | `reportCrash` or a host-owned crash bridge | Preserve the host handler and avoid forwarding the same crash back to its vendor |
 
@@ -167,11 +168,16 @@ Keep the tester sheet simple; open the deeper tools when investigating a specifi
 | Network and Logs | Inspect retained calls, latency, errors, filtering and timelines | Bounded histories and missing hooks can omit evidence |
 | Crash, ANR, jank, memory and connectivity | Correlate captured failures and performance observations with a session | Coverage depends on lifecycle/device callbacks; a blank track is inconclusive |
 | Control Room → Macros | Drive supported Compose actions and evaluate assertions after returning to the app | Named Android macros and pure snapshot macros are different APIs; unsupported steps fail |
-| SQL tools and preference watches | Query an explicitly registered database and inspect selected host settings | SQL can change data; use disposable fixtures and allowlisted values |
+| Control Room Database · Raw SQL and App data | Choose this app's SQLite files; search live allowed settings from existing host Flows | SQL can change data; file metadata alone does not expose decoded DataStore values |
 | QA profiles and App Config | Import/export panel settings, webhook setup, macros and saved SQL | `.appsal` can contain user-entered secrets even when webhook credentials are omitted |
 
 The integration guide owns registration examples. Stop observation/capture through the SDK's
 runtime controls when testing ends; previously saved or shared artifacts remain where they were stored.
+
+Control Room → **App data** leads with expandable, searchable values and their update status.
+**Show storage files** is optional; encrypted/protobuf backing files require the app's decoded
+value hook. SQL has separate Run/Save controls, a full database picker and scrollable bounded
+results. See the [app data guide](docs/APP_DATA.md) for integration and QA acceptance.
 
 ## Record and mark a bug
 
@@ -371,6 +377,7 @@ or an owned backend whose validated limits suit your recordings.
 | Browser replay, config editor and CLI | [Web guide](web/README.md) |
 | Android capture actions, evidence views and connection | [Mobile overlay](docs/MOBILE_OVERLAY.md) |
 | Android player synchronization, seeking and event following | [Mobile replay](docs/MOBILE_REPLAY.md) |
+| SQL controls and useful decoded DataStore settings | [App data](docs/APP_DATA.md) |
 | Test upload protocol and dashboard | [Backend guide](backend/README.md) |
 | Archive schema, reader bounds and coverage | [SAL format](docs/SAL_FORMAT.md), [retention](docs/RECORDING_RETENTION.md) |
 | Clip timing and long recording limits | [Recording clips](docs/RECORDING_CLIPS.md) |

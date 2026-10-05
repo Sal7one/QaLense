@@ -23,7 +23,8 @@ internal data class DataSourceEntry(
     val provider: () -> Map<String, String>,
     val redactKeys: Set<String> = emptySet(),
     val redactPatterns: List<Regex> = emptyList(),
-    val redactAll: Boolean = false
+    val redactAll: Boolean = false,
+    val redactFieldNames: Boolean = false
 )
 
 internal class AnalysisEngine(
@@ -96,7 +97,7 @@ internal class AnalysisEngine(
                 .onFailure { onError(ErrorKind.DATA_SOURCE, "Data source '$name' failed: ${it.message}") }
                 .getOrNull() ?: return@mapNotNull null
             // B16: per-source redaction on top of the global rules.
-            name to snapshot.mapValues { (key, value) ->
+            val safe = snapshot.mapValues { (key, value) ->
                 when {
                     key in entry.redactKeys -> "[REDACTED]"
                     entry.redactAll -> "[REDACTED]"
@@ -104,6 +105,7 @@ internal class AnalysisEngine(
                     else -> cfg.redact(value)  // global rules as backstop
                 }
             }
+            name to if (entry.redactFieldNames) safe.mapKeys { (key, _) -> cfg.redact(key) } else safe
         }.toMap()
 
     private fun resolveFeatureFlags(cfg: QaLensConfig): Map<String, Boolean> {

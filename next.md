@@ -3,6 +3,20 @@
 Updated 2026-10-05. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Completed 2026-10-05: usable SQL and app data
+
+- [x] Reproduce the narrow SQL controls in screenshots at 360×640 dp / 150% font / three-button
+  navigation; separate fields/actions, expose all databases, saved Run/Delete and scrollable lazy
+  result previews. Respect system/keyboard insets and wrap narrow action groups.
+- [x] Add searchable decoded host values/status to Control Room. Connect existing DataStore Flows
+  through a worker-mapped, bounded, redacted cache; retain event-only API and release/no-op parity.
+- [x] Verify foreground writes, current privacy rules, initial-read semantics, pause/resume/stop,
+  finite/error status and owned-preview replacement. Keep file metadata optional and distinguish
+  recognized encrypted preference envelopes from decoded values; exclude SDK config preferences.
+- [x] Add actual UI/real Preferences DataStore fixtures, unit/no-op/consumer coverage and integration
+  guidance; verify normal/small-display focused data UI, small-display tester workflow and full
+  Android runner. Physical/TalkBack/other serializers and consuming-app acceptance remain separate.
+
 ## Completed 2026-10-05: overlay task cleanup
 
 - [x] Replace the 12-tab diagnostics panel with Activity/Network/Logs/Elements/Device and keep host

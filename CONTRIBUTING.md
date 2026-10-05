@@ -81,6 +81,23 @@ against current system/IME insets; run with gesture and three-button navigation.
 
 ## Focused device checks
 
+Control Room SQL and real decoded Preferences DataStore have a focused UI runner:
+
+```sh
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e dataUiOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: Control Room SQL picker/actions/results/cancellation` and no `FAIL:`. The case
+creates six long-named SQLite fixtures, verifies action dimensions, saved queries, lazy results,
+syntax failure and cancellation. It uses a real app-owned Preferences DataStore for foreground
+updates, credential/current-rule redaction, pause/resume, stop, completion/error and ownership.
+Optional file checks cover redacted plain preferences and a synthetic encrypted-envelope marker.
+See [app data](docs/APP_DATA.md). Repeat at 360×640 dp, 150% font and three-button navigation on a
+disposable emulator; restore display/font/navigation afterwards. Private cache screenshots are
+`qalens-control-sql-after.png`, `qalens-control-app-data-after.png` and, on failure,
+`qalens-data-ui-failure.png`. Do not commit captures. This focused case is separate from the full runner.
+
 Mobile replay synchronization has a focused synthetic frame/video runner:
 
 ```sh

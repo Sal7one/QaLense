@@ -70,15 +70,12 @@ class SampleApp : Application() {
         }
 
         // App-provided data snapshots (real apps would read DataStore / query Room here).
-        QaLens.registerDataSource("Preferences") { SamplePreferences.current }
         QaLens.registerDataSource("Database") {
             mapOf("accounts" to "4", "transactions" to "152", "pending_sync" to "0")
         }
 
         // Change events: a DataStore-style flow → timeline. (Room: QaLens.observeRoom(db, "table…").)
-        QaLens.observeDataStore("Preferences", SamplePreferences.flow) { values ->
-            "preference keys: ${values.keys.sorted().joinToString()}" // never send values to the event log
-        }
+        QaLens.observeDataStoreValues("Preferences", SamplePreferences.flow) { values -> values }
 
         QaLens.install(this)
     }

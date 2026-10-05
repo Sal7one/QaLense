@@ -4,7 +4,8 @@ Updated 2026-10-05. Read this before changing the repository. [ONBOARDING.md](ON
 the user/integrator overview; [AI integration](docs/AI_INTEGRATION.md) is the host-agent work order;
 [next.md](next.md) is the only current backlog;
 [CONTRIBUTING.md](CONTRIBUTING.md) owns portable build/device commands. This handover records
-the current engineering baseline, including the simplified overlay and recording-control fixes below. Git and CHANGELOG retain earlier history.
+the current engineering baseline, including Control Room app values, the simplified overlay and
+recording-control fixes below. Git and CHANGELOG retain earlier history.
 Check the working tree, remote branches and CI before assuming publication or validation state.
 
 ## Product and priorities
@@ -46,6 +47,40 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Control Room SQL and app data — 2026-10-05
+
+SQL now uses an all-database picker, separate query/Run/name/Save, 48 dp actions and equal saved
+Run/Delete controls. Results start at 12 previews, allow all retained rows (100 maximum) through a
+lazy vertical viewport and scroll columns horizontally; UI shows at most 30 columns/80-character
+cells. Every execution resets the preview. Query errors/cancellation remain visible; cancellation
+does not undo writes. Control Room has safeDrawing/IME padding and wrapping action groups.
+
+App data leads with searchable read-only host snapshots/status. New public `observeDataStoreValues`
+maps an existing decoded host Flow on a worker into a bounded redacted cache. Initial reads populate
+state without a change; later labels contain counts only. Stop removes only its owned preview,
+disable pauses, re-enable reads again, and completion/failure is explicit. No-op neither subscribes
+nor evaluates mapping. Existing `observeDataStore` and manual cached providers remain supported.
+Never create a second DataStore, parse arbitrary backing files or bypass the host's encryption.
+File details are optional: SDK prefs excluded, plain values redacted before truncation, recognized
+AndroidX encrypted envelopes explained, DataStore names/sizes disclosed as metadata only.
+The UI offers 30 sources/100 retained fields each and renders at most 100 expanded fields.
+See [app data](docs/APP_DATA.md) for the API, lifetime, privacy and QA contract.
+
+Local checks pass 238 unit tests (183 core / 35 Compose / 17 replay / 3 no-op), changed Compose/sample
+lint with zero errors, sample debug/test/release/isolation and independent consumer
+debug/release/isolation. Unchanged tasks reuse outputs. The focused `dataUiOnly` API 36 test passes
+actual SQL picker/actions/results/saved queries/error/cancellation and real Preferences DataStore
+initial/foreground updates, redaction, disable/resume/stop, finite completion, failure and replacement
+ownership. Plain preferences and a synthetic encrypted-envelope marker are checked; this is not
+cryptography verification. Screenshots are reviewed from private cache and not committed.
+The final focused case passes normal display and 360×640 dp / 150% font / three-button navigation;
+the tester workflow also passes in the latter setup. The full Android runner passes recording
+retention/real Room/DataStore state, privacy/lifecycle, SQL/macros/replay/webhook, Chucker/adapters,
+inspection/bridge and continuous traffic. Its load case observed 2,431 background iterations and
+a worst measured main heartbeat of 3 ms, a synthetic check rather than a consuming-app guarantee.
+Physical phones/TalkBack, other serializers/OS/Compose versions and the consuming app still need
+acceptance. No capture/recording-format or web/desktop/backend behavior changed in this work.
 
 ### Task-based overlay — 2026-10-05
 
@@ -407,7 +442,8 @@ Use the [contributor commands](CONTRIBUTING.md); set host paths through local en
 Serialize Gradle processes sharing this checkout. Earlier work used atomic
 `mkdir /tmp/qalens-gradle-lock` plus a cleanup trap; never delete another active build's lock.
 
-At this handover baseline, `dev` contains the task-based overlay changes above and
+At this handover baseline, `dev` contains the Control Room app-data changes above, the
+task-based overlay at `ecc2d21` and
 `9696976` (mobile replay synchronization), `56f8347` (host-agent integration guidance),
 `a04b107` (linked inspection/selectors) as well as
 `90d669f` (recording visual contexts/budgets) and
@@ -418,8 +454,8 @@ merging; this handover does not authorize merging a branch. Default coordinates 
 `com.qalens:<module>:0.9.0` with a `-PqalensVersion` override. `qalensDist` builds a local Maven
 repository; `scripts/release_internal.sh --verify` packages/checks it. Public artifact publication
 and an authenticated company backend are separate work.
-GitHub CI for `9696976` completed successfully in
-[run 37256006339](https://github.com/Sal7one/QaLense/actions/runs/37256006339). That result covers
+GitHub CI for `ecc2d21` completed successfully in
+[run 37259923113](https://github.com/Sal7one/QaLense/actions/runs/37259923113). That result covers
 that implementation revision; inspect the current HEAD's run separately.
 
 ## Documentation ownership
@@ -438,6 +474,7 @@ that implementation revision; inspect the current HEAD's run separately.
 | [Android verification](docs/ANDROID_VERIFICATION.md) | Dated executed feature matrix and validation limits |
 | [Mobile overlay](docs/MOBILE_OVERLAY.md) | Capture tasks, evidence/connection navigation and retired overlay controls |
 | [Mobile replay](docs/MOBILE_REPLAY.md) | Android transport, event following, media/time coverage and focused playback checks |
+| [App data](docs/APP_DATA.md) | SQL controls, decoded DataStore value wiring, privacy/lifetime and focused UI acceptance |
 | [SAL format](docs/SAL_FORMAT.md) | Writer/reader schema, compression/checksums and compatibility |
 | [Desktop](tools/local-bridge/README.md), [web](web/README.md), [backend](backend/README.md) | Each tool's detailed operating/API/storage contract |
 | [Client fixes](docs/CLIENT_SAFETY_FIXES.md), [overlay design](docs/OVERLAY_DESIGN.md) | Dated migration decisions and remaining UI token coverage |

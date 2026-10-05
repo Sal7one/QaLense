@@ -1,5 +1,39 @@
 # Android verification — 2026-10-04
 
+## Control Room data addendum — 2026-10-05
+
+The focused `dataUiOnly` runner uses actual accessible Control Room controls, six private SQLite
+fixtures and an app-owned real Preferences DataStore. It passes at normal API 36 emulator size
+and 360×640 dp / 150% font / three-button navigation. Private SQL/app-data screenshots are inspected;
+generated captures are not committed. The UI test requires Run/Save/Cancel to be brought fully into
+view with minimum 48 dp height and 100 dp width, rather than measuring a clipped scroll boundary.
+
+| Case | Executed checks |
+|---|---|
+| SQL | Sixth long database beyond the old four-chip cap; editable SQL/name, action dimensions, first 12/all 30 retained rows via lazy scrolling, saved Run/Delete, table listing, syntax error, canceled recursive read and a subsequent successful query |
+| Live values | Initial decoded state without a change event, actual preference update while Control Room is foreground, searchable values, credential masking and no raw value in the count-only change label |
+| Privacy/lifetime | New global rules hide old previews, disable pauses/hides, re-enable refreshes without a change label, stop removes only owned values, finite Flow keeps its last value, newer manual provider survives stop, throwing mapper surfaces unavailability |
+| Storage details | Plain preferences mask credential-like fields and redact full text before preview truncation; SDK prefs are excluded; a synthetic AndroidX envelope marker shows decoded-hook guidance instead of ciphertext; DataStore file names/sizes remain metadata |
+
+A saved-query rerun originally reused its expanded-row toggle when equal results arrived; every
+new execution now resets the preview. File fixtures do not test cryptography or arbitrary encrypted
+formats. Local builds pass 238 units (183/35/17/3), Compose/sample lint with zero errors, sample
+debug/test/release/isolation and independent consumer debug/release/isolation. Unchanged tasks
+reuse outputs. No `.sal` schema or capture-consent changes; web/Python/backend checks were not
+rerun for this Android work. Physical devices/TalkBack, other serializers/OS versions and the
+reported consuming-app failures remain unverified. See [app data](APP_DATA.md) and
+[focused commands](../CONTRIBUTING.md#focused-device-checks).
+
+The final `workflowOnly` case passes at 360×640 dp / 150% font / three-button navigation,
+including actual capture, Control Room macros/configuration, loopback upload and replay. The
+full Android runner passes 600-request/log retention, archive storage, real Room/DataStore and
+recorded preference state, client privacy/disable/resume, SQL/macros/replay/webhook, Chucker and
+adapter contracts, Compose/bridge/gesture cases and continuous traffic. The latest load case
+observed 2,431 background iterations and a worst measured main heartbeat of 3 ms. This does
+not prove the consuming-app ANR is fixed. Focused projection consent/HD, clip/endurance and
+replay-color modes were not rerun for this app-data change. Emulator display/font/navigation
+settings were restored after checking the narrow layout.
+
 ## Overlay cleanup addendum — 2026-10-05
 
 The current overlay has quick capture/inspection actions and five evidence views; the historical
