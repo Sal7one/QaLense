@@ -152,7 +152,8 @@ class QaLensProjectionService : Service() {
         )
         if (!QaLensSessionRecorder.isAwaitingVideo(output.absolutePath)) { stopRecording(); return }
         rec.start()
-        QaLensSessionRecorder.onVideoStarted(output.absolutePath)
+        // Preserve the encoder's start clock even if the host main queue is busy.
+        QaLensSessionRecorder.onVideoStarted(output.absolutePath, System.currentTimeMillis())
     }
 
     @Volatile private var stopped = false

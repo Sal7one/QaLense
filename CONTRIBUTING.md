@@ -81,6 +81,18 @@ against current system/IME insets; run with gesture and three-button navigation.
 
 ## Focused device checks
 
+Mobile replay synchronization has a focused synthetic frame/video runner:
+
+```sh
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e replayOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: Android frame/video replay clock`, with no `FAIL:` output. It checks actual decoded
+colors, event/state synchronization, auto-follow/manual browse, playing scrubs, fullscreen surfaces,
+background pause, legacy alignment, trailing evidence and restart. No projection consent is needed;
+this checks playback, not capture. See [mobile replay](docs/MOBILE_REPLAY.md).
+
 Overlay selector search/copy uses actual accessible controls:
 
 ```sh

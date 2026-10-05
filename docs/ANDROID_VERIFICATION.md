@@ -1,5 +1,28 @@
 # Android verification — 2026-10-04
 
+## Mobile replay addendum — 2026-10-05
+
+The focused `replayOnly` API 36 runner passes on the normal emulator display and at 360×640 dp
+with 150% font. Synthetic archives deliberately reverse input track order; a six-second H.264
+red/green/blue fixture proves actual decoded pixels match seeks, not only reported timestamps.
+It checks chronological/current visible Timeline rows, Network/Logs/State sync, selected-track
+Previous/Next, first error, manual browse/Follow, continued Play after slider drag, paused seeking,
+fullscreen surface recreation/Back, background pause, trailing events after video end, legacy
+end alignment, restart and explicit evidence playback after decoder failure. A 160k-character
+detail stays bounded in its row. Closing while playback is active also completes.
+
+The existing `workflowOnly` recording/config/upload/player/Close path and consent-approved
+`videoRecoveryOnly` real HD background/notification Stop pass with the encoder-worker start
+timestamp. That timestamp avoids UI-queue delay; it does not prove device-specific sub-frame
+calibration. The playback runner itself does not request capture consent or exercise projection.
+
+Local checks pass 233 unit tests (183 core / 31 Compose / 17 replay / 2 no-op), changed Compose/
+replay/sample lint with zero errors, sample debug/test/release and both sample/independent consumer
+release gates. The consumer's debug/release builds pass. Unchanged tasks may be cached. Commands
+and coverage contracts are in [mobile replay](MOBILE_REPLAY.md) and [CONTRIBUTING.md](../CONTRIBUTING.md).
+Physical phones, rotation/process recreation, other OS/decoder versions and actual consuming-app
+failures remain unverified. The earlier matrices below were not all rerun for replay.
+
 ## Selector and linked inspection addendum — 2026-10-05
 
 The API 36 focused bridge test passes selector/XML/query privacy, scoped/duplicate tag counts,
@@ -19,7 +42,7 @@ no page overflow. The focused wider tester workflow also passes on this build.
 Physical phones/TalkBack/other Compose versions and consuming-app failures remain unverified.
 The historical matrix below records the broader 2026-10-04 run; it was not all rerun for selectors.
 
-Current local builds pass 221 unit tests (183 core / 31 Compose / 5 replay / 2 no-op), five
+At the selector baseline, local builds passed 221 unit tests (183 core / 31 Compose / 5 replay / 2 no-op), five
 module/sample lint checks with zero errors, sample debug/test/release, independent consumer
 debug/release and both release isolation gates; 27 Python tests and selector/transfer/polling
 browser wiring checks pass. Unchanged checks may be cached. Commands are in

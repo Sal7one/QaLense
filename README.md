@@ -94,6 +94,7 @@ button requires HTTP serving. `web/index.html` remains the classic fallback and 
 | Implement or inspect recordings | [SAL format](docs/SAL_FORMAT.md), [retention](docs/RECORDING_RETENTION.md), [clips](docs/RECORDING_CLIPS.md) |
 | Pair phones, inspect components and process saved files | [Desktop guide](tools/local-bridge/README.md) |
 | Run replay/upload tools | [Web](web/README.md), [backend](backend/README.md), [demo](DEMO.md) |
+| Use synchronized Android playback and event following | [Mobile replay](docs/MOBILE_REPLAY.md) |
 | Build, verify or distribute locally | [Contributing](CONTRIBUTING.md) |
 | Review history | [Changelog](CHANGELOG.md), Git history |
 

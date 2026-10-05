@@ -3,6 +3,22 @@
 Updated 2026-10-05. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Completed 2026-10-05: mobile replay synchronization
+
+- [x] Use elapsed time for frame playback and decoder time only within HD coverage; handle seeks,
+  buffering, replay from end and pause when leaving the player.
+- [x] Follow the active event chronologically across Timeline/Network/Logs, preserve manual browsing
+  with an explicit Follow control, and synchronize event taps/scrubbing with media and State.
+- [x] Add clock/index regressions and focused Android frame/video playback/scroll/seek checks;
+  verify builds/lint/release isolation and document actual device coverage.
+- [x] Step within the selected track, open the first error's track, bound long row previews and keep
+  retained events playable after decoder failure. Stamp new HD start metadata on the encoder worker.
+- API 36 frame/video, decoded seek colors, selected events/state, manual browse/follow, playing scrub,
+  fullscreen/Back, background pause, legacy alignment and restart pass, including 360×640 dp at
+  150% font and a 160k-character detail. Existing tester workflow and real HD notification Stop pass.
+- Physical phones, rotation/process recreation, other OS/decoder versions and sub-frame calibration
+  still need their own validation; the reported consuming-app crash is not established as resolved.
+
 ## Completed 2026-10-05: AI host integration documentation
 
 - [x] Add an agent discovery/work order, privacy surface review, failure diagnosis, public source

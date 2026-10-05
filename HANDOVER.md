@@ -47,6 +47,35 @@ assuming a named class or public signature is unchanged.
 
 ## Latest local verification
 
+### Mobile replay synchronization — 2026-10-05
+
+Android replay defaults to chronological Timeline. Timeline/Network/Logs keep the latest current
+row visible, including event taps/seeks and track changes. User drags suspend following without
+pausing playback; explicit Follow/Play/seeking restores it. Previous/Next step within the selected
+track (Summary/State use merged events), and First error opens the earliest error's track. Import
+sorts tracks once; binary frame/state/event lookups and cached merged events avoid repeated scans/
+sorts. Long row details are bounded/ellipsized without changing retained evidence.
+
+Frames use monotonic elapsed time; covered video uses decoder time, exact seeks and known video
+offsets. Preparation/buffering freezes video time; pre/post video periods advance retained events
+with explicit viewport coverage. Legacy files align video end to session end. Scrubbing coalesces
+previews, commits the final seek and preserves Play/Pause; replay at end restarts. Backgrounding
+pauses without auto-resume. Fullscreen detaches old surfaces and preserves position/Back; loop
+cleanup avoids touching an already released decoder. Decoder errors are visible and allow explicit
+event-only playback. Future frames/state are not shown before capture. New recordings stamp HD
+start on the encoder worker before the UI callback; no sub-frame calibration claim or schema change.
+
+Local checks pass: 233 unit tests (183/31/17/2), changed Compose/replay/sample lint with zero errors,
+sample debug/test/release/isolation and independent consumer debug/release/isolation. Unchanged
+checks reuse outputs. The new `replayOnly` API 36 runner checks actual rendered red/green/blue
+video against offset seeks, sorted reverse-input tracks, current event/state, manual browse/follow,
+playing scrubs, fullscreen surfaces/Back, background pause, trailing evidence, legacy alignment,
+restart, close during playback and explicit decoder-error evidence playback. It passes at normal
+emulator size and 360×640 dp / 150% font, including a 160k-character detail. Existing tester workflow
+and real consent-approved HD background/notification Stop pass. The color fixture is synthetic,
+not a recorded phone screen. Physical phones, rotation/process recreation, other OS/decoder
+versions and the consuming-app failure remain unverified. See [mobile replay](docs/MOBILE_REPLAY.md).
+
 ### Integration documentation — 2026-10-05
 
 Host agents now have a dedicated discovery/work order, privacy surface review, troubleshooting,
@@ -370,6 +399,7 @@ that implementation revision; inspect the current HEAD's run separately.
 | [Architecture](docs/ARCHITECTURE.md) | Module and observation/analysis/capture/lifecycle boundaries |
 | [Recording clips](docs/RECORDING_CLIPS.md), [retention](docs/RECORDING_RETENTION.md) | Timing, journal/media budgets and omissions |
 | [Android verification](docs/ANDROID_VERIFICATION.md) | Dated executed feature matrix and validation limits |
+| [Mobile replay](docs/MOBILE_REPLAY.md) | Android transport, event following, media/time coverage and focused playback checks |
 | [SAL format](docs/SAL_FORMAT.md) | Writer/reader schema, compression/checksums and compatibility |
 | [Desktop](tools/local-bridge/README.md), [web](web/README.md), [backend](backend/README.md) | Each tool's detailed operating/API/storage contract |
 | [Client fixes](docs/CLIENT_SAFETY_FIXES.md), [overlay design](docs/OVERLAY_DESIGN.md) | Dated migration decisions and remaining UI token coverage |

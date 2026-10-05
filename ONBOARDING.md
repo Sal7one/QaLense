@@ -366,6 +366,7 @@ or an owned backend whose validated limits suit your recordings.
 | Chucker, transports, Room, DataStore, Timber and crash hooks | [OSS integrations](docs/OSS_INTEGRATIONS.md) |
 | Desktop pairing, API, files, profiles and processors | [Desktop guide](tools/local-bridge/README.md) |
 | Browser replay, config editor and CLI | [Web guide](web/README.md) |
+| Android player synchronization, seeking and event following | [Mobile replay](docs/MOBILE_REPLAY.md) |
 | Test upload protocol and dashboard | [Backend guide](backend/README.md) |
 | Archive schema, reader bounds and coverage | [SAL format](docs/SAL_FORMAT.md), [retention](docs/RECORDING_RETENTION.md) |
 | Clip timing and long recording limits | [Recording clips](docs/RECORDING_CLIPS.md) |

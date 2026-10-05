@@ -2,6 +2,23 @@
 
 ## Unreleased — post-0.9.0
 
+### Mobile replay clock and event following — 2026-10-05
+
+- Replay Timeline/Network/Logs chronologically with a current row that follows playback and seeking;
+  allow manual browsing without pausing media and explicit Follow to return. Default to Timeline.
+- Use monotonic elapsed time for frames and decoder position only inside video coverage. Preserve
+  consent/clip offsets and legacy end alignment; disclose preroll/trailing gaps, freeze during
+  buffering, restart at end, pause on background and preserve Play/Pause after slider scrubs.
+- Step within the selected track and open the earliest error's track. Sort imported tracks once,
+  cache merged events and use binary lookups; exclude future frames/state before their timestamps.
+- Coalesce drag previews, request exact media seeks and detach fullscreen PlayerViews. Guard loop
+  cleanup after release; expose control names/roles and bound long row previews with ellipses.
+- Report decoder/frame failures; allow retained event playback after video failure. Stamp HD start
+  on the encoder worker rather than in the later main-thread UI callback; keep capture opt-ins.
+- Add 12 replay policy/index regressions and a focused Android runner with synthetic decoded color
+  checks. Verify API 36 normal/small display/150% font, large details, actual tester workflow and
+  HD notification Stop; update mobile replay guidance and preserve physical/host validation limits.
+
 ### Host integration documentation for AI agents — 2026-10-05
 
 - Add a consumer-agent runbook with discovery/work order, public source index, privacy review,

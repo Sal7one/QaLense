@@ -49,14 +49,14 @@ data class PlayerSession(
 ) {
     val durationMs: Long get() = (endMs - startMs).coerceAtLeast(1)
 
-    /** All event items merged + sorted, for step-to-next/prev navigation. */
-    val allEvents: List<PItem> get() = (timeline + network + logs).sortedBy { it.ts }
+    /** Merged events for first-error and Summary/State navigation; event tabs step in their own track. */
+    val allEvents: List<PItem> = (timeline + network + logs).sortedBy { it.ts }
 
     fun frameAt(ts: Long): FrameRef? =
-        frames.lastOrNull { it.ts <= ts } ?: frames.firstOrNull()
+        frames.getOrNull(frames.latestIndexAt(ts) { it.ts })
 
     fun stateAt(ts: Long): PStateSample? =
-        state.lastOrNull { it.ts <= ts } ?: state.firstOrNull()
+        state.getOrNull(state.latestIndexAt(ts) { it.ts })
 }
 
 /**
@@ -102,10 +102,10 @@ object QaLensSalReader {
                 endMs = end,
                 fps = manifest.optInt("fps", 2),
                 frames = frames,
-                timeline = parseTimeline(arrayOf(dir, "timeline.json")),
-                network = parseNetwork(arrayOf(dir, "network.json")),
-                logs = parseLogs(arrayOf(dir, "logs.json")),
-                state = parseState(arrayOf(dir, "state.json")),
+                timeline = parseTimeline(arrayOf(dir, "timeline.json")).sortedBy { it.ts },
+                network = parseNetwork(arrayOf(dir, "network.json")).sortedBy { it.ts },
+                logs = parseLogs(arrayOf(dir, "logs.json")).sortedBy { it.ts },
+                state = parseState(arrayOf(dir, "state.json")).sortedBy { it.ts },
                 summary = parseSummary(dir),
                 report = textOf(dir, "report.txt"),
                 videoFile = videoFile,

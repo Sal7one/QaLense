@@ -262,10 +262,10 @@ internal object QaLensSessionRecorder {
         QaLens.config.value.enabled && QaLens.config.value.allowUnmaskedVideo &&
             lifecycle.phase == RecordingLifecycle.Phase.AWAITING_CONSENT && videoFile?.absolutePath == path
 
-    fun onVideoStarted(path: String) {
+    fun onVideoStarted(path: String, startedAtMillis: Long) {
         handler.post {
             if (!isAwaitingVideo(path) || videoFile?.absolutePath != path || !lifecycle.activate(lifecycle.sessionId)) return@post
-            videoStartMs = System.currentTimeMillis()
+            videoStartMs = startedAtMillis
             val activity = QaLens.currentActivity ?: activityRef?.get()
             if (activity != null) beginCapture(activity)
             else { startEvidence(); QaLens.setRecording(true); handler.post(tick) }  // no activity (backgrounded)
