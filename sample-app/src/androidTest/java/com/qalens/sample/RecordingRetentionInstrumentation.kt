@@ -46,6 +46,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var desktopDataOnly = false
     private var desktopDataGuiSeconds = 0
     private var desktopGuiHoldSeconds = 0
+    private var scrcpyGuiSeconds = 0
     private var overlayLoadOnly = false
     private var controlOnly = false
     private var controlVideoOnly = false
@@ -72,6 +73,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         desktopDataOnly = arguments?.getString("desktopDataOnly") == "true"
         desktopDataGuiSeconds = arguments?.getString("desktopDataGuiSeconds")?.toIntOrNull() ?: 0
         desktopGuiHoldSeconds = arguments?.getString("desktopGuiHoldSeconds")?.toIntOrNull() ?: 0
+        scrcpyGuiSeconds = arguments?.getString("scrcpyGuiSeconds")?.toIntOrNull() ?: 0
         overlayLoadOnly = arguments?.getString("overlayLoadOnly") == "true"
         controlOnly = arguments?.getString("controlOnly") == "true"
         controlVideoOnly = arguments?.getString("controlVideoOnly") == "true"
@@ -96,6 +98,11 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         val result = Bundle()
         var consent: java.util.concurrent.FutureTask<Unit>? = null
         try {
+            if (scrcpyGuiSeconds > 0) {
+                ScrcpyDesktopChecks(this).hold(scrcpyGuiSeconds)
+                result.putString("stream", "\nOK: Disposable scrcpy fixture restored input UI, HD policy and bridge.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             if (desktopDataGuiSeconds > 0) {
                 DesktopDiagnosticsChecks(this).holdGui(desktopDataGuiSeconds)
                 result.putString("stream", "\nOK: Disposable desktop data GUI fixture restored hooks, databases, queries and privacy.\n")

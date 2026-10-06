@@ -62,7 +62,7 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(spawn.call_args.args[0], ["/synthetic/scrcpy", "-s", "synthetic", "--window-title", "QaLens mirror"])
             self.assertEqual(spawn.call_args.kwargs["env"]["ADB"], "fake-adb")
             self.bench.desktop.stop_mirror(); process.terminate.assert_called_once(); process.wait.assert_called_once()
-        with patch("desktop.shutil.which", return_value=None):
+        with patch("desktop.native_scrcpy", return_value=None):
             self.assertRaises(ValueError, self.bench.desktop.task, {"action": "mirror", "connectionId": self.bench.connection_id})
 
     def test_push_requires_auth_connection_and_bounded_safe_filename(self):

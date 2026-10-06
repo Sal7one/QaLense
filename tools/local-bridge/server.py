@@ -19,7 +19,9 @@ from http.client import IncompleteRead
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from workbench import Workbench, MAX_DOCUMENT, StorageUnavailable
-from desktop import WEB_ROOT, WEB_ASSETS, MAX_TRANSFER, png_size
+from desktop import WEB_ROOT, WEB_ASSETS, MAX_TRANSFER, png_size, native_scrcpy
+import scrcpy_mirror
+from mirror_flags import ENABLE_LEGACY_MIRROR
 from urllib.parse import urlsplit, parse_qs
 import mimetypes
 from urllib.error import HTTPError, URLError
@@ -88,6 +90,7 @@ class Handler(BaseHTTPRequestHandler):
         assets = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/recording-transfer.js": ("recording-transfer.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8")}
         assets["/mirror-controls.js"] = ("mirror-controls.js", "text/javascript; charset=utf-8")
         assets["/diagnostics.js"] = ("diagnostics.js", "text/javascript; charset=utf-8")
+        assets["/scrcpy-stream.js"] = ("scrcpy-stream.js", "text/javascript; charset=utf-8")
         if self.command == "GET" and self.path in assets:
             name, mime = assets[self.path]
             return self.reply(200, Path(__file__).with_name(name).read_bytes(), mime)
@@ -105,6 +108,31 @@ class Handler(BaseHTTPRequestHandler):
         device = self.server.token and hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode())
         if not (desktop or device):
             return self.reply(401, {"ok": False, "error": "Reload the desktop page to renew its session. Scripts require a valid pairing token."})
+        if (self.path.startswith("/api/mirror/") or (not ENABLE_LEGACY_MIRROR and self.path == "/api/preview")) and not desktop:
+            return self.reply(401, {"ok": False, "error": "Open the desktop page to use the mirror"})
+        if self.path == "/api/mirror/video" and self.command == "GET" and bench:
+            try:
+                owned = bench.desktop.stream_session({"connectionId": self.headers.get("X-Qalens-Connection", ""), "streamId": self.headers.get("X-Qalens-Mirror", "")})
+                packets = owned.stream()
+                # Validate the one-viewer lease before committing HTTP streaming headers.
+                first = next(packets)
+            except (ValueError, StopIteration) as error:
+                return self.reply(409, {"ok": False, "error": str(error) or "Mirror stopped"})
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Transfer-Encoding", "chunked")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                for data in self.stream_packets(first, packets):
+                    self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n"); self.wfile.flush()
+                self.wfile.write(b"0\r\n\r\n")
+            except (OSError, TimeoutError): pass
+            finally:
+                packets.close(); self.close_connection = True
+            return
         if self.path == "/api/screen" and self.command == "GET" and bench:
             try:
                 pixels, frame_id = bench.desktop.screen(self.headers.get("X-Qalens-Connection", ""), with_meta=True)
@@ -205,6 +233,11 @@ class Handler(BaseHTTPRequestHandler):
         except (URLError, TimeoutError, ConnectionError, ValueError, IncompleteRead):
             return 502, {"ok": False, "error": "Phone unavailable. Check USB and return to the app. UI actions are never retried automatically."}
 
+    @staticmethod
+    def stream_packets(first, packets):
+        yield first
+        yield from packets
+
     def proxy_screenshot(self, body):
         request = Request(f"http://127.0.0.1:{self.server.device_port}/v1/screenshot", data=body,
                           headers={"Authorization": f"Bearer {self.server.token}", "Content-Type": "application/json"}, method="POST")
@@ -232,7 +265,9 @@ class Handler(BaseHTTPRequestHandler):
                     return {**bench.connection_state(self.server), "profiles": bench.profiles(), "dataDir": str(bench.root.resolve()),
                             "preferences": bench.preferences(),
                             "pipelines": [{"id": p["id"], "name": p.get("name", p["id"])} for p in bench.pipelines.values()],
-                            "jobs": list(bench.jobs.values()), "scrcpyAvailable": bool(shutil.which("scrcpy"))}
+                            "jobs": list(bench.jobs.values()), "scrcpyAvailable": bool(native_scrcpy()),
+                            "mirrorBackend": "legacy" if ENABLE_LEGACY_MIRROR else "scrcpy",
+                            "mirrorReady": scrcpy_mirror.available(), "mirrorVersion": scrcpy_mirror.VERSION}
             if self.path == "/api/recordings/local": return bench.desktop.library()
             if self.path == "/api/saved": return bench.saved()
             if self.path == "/api/previews":
@@ -241,6 +276,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/adb": return bench.desktop.task(body)
         if self.path == "/api/preview": return bench.desktop.preview(body)
         if self.path == "/api/input": return bench.desktop.input(body)
+        if self.path == "/api/mirror/setup": return scrcpy_mirror.install()
+        if self.path in {"/api/mirror/heartbeat", "/api/mirror/input"}:
+            if self.path.endswith("heartbeat"):
+                # A local viewer must not keep capture alive after phone SDK access is revoked.
+                bench.check_connection(self.server, reconnect=False)
+            owned = bench.desktop.stream_session(body)
+            if self.path.endswith("heartbeat"): return owned.heartbeat()
+            return owned.input(body)
         if self.path == "/api/connection/check": return bench.check_connection(self.server, body.get("reconnect", True) is True)
         if self.path == "/api/apps": return {"ok": True, "apps": bench.apps(body.get("serial"))}
         if self.path == "/api/preferences": return {"ok": True, "preferences": bench.save_preferences(body)}
@@ -278,6 +321,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 WORKBENCH_ROUTES = {"/api/workbench", "/api/saved", "/api/previews", "/api/devices", "/api/packages",
+                    "/api/mirror/setup", "/api/mirror/video", "/api/mirror/heartbeat", "/api/mirror/input",
                     "/api/apps", "/api/pair", "/api/connection/check", "/api/preview", "/api/screen", "/api/input", "/api/preferences",
                     "/api/profile", "/api/profile/delete", "/api/connect", "/api/disconnect", "/api/launch",
                     "/api/adb", "/api/file/push", "/api/recordings/local", "/api/recordings/receive", "/api/import", "/api/save", "/api/document", "/api/run", "/api/artifacts", "/api/artifact"}

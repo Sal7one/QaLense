@@ -1,5 +1,30 @@
 # Android verification — 2026-10-04
 
+## Embedded scrcpy addendum — 2026-10-06
+
+The default desktop backend is pinned scrcpy 5.0 H.264/WebCodecs. The prior PNG/adb mirror remains
+behind a default-off code flag. API 36 emulator checks against the actual desktop HTTP server pass
+live encoded-video/FFmpeg decoding, real native touch, editable text/Back, mouse-wheel content
+movement, landscape/portrait stream reconfiguration, SDK-linked selection/attributes, Inspect/
+Preview input rejection, fresh stream restart and stale input rejection. Session-only forwarding
+and jar cleanup are separately covered by regressions; another mirror/adb server is never killed.
+
+SDK Frames and last-ten-second marks/screenshot capture coexist with video. Actual Android screen
+capture consent starts HD alongside scrcpy; Stop produces master/clip `.sal` files whose short MP4s
+decode fully after PC transfer. Source presentation timestamps increase strictly; the decode check
+preserves the variable frame-rate time base. The official checksum-verified macOS aarch64 scrcpy 5.0 binary also records a
+real headless MP4 that FFmpeg decodes. All test data is synthetic. `scrcpyGuiSeconds` supplies a
+test-APK-only editable/scrollable UI, temporary HD opt-in and synthetic bridge, restoring policy/UI/
+bridge on expiry. [Reproduction and manual acceptance](../CONTRIBUTING.md#scrcpy-mirror-checks).
+
+The new test APK builds; 52 Python and six desktop JS suites/syntax plus web-reader/CLI pass. No
+SDK production implementation/public/no-op dependency changes were made here. The preceding 240
+Kotlin units/full Android/build/lint/isolation baseline below was not all rerun for this PC change.
+New browser rendering/hardware throughput, native window UI, physical/OEM encoder concurrency,
+actual USB loss, other platforms and hour-long endurance are unverified. The UI tool reported no
+browser/locked Mac, so live browser acceptance could not run. This does not certify the consuming
+app's reported HD crash or ANR as resolved.
+
 ## Desktop live data and SQL addendum — 2026-10-05
 
 API 36 `desktopDataOnly` passes actual decoded Preferences DataStore initial/foreground updates,

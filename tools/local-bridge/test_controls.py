@@ -19,6 +19,8 @@ PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR' + struct.pack('>II', 1080, 1920) + 
 
 class ControlsTests(unittest.TestCase):
     def setUp(self):
+        self.rollback = patch('desktop.ENABLE_LEGACY_MIRROR', True)
+        self.rollback.start(); self.addCleanup(self.rollback.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.bench = Workbench(self.temp.name, 'fake-adb')
         self.bench.connection = {'serial': 'synthetic', 'package': 'example.qa'}

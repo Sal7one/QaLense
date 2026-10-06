@@ -29,14 +29,17 @@ python3 tools/local-bridge/test_workbench.py
 python3 tools/local-bridge/test_connection.py
 python3 tools/local-bridge/test_desktop.py
 python3 tools/local-bridge/test_controls.py
+python3 tools/local-bridge/test_scrcpy.py
 node --check tools/local-bridge/app.js
 node --check tools/local-bridge/mirror-controls.js
 node --check tools/local-bridge/diagnostics.js
+node --check tools/local-bridge/scrcpy-stream.js
 node tools/local-bridge/test_recording_transfer.js
 node tools/local-bridge/test_polling.js
 node tools/local-bridge/test_selectors.js
 node tools/local-bridge/test_mirror.js
 node tools/local-bridge/test_diagnostics.js
+node tools/local-bridge/test_scrcpy_stream.js
 ```
 
 The consumer fixture resolves normal `com.qalens:*` coordinates through `includeBuild`; it catches
@@ -57,6 +60,42 @@ adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w com.qalens.sample.test/com.
 Require the runner's `OK:` message. An adb process exit code alone does not prove assertions passed.
 The runner changes sample activity contents/preferences and creates synthetic recordings; HTTP
 fixtures bind loopback only.
+
+### scrcpy mirror checks
+
+Use the installed sample/debug-test APKs on a disposable emulator, Python desktop, adb and Chrome/
+Edge with H.264 WebCodecs support. `python3 tools/local-bridge/scrcpy_mirror.py` optionally prepares
+the checksum-verified 5.0 server cache; first Start mirror also sets it up. An installed native
+scrcpy client is optional. Run desktop with an unused port (`--port 0` prints one), connect the
+sample once, and keep that saved emulator/profile. Start this test-only fixture in another terminal:
+
+```sh
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e scrcpyGuiSeconds 300 \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+python3 tools/local-bridge/check_scrcpy_device.py \
+  --url http://127.0.0.1:YOUR_DESKTOP_PORT --adb /path/to/adb --fixture --hd
+```
+
+`--fixture` uses only the synthetic test token/port and a saved `com.qalens.sample` emulator profile;
+it cannot target a physical/customer app. Wait for fixture UI/bridge readiness before the check.
+`--hd` requires FFmpeg, chooses the real API 36 consent dialog and verifies copied master/clip MP4s.
+Omit it for input/Frames/HTTP coverage; without `--fixture`, the tool needs an already approved normal
+sample emulator. It tests real touch/text (fixture), wheel movement, rotation, SDK selection,
+Preview/Inspect input refusal, screenshot/recording coexistence, encoded-video decoding when FFmpeg
+is present and fresh stream restart. Temporary PC media is removed; synthetic phone archives persist.
+Let the fixture finish: require its `OK: Disposable scrcpy fixture restored` message. It restores
+HD policy/UI/bridge after 1–600 seconds, and is absent from the SDK/release APK.
+
+For manual browser acceptance, use the held fixture with Advanced manual pairing's same **synthetic**
+test token `synthetic-scrcpy-desktop-0123456789`, device port `18766` and intended emulator/package.
+Start mirror; verify moving video, tap counter, actual text field, drag/wheel, focus keys, Back,
+letterboxing, resizable panes and portrait/landscape. Inspect/tree selection should highlight/read
+SDK attributes without a host click; Preview blocks input. Return to Control, test Frames/HD with
+normal OS consent, recent clip marks, screenshots and master/clip replay. Stop/restart, hide/leave
+the page, try a second tab and revoke the bridge on the phone: no stale gesture may target a new
+stream or continue after cancellation. After failure choose Start explicitly; auto reconnect repairs
+SDK pairing and never repeats input. Report browser pixels/hardware performance separately from
+controller/transport/FFmpeg and Android evidence. The current browser rendering check is unverified.
 
 For only the overlay/log-flood regression, use the same installed APKs on a disposable emulator:
 

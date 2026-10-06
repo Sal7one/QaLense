@@ -20,7 +20,7 @@ function fixture() {
     });
     return elements.get(id);
   };
-  const state = {connected: true, phase: 'connected', connectionId: 'phone-a',
+  const state = {connected: true, phase: 'connected', mirrorBackend: 'legacy', connectionId: 'phone-a',
     connection: {package: 'synthetic.sample'}, preferences: {autoConnect: false},
     profiles: [], pipelines: [], jobs: [], items: [{name: 'existing.sal'}], health: null};
   const json = payload => ({ok: true, json: async () => payload});
@@ -28,7 +28,7 @@ function fixture() {
     querySelectorAll: () => [], querySelector: element, createElement: element, addEventListener() {}};
   const context = vm.createContext({document, location: {hash: '#landing', origin: 'http://fixture'},
     history: {replaceState() {}}, window: {scrollTo() {}, addEventListener() {}},
-    QaLensRecordingTransfer: RecordingTransfer,
+    QaLensScrcpy: require('./scrcpy-stream.js'), QaLensRecordingTransfer: RecordingTransfer,
     setInterval: (callback, delay) => { timers.push({callback, delay}); },
     fetch: async (url, options) => {
       requests.push({url, body: options.body && JSON.parse(options.body)});

@@ -3,31 +3,49 @@ const assert = require('node:assert/strict'), fs = require('node:fs'), vm = requ
 const Mirror = require('./mirror-controls.js'), Transfer = require('./recording-transfer.js');
 const Diagnostics = require('./diagnostics.js');
 const drain = async () => { for (let i = 0; i < 12; i++) await new Promise(setImmediate); };
-function fixture() {
+function fixture(live = false) {
   const elements = new Map(), requests = [], timers = [], posts = [], urls = [];
   const make = () => ({children: [], options: [], checked: false, value: '', dataset: {}, style: {}, attrs: {}, listeners: {},
     classList: {toggle() {}, add() {}, remove() {}}, setAttribute(k,v) { this.attrs[k] = v; }, removeAttribute() {},
     addEventListener(event, callback) { this.listeners[event] = callback; }, replaceChildren(...nodes) { this.children = nodes; this.options = nodes; },
     append(...nodes) { this.children.push(...nodes); this.options = this.children; }, focus() {}, setPointerCapture() {}, click() {}, remove() {}, showModal() { this.open = true; }, close() { this.open = false; },
-    getBoundingClientRect: () => ({left: 0, top: 0, width: 400, height: 600}), contentWindow: {postMessage: (...args) => posts.push(args)}});
+    getContext: () => ({drawImage() {}, clearRect() {}}), getBoundingClientRect: () => ({left: 0, top: 0, width: 400, height: 600}), contentWindow: {postMessage: (...args) => posts.push(args)}});
   const get = id => { if (!elements.has(id)) elements.set(id, make()); return elements.get(id); };
   const nodes = [{id: 'a', tag: 'cart.buy', label: 'Buy', actions: ['tap'], enabled: true, bounds: {left: 0, top: 0, right: 30, bottom: 40}}];
-  const state = {connected: true, phase: 'connected', connectionId: 'phone-a', connection: {serial: 'phone', package: 'example.qa'}, profiles: [], pipelines: [], jobs: [], preferences: {autoConnect: false},
-    controls: {phase: 'idle', mode: 'frames', allowVideo: true, canClip: false, markedClips: 0, inspection: false, sessionName: 'session_123.sal', capabilities: ['recording-control', 'masked-screenshot']}, items: [], holdInput: null};
+  const state = {connected: true, phase: 'connected', mirrorBackend: live ? 'scrcpy' : 'legacy', connectionId: 'phone-a', connection: {serial: 'phone', package: 'example.qa'}, profiles: [], pipelines: [], jobs: [], preferences: {autoConnect: false},
+    mirrorReady: true, stream: {streamId:'stream', revision:1, modeEpoch:1}, controls: {phase: 'idle', mode: 'frames', allowVideo: true, canClip: false, markedClips: 0, inspection: false, sessionName: 'session_123.sal', capabilities: ['recording-control', 'masked-screenshot']}, items: [], holdInput: null};
   const json = payload => ({ok: true, headers: {get: () => 'frame'}, json: async () => payload, blob: async () => ({}), arrayBuffer: async () => new ArrayBuffer(3)});
   const document = {hidden: false, body: get('body'), getElementById: get, querySelectorAll: () => [], querySelector: get, createElement: make, createElementNS: make, addEventListener() {}};
+  class FakeDecoder {
+    constructor(callbacks) { this.callbacks=callbacks; this.decodeQueueSize=0; }
+    static async isConfigSupported(config) { return {supported:true,config}; }
+    configure(config) { this.config=config; }
+    decode() { this.callbacks.output({displayWidth:this.config.codedWidth,displayHeight:this.config.codedHeight,close(){}}); }
+    close() {}
+  }
+  function liveBytes() {
+    const size=Buffer.alloc(12); size.writeUInt32BE(0x80000000); size.writeUInt32BE(100,4); size.writeUInt32BE(200,8);
+    const csd=Buffer.from([0,0,0,1,0x67,0x42,0xc0,0x1e,0,0,0,1,0x68,0]);
+    const config=Buffer.alloc(12); config.writeBigUInt64BE(1n<<62n); config.writeUInt32BE(csd.length,8);
+    const frame=Buffer.from([0,0,1,0x65,1]); const header=Buffer.alloc(12); header.writeBigUInt64BE((1n<<61n)|123n); header.writeUInt32BE(frame.length,8);
+    return new Uint8Array(Buffer.concat([Buffer.from('h264'),size,config,csd,header,frame]));
+  }
   const context = vm.createContext({document, location: {hash: '#landing', origin: 'http://fixture'}, history: {replaceState() {}, pushState() {}}, window: {scrollTo() {}, addEventListener() {}},
-    navigator: {clipboard: {writeText: async () => {}}}, QaLensMirror: {...Mirror, installLayout() {}}, QaLensRecordingTransfer: Transfer,
+    navigator: {clipboard: {writeText: async () => {}}}, QaLensMirror: {...Mirror, installLayout() {}}, QaLensScrcpy: require('./scrcpy-stream.js'), QaLensRecordingTransfer: Transfer,
     QaLensDiagnostics: {...Diagnostics, install: () => ({sync() {}, buttons() {}, pageChanged() {}})},
+    VideoDecoder: FakeDecoder, EncodedVideoChunk: class {constructor(data){Object.assign(this,data);}}, AbortController, clearInterval() {},
     Date, URL: {createObjectURL: () => { const url = `blob:${urls.length}`; urls.push(url); return url; }, revokeObjectURL() {}},
     setInterval: (callback, delay) => timers.push({callback, delay}), setTimeout, clearTimeout,
     fetch: async (url, options = {}) => {
       const body = options.body && JSON.parse(options.body); requests.push({url, body, headers: options.headers});
       if (url === '/api/bootstrap') return new Promise(() => {});
+      if (url === '/api/mirror/video') return {ok:true,body:new ReadableStream({start(c){c.enqueue(liveBytes());options.signal.addEventListener('abort',()=>c.error(Object.assign(Error('aborted'),{name:'AbortError'})),{once:true});}})};
+      if (url === '/api/mirror/input') return state.holdInput || json({ok:true});
+      if (url === '/api/mirror/heartbeat') return json({...state.stream,width:100,height:200});
       if (url === '/api/screen') return json({});
       if (url === '/api/input') return state.holdInput ? state.holdInput : json({ok: true});
       if (url === '/api/inspection') { state.controls.inspection = body.enabled; return state.holdInspection || json({ok: true}); }
-      if (url === '/api/preview') return json({ok: true});
+      if (url === '/api/preview') { state.stream.modeEpoch++; return json({ok:true,...state.stream}); }
       if (url === '/api/adb') return json({ok: true, notice: 'Phone Back sent'});
       if (url === '/api/snapshot') return json({connectionId: state.connectionId, viewport: {width: 100, height: 200}, nodes, screen: 'Cart', omittedNodes: 0});
       if (url === '/api/component') return json({document: {hash: 'a'.repeat(64), content: {component: {...nodes[0], attributes: []}, tree: {path: []}}}});
@@ -51,11 +69,43 @@ function fixture() {
   vm.runInContext(fs.readFileSync(`${__dirname}/app.js`, 'utf8'), context);
   context.fixtureState = state;
   vm.runInContext('busy = false; session = "session"; workbench = {...fixtureState}; captureConnection = "phone-a"; captureState = fixtureState.controls; previewEnabled = true; mirrorFrame = {id:"frame",connectionId:"phone-a",width:100,height:200,at:Date.now()}; viewerLoaded = true;', context);
+  if (live) vm.runInContext('previewEnabled=false; mirrorFrame=null;',context);
   get('record-mode').value = 'frames'; get('clip-duration').value = '10'; get('link-selections').checked = true;
   const event = (x=200,y=300) => ({button: 0, pointerId: 1, clientX: x, clientY: y, preventDefault() {}});
   return {get, context, state, requests, posts, document, event};
 }
 async function run() {
+  {
+    const f=fixture(true), canvas=f.get('phone-canvas');
+    await f.get('preview-toggle').onclick(); await drain();
+    assert.equal(f.get('screen-video').hidden,false,'Live video never appeared');
+    canvas.listeners.pointerdown(f.event()); canvas.listeners.pointermove(f.event(210,320)); canvas.listeners.pointerup(f.event(215,330)); await drain();
+    assert.deepEqual(f.requests.filter(r=>r.url==='/api/mirror/input').map(r=>r.body.state),['down','move','up']);
+    assert.equal(f.requests.filter(r=>r.url==='/api/screen'||r.url==='/api/input').length,0,'Default mirror used the legacy capture/input path');
+    await vm.runInContext('setMirrorMode("preview")',f.context); await drain();
+    canvas.listeners.pointerdown(f.event()); canvas.listeners.pointerup(f.event()); await drain();
+    assert.equal(f.requests.filter(r=>r.url==='/api/mirror/input').length,3,'Preview sent a live host input');
+    await f.get('mode-inspect').onclick(); await drain();
+    canvas.listeners.pointerdown(f.event(95,60)); canvas.listeners.pointerup(f.event(95,60)); await drain();
+    assert.equal(f.requests.filter(r=>r.url==='/api/mirror/input').length,3,'Inspect sent a live host input');
+    assert.deepEqual(f.requests.filter(r=>r.url==='/api/command').map(r=>r.body.action),['select']);
+    const updates=f.requests.filter(r=>r.url==='/api/preview' && r.body.mode==='inspect');
+    assert.ok(updates.every(r=>r.body.streamId==='stream'),'Selection did not update the owned video mode');
+    await vm.runInContext('setMirrorMode("control")',f.context); await drain();
+    canvas.listeners.wheel({...f.event(),deltaY:120,deltaX:0}); canvas.listeners.keydown({...f.event(),key:'Enter'}); await drain();
+    assert.deepEqual(f.requests.filter(r=>r.url==='/api/mirror/input').slice(-2).map(r=>r.body.action),['scroll','key']);
+    await vm.runInContext('stopPreview()',f.context); assert.equal(f.get('screen-video').hidden,true);
+    assert.equal(f.requests.filter(r=>r.url==='/api/preview').at(-1).body.streamId,'stream');
+  }
+  {
+    const f=fixture(true), canvas=f.get('phone-canvas');
+    await f.get('preview-toggle').onclick(); await drain();
+    canvas.listeners.pointerdown(f.event());
+    vm.runInContext('mirrorPointer.frame={...mirrorPointer.frame,at:Date.now()-6000};',f.context);
+    canvas.listeners.pointerup(f.event()); await drain();
+    assert.deepEqual(f.requests.filter(r=>r.url==='/api/mirror/input').map(r=>r.body.state),['down','cancel'],'Expired long press must release the held finger without clicking');
+    await vm.runInContext('stopPreview()',f.context);
+  }
   const box = {left:10,top:20,width:400,height:600};
   assert.deepEqual(Mirror.point(box,100,200,210,320),{x:.5,y:.5});
   assert.equal(Mirror.point(box,100,200,15,320),null,'Letterbox padding is not a touch target');

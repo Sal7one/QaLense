@@ -1,6 +1,6 @@
 # QaLens engineering handover
 
-Updated 2026-10-05. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
+Updated 2026-10-06. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
 the user/integrator overview; [AI integration](docs/AI_INTEGRATION.md) is the host-agent work order;
 [next.md](next.md) is the only current backlog;
 [CONTRIBUTING.md](CONTRIBUTING.md) owns portable build/device commands. This handover records
@@ -39,7 +39,7 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 | Optional Android tools | `qalens-navigation-compose/`, `qalens-replay/` |
 | Production API mirror | `qalens-noop/`, `NoopParityCheck`; independent `integration-tests/consumer/` |
 | Browser/CLI | `web/app-v2.js`, `web/app.js`, shared `web/sal.js`, `web/tools/sal_report.js` |
-| Desktop/automation | `tools/local-bridge/server.py`, `workbench.py`, `desktop.py`, `process.py`, `recording-transfer.js` |
+| Desktop/automation | `tools/local-bridge/server.py`, `workbench.py`, `desktop.py`, `scrcpy_mirror.py`, `scrcpy-stream.js`, `diagnostics.js`, `process.py`, `recording-transfer.js` |
 | Upload test service | `backend/server.py`, `backend/tests/test_backend.py` |
 | Executed device fixtures | `sample-app/src/androidTest/.../RecordingRetentionInstrumentation.kt` and focused checks |
 
@@ -47,6 +47,52 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Embedded scrcpy mirror — 2026-10-06
+
+Landing now defaults to an inline scrcpy 5.0 H.264 stream decoded with WebCodecs; Control uses
+continuous native touch/wheel/basic text and editing keys. Preview pauses input; Inspect/tree
+selection still uses the SDK's semantics/attributes and scaled display/window geometry. The old
+PNG/adb mirror is preserved behind `tools/local-bridge/mirror_flags.py: ENABLE_LEGACY_MIRROR = False`.
+There is no UI/env/query/preference toggle or silent fallback. Restart Python and refresh the browser;
+this change does not require new SDK APIs/dependencies or a host rebuild.
+
+First explicit Start downloads the fixed official server into `~/.qalens/dependencies/scrcpy/5.0`
+with a SHA-256 check and Apache license. `scrcpy_mirror.py` is also the offline-preparation installer.
+The protocol is pinned: never upgrade just a version/digest without testing framing/control. The
+optional native window uses an installed client or explicitly cached `native/` bundle; the GUI does
+not install that client. Source/license/setup contracts are in the desktop guide and SCRCPY_NOTICE.
+
+Whole-phone pixels remain unmasked/memory-only. Audio and automatic clipboard sync are disabled.
+One page owns a random session/phone jar/forward; seven-second authenticated heartbeat expiry,
+phone-auth revocation, mode/rotation revisions and current connection guard capture/input. Mode/Stop/
+rotation cancel held fingers. Packet/transport/decode/input queues have explicit budgets; slow or
+broken consumers stop. Pairing Auto reconnect repairs SDK transport but never retries input or
+restarts video. Reconnect as needed and explicitly Start after stream failure. Long recording copies
+now snapshot their source under the workbench lock and transfer/validate/publish separately, so they
+do not monopolize that lock and starve mirror/heartbeat/input.
+
+Current verification passes 52 Python tests, six desktop JS suites/syntax, web-reader/CLI and a
+rebuilt sample test APK. Real API 36 emulator + desktop HTTP checks pass actual H.264/FFmpeg decode,
+touch, editable text/Back, wheel moving content, portrait/landscape reconfiguration, linked SDK
+selection/attributes, Inspect/Preview rejection, fresh restart IDs and stale-input rejection.
+SDK Frames/last-ten-second marks/masked screenshots coexist with the stream. Actual OS-approved HD
+recording and last-ten-second marking complete; all frames in both short master/clip `.sal` MP4s
+decode after desktop copy, and input presentation timestamps increase strictly. The decode check
+preserves the variable-rate source clock rather than rounding it to a null muxer's nominal rate.
+The checksum-verified official native macOS aarch64 5.0 bundle also records a real headless MP4
+that FFmpeg decodes. The disposable test-only fixture restores HD policy, UI and bridge on expiry.
+Initial launch-before-foreground/bridge-ready smoke attempts were rejected (502/400); the harness
+now waits for real connected/UI readiness. Only completed passing runs count as successful coverage.
+
+**Live browser canvas/rendering acceptance remains unverified**: the UI tool reports locked Mac/
+no browser surface. Controller/real transport/FFmpeg checks do not certify WebCodecs rendering,
+hardware acceleration, frame rate or latency. Prior PNG-browser checks below do not validate this
+new backend. Physical phones/OEM encoder concurrency, real USB loss, native window UI, other browsers/
+OS and hour-long endurance remain open; the consuming app's separate ANR/HD problem is not certified
+resolved. The 240 Kotlin units/full Android/build/lint/release gates below were verified in the
+preceding SDK change, not all rerun for this PC adapter. Only instrumentation fixture code changes
+in Android here. [Commands and manual acceptance](CONTRIBUTING.md#scrcpy-mirror-checks).
 
 ### Desktop live diagnostics, decoded values, clip notes and SQL — 2026-10-05
 

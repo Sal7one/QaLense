@@ -2,6 +2,22 @@
 
 ## Unreleased — post-0.9.0
 
+### Embedded scrcpy mirror — 2026-10-06
+
+- Make official checksum-pinned scrcpy 5.0 H.264 the inline Landing mirror with WebCodecs decoding,
+  continuous native touch/wheel/basic keyboard input and SDK-linked scaled Compose inspection.
+- Preserve the old PNG/adb implementation behind `ENABLE_LEGACY_MIRROR`, false by default; offer
+  deliberate code rollback and retain the separate optional native desktop window.
+- Guard one viewer, stream/dimension/mode/connection ownership, canceled fingers, phone-auth
+  heartbeats and scoped cleanup; bound video/decode/input queues and fail without replaying actions.
+- Download only the official server into a private PC dependency cache with SHA-256 verification
+  and its Apache license. Disable embedded audio/clipboard sync and retain explicit unmasked,
+  memory-only whole-phone capture. Keep SDK recording, privacy/OS consent and `.sal` schema intact.
+- Move long recording transfer/validation outside the shared workbench lock so video/input and
+  heartbeat can progress. Add HTTP/controller/native input/rotation/HD-clip coexistence regressions
+  and reproducible disposable emulator checks. New browser rendering/hardware performance remains
+  unverified; this does not establish that the reported consuming-app HD failure is resolved.
+
 ### Desktop live diagnostics and data tools — 2026-10-05
 
 - Add collapsible Landing Network/Logs/App values with local search, Errors only, bounded Follow/

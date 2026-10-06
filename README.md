@@ -117,6 +117,9 @@ the filters and selected-node card. Bubble/dock movement follows physical screen
 
 The [local desktop launcher](tools/local-bridge/README.md) embeds the existing replay viewers alongside
 phone pairing, Compose inspection, saved components, processing pipelines and adb/file tools.
+Landing now uses an inline scrcpy 5.0 H.264/WebCodecs mirror with continuous phone control and linked
+SDK inspection; first Start verifies the official server download. The previous PNG mirror remains
+behind a default-off code flag. [Setup, browser requirements and fallback](tools/local-bridge/README.md#scrcpy-setup-and-fallback).
 [Long sessions and bug clips](docs/RECORDING_CLIPS.md) describes retrospective 10/20/60-second/custom marks
 without stopping capture, plus opt-in finished-recording collection on your PC.
 

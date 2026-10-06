@@ -70,6 +70,8 @@ class ConnectionTests(unittest.TestCase):
         with patch("workbench.urlopen", return_value=self.approved_response()):
             self.assertEqual(self.bench.check_connection(self.server)["phase"], "connected")
     def test_auth_revocation_stops_preview_and_auto_reconnect_off_does_not_repair(self):
+        rollback = patch('desktop.ENABLE_LEGACY_MIRROR', True)
+        rollback.start(); self.addCleanup(rollback.stop)
         self.bench.connect(self.server, PROFILE, "synthetic-pairing-token-0123456789")
         self.bench.desktop.preview({"enabled":True, "connectionId":self.bench.connection_id})
         before = len(self.bench.adb_call.call_args_list)
@@ -103,6 +105,8 @@ class ConnectionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, notice): self.bench.pair(self.server, PROFILE)
             self.assertIsNone(self.server.token); self.assertIsNone(self.bench.owned_forward)
     def test_preview_is_explicit_bounded_memory_only_and_rejects_stale_stop(self):
+        rollback = patch('desktop.ENABLE_LEGACY_MIRROR', True)
+        rollback.start(); self.addCleanup(rollback.stop)
         self.bench.connect(self.server, PROFILE, "synthetic-pairing-token-0123456789")
         ident = self.bench.connection_id; desktop = self.bench.desktop
         with self.assertRaises(ValueError): desktop.screen(ident)

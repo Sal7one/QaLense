@@ -17,7 +17,7 @@ the sample app or adding the mock backend is unnecessary.
 
 Inspection coverage is visible Compose semantics from attached/registered roots in the foreground Activity.
 Native views, WebViews, arbitrary private state and unregistered windows are outside semantics inspection;
-mirror touch input uses adb and can interact with whatever is visible on the whole phone.
+mirror touch input uses scrcpy over adb and can interact with whatever is visible on the whole phone.
 An accepted semantics action is not proof of the resulting app state: refresh/assert its effect.
 
 ## Start and pair
@@ -165,22 +165,39 @@ Separators also accept arrow keys; Home, double-click or **Reset layout** restor
 Only dimensions are remembered in origin-scoped browser storage. Smaller windows stack panels;
 the tree and detail views keep independent scrolling. No credentials/components enter layout storage.
 
-**Start mirror** explicitly samples the whole phone, including other apps, unmasked and in memory
-only, at about one frame per second. Leaving Landing, hiding the page, stopping or disconnecting
-ends sampling. **Control** is the default: click to tap, drag to swipe, wheel to scroll and hold to
-long-press. Escape sends Phone Back while the mirror has focus. Back/Home/Wake are beside the mirror.
+**Start mirror** explicitly streams the whole phone, including other apps, unmasked and in memory
+only. The default is scrcpy 5.0 H.264 decoded directly into Landing's canvas with browser WebCodecs;
+there is no intermediate PNG/JPEG encoding. Use Chrome/Edge with H.264 WebCodecs support. First Start
+downloads the pinned official server after a SHA-256 check; see [setup](#scrcpy-setup-and-fallback).
+Leaving Landing, hiding the page, stopping or disconnecting ends the stream. **Control** is the
+default: click to tap, drag to swipe, wheel to scroll and hold to long-press. Type with the mirror
+focused; supported printable text and navigation/editing keys go to Android. Escape sends Phone Back.
+Back/Home/Wake are beside the mirror. This is basic text/key input, not full desktop IME or shortcuts.
 **Preview** pauses touch/navigation input. **Inspect elements** overrides both modes with all visible
 Compose outlines; clicking reads/highlights the smallest element without executing a host action.
 Tree filters do not hide mirror outlines. Selecting in the linked tree also enters inspection;
 choose Control or Done inspecting to return to normal touch. Phone inspection state is synchronized.
 
 Touch coordinates use the decoded image's aspect ratio and actual pixel dimensions; letterbox areas
-cannot send input. The server accepts only the two latest frame leases for up to six seconds; known
-rotation, mode/connection changes and stopped preview revoke older leases. Gestures are bounded,
-serialized and never retried after failure. The tree refreshes shortly after a gesture to let Compose
-update. Verify the app state before repeating an uncertain input. A rotation/navigation occurring
-after the latest sample remains subject to sampling latency. **Fast mirror** opens installed scrcpy
-in its own window when available; the embedded sampled preview is not a video stream.
+cannot send input. Continuous Down/Move/Up and native mouse-wheel messages use scrcpy's control
+socket, rather than launching an adb process per gesture. Moves coalesce under load. Stream identity,
+current video dimensions/revision, mode epoch and connection nonce reject stale input; mode changes,
+rotation and Stop cancel a held finger. Preview/Inspect refuse host input. Inspection maps scaled
+video to the SDK's full-display viewport/window origin and refuses mismatched aspect ratios. Native
+or unsupported areas remain visible but cannot become Compose targets.
+
+Only one page owns a stream. Static screens remain usable while authenticated heartbeats continue;
+seven seconds without a responding page ends capture. Decoder/transport queues are bounded and a
+slow consumer stops with a restart message. Input is never retried: scrcpy confirms socket delivery,
+not completion of the host action, so verify app state before repeating an uncertain action. After a
+stream/device/decoder failure, reconnect if needed and choose Start mirror again. The existing SDK
+**Auto reconnect** repairs pairing transport; it does not restart video or repeat input.
+
+The encoder is limited to a 1600-pixel longest edge, up to 60 fps and 6 Mbps, with audio and automatic
+clipboard synchronization disabled. Browser decoding prefers hardware and checks a software-compatible
+configuration when unsupported. Actual frame rate, latency, hardware decoding and concurrent encoder
+capacity depend on the phone/browser; no scrcpy native-client performance benchmark is claimed here.
+**Open desktop window** separately launches an installed/cached native scrcpy client when available.
 
 ### Live diagnostics
 
@@ -390,9 +407,13 @@ This trusts the local OS/adb environment; it is not a remotely exposed or multi-
 | `POST /api/apps` | `{serial}` → launcher activities with QaLens availability |
 | `POST /api/pair` | `{profile}` → memory-only request for explicit phone approval |
 | `POST /api/connection/check` | `{reconnect}` → status, bounded health read / owned forward repair |
-| `POST /api/preview` | `{enabled,mode,connectionId}`; mode `control`, `preview` or `inspect` revokes old leases |
-| `GET /api/screen` | Memory-only PNG + `X-Qalens-Frame`; requires session/connection and active preview |
-| `POST /api/input` | `{connectionId,frameId,action,x,y,endX?,endY?,duration?}`; normalized 0–1 screen coordinates, tap/swipe/long-press; only Control |
+| `POST /api/preview` | `{enabled,mode,connectionId,streamId?}`; returns owned scrcpy stream ID/dimensions/revision/mode epoch; require its ID to change/stop |
+| `POST /api/mirror/setup` | Desktop session only; checksum-pinned server cache setup, no capture |
+| `GET /api/mirror/video` | Desktop session + `X-Qalens-Connection`/`X-Qalens-Mirror`; one chunked H.264 viewer, memory-only |
+| `POST /api/mirror/heartbeat` | `{connectionId,streamId}`; verifies current SDK access, renews seven-second page lease |
+| `POST /api/mirror/input` | `{connectionId,streamId,revision,modeEpoch,action,...}`; Control-only touch states/normalized coordinates, wheel, limited keys or <=300-byte UTF-8 text |
+| `GET /api/screen` | Legacy-flag-only memory PNG + `X-Qalens-Frame`; requires session/connection and active preview |
+| `POST /api/input` | Legacy-flag-only `{connectionId,frameId,action,x,y,endX?,endY?,duration?}`; normalized coordinates and bounded adb gestures |
 | `POST /api/inspection` | `/v1/inspection`: `{enabled}`; closes SDK panel/watch/tag modes, toggles inspector |
 | `GET /api/recordings/device` | `/v1/recordings`: completed items, `recording`, `saving`, `controls` phase/mode/capabilities |
 | `POST /api/recording` | `/v1/recording`: `{action:"start",video:boolean}`, `{action:"stop"}` or `{action:"clip",seconds:1..300,label?:string}` |
@@ -443,11 +464,13 @@ python3 tools/local-bridge/test_workbench.py
 python3 tools/local-bridge/test_connection.py
 python3 tools/local-bridge/test_desktop.py
 python3 tools/local-bridge/test_controls.py
+python3 tools/local-bridge/test_scrcpy.py
 node --check tools/local-bridge/app.js
 node tools/local-bridge/test_recording_transfer.js
 node tools/local-bridge/test_polling.js
 node tools/local-bridge/test_selectors.js
 node tools/local-bridge/test_mirror.js
+node tools/local-bridge/test_scrcpy_stream.js
 # Build/install sample debug + androidTest APKs as in CONTRIBUTING.md, then:
 adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e bridgeOnly true \
   com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
@@ -522,22 +545,46 @@ comparisons and the `.appsal` editor remain the existing web client's features. 
 viewers share one localhost origin; viewer preferences/recents use that origin's browser storage.
 
 Device tools includes phone Back/Home/Wake, Android settings and the existing explicit no-reset
-launch. Start mirror launches **your installed `scrcpy`** in a separate window, using this profile's
-serial and adb executable. Stop mirror/disconnect/server exit closes the owned process. If scrcpy
-is absent the GUI reports how to enable it; this tool does not download/install it. No external
-mirror is embedded or remote-exposed. scrcpy launch was covered by the argv contract; real mirroring
-requires installed scrcpy and remains unverified on this host.
+launch. **Open desktop window** launches your installed scrcpy, or a native bundle explicitly placed
+under the pinned dependency cache's `native/` directory. It uses the selected serial/adb executable;
+Stop/disconnect/server exit closes only the owned process. Native scrcpy is optional; the embedded
+video needs only adb, the verified server and a compatible browser. No audio/clipboard features of
+the native client are controlled by the embedded adapter's options.
 
-Landing’s **Start mirror** uses adb screen PNGs directly, without requiring scrcpy. This shows
-**the whole phone**, including other apps and sensitive pixels; host text redaction/pixel masks do
-not sanitize it. It requires explicit start after approved connection, keeps pixels only in memory,
-and stops on leaving Landing, hiding the browser tab or disconnect. No background capture or files.
-Capture is limited to one frame/second, one in-flight request, a four-second adb deadline, 16 MiB
-PNG and 24 million decoded pixels. It is a sampled live preview, not a high-FPS video stream.
-Selecting a screen position refreshes the live tree and chooses the smallest containing visible
-node; dimensions and window origin must align. Unsupported/native areas are not Compose targets.
-Inspect mode selects without host actions; Control mode sends bounded adb gestures. Preview mode
-is read-only. See the Landing workspace section above. scrcpy remains the optional external mirror.
+### scrcpy setup and fallback
+
+First **Start mirror** sets up only the official `scrcpy-server-v5.0` asset, not a global executable
+or package manager. For offline preparation on the PC, run:
+
+```sh
+python3 tools/local-bridge/scrcpy_mirror.py
+```
+
+The cache is `~/.qalens/dependencies/scrcpy/5.0/scrcpy-server`, with the included Apache 2.0 license.
+Version, fixed release URL and digest live in [scrcpy_mirror.py](scrcpy_mirror.py). A corrupt/oversized
+download never replaces the prior server. Setup errors explain connectivity/write access. An offline
+installation may copy that exact official asset and its license to the cache; every Start verifies its digest.
+The protocol adapter is pinned to 5.0: upgrading needs coordinated framing/control tests, not just a
+version edit. [Upstream/license notes](SCRCPY_NOTICE.md) identify the sources and ownership.
+
+The earlier adb PNG mirror and bounded adb gesture implementation remain intact behind the **code-only**
+`ENABLE_LEGACY_MIRROR = False` in [mirror_flags.py](mirror_flags.py). Set it to `True`, restart Python
+and refresh the browser to deliberately use the old roughly-one-fps preview. There is no user-facing,
+URL, environment or saved-preference switch, and no silent fallback after video failure. Legacy
+screenshots have a 16 MiB/24-million-pixel budget and two six-second frame leases.
+
+Both paths capture unmasked whole-phone pixels, including other apps. SDK text redaction/pixel masks
+do not sanitize mirroring. Approved connection and explicit Start are required; video is memory-only
+and stops when the page leaves/hides/disconnects. Session-owned adb forwards/random phone jars are
+removed on shutdown/expiry, without killing adb or another scrcpy instance. Packet size is limited
+to 2 MiB, queued transport to 8 MiB/128 records, decode backlog to 90 records/eight decoder entries,
+and queued input to 24 messages. Tokens/stream identifiers travel in headers/bodies, not URLs.
+
+API 36 emulator checks exercise real H.264 HTTP transport/FFmpeg decoding, native touch/text/wheel,
+rotation, linked SDK selection, Preview/Inspect rejection, stream stop/restart and concurrent SDK
+Frames/HD, consent, screenshots and master/clip MP4 decoding. See the reproducible commands in
+[CONTRIBUTING](../../CONTRIBUTING.md#scrcpy-mirror-checks). Browser canvas visual/rendering acceptance,
+physical/OEM encoders, USB loss, hour-long endurance and other platforms remain separate checks.
 
 Push explicitly chooses a browser file, up to 32 MiB, and writes `/sdcard/Download/<filename>`;
 an existing same-name phone file is replaced. Names allow only letters/numbers/dot/dash/underscore.

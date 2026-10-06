@@ -12,6 +12,8 @@ let mirrorModeGeneration = 0;
 let lastPreviewRequest = 0, treeRefreshTimer = null;
 let captureChecked = false, captureIssue = '';
 let diagnostics = null;
+let mirrorStream = null;
+const legacyMirror = () => workbench?.mirrorBackend === 'legacy';
 const status = text => { $('status').textContent = text; };
 async function api(path, command, connectionId = workbench?.connectionId) {
   const headers = {'X-Qalens-Session': session};
@@ -119,7 +121,7 @@ async function choose(node, origin = 'pc') {
           if (generation === selectionGeneration) {
             lastPhoneSelection = node.id;
             ++mirrorModeGeneration; mirrorInspect = true; mirrorPointer = null; mirrorFrame = null; mirrorUi();
-            if (previewEnabled) await api('preview', {enabled: true, mode: 'inspect', connectionId});
+            if (previewEnabled) await syncMirrorMode(connectionId);
           }
         });
         highlightQueue = highlight; await highlight;
@@ -199,6 +201,7 @@ async function loadWorkbench() {
   diagnostics?.sync();
   document.querySelector('[data-adb="mirror"]').title = workbench.scrcpyAvailable ? 'Start installed scrcpy' : 'Install scrcpy to enable this tool';
   $('auto-connect').checked = workbench.preferences.autoConnect;
+  $('fast-mirror').textContent = 'Open desktop window ↗';
   connectionStatus(workbench); connectionButtons();
   $('storage').textContent = `Local storage: ${workbench.dataDir}`;
   $('profiles').replaceChildren();
@@ -441,7 +444,7 @@ async function phoneRecordings(connectionId = workbench.connectionId) {
   captureConnection = connectionId; captureState = result.controls || null; captureChecked = true; captureIssue = ''; phoneArchiveList = result.items; captureUi();
   if (modeGeneration === mirrorModeGeneration && typeof captureState?.inspection === 'boolean' && mirrorInspect !== captureState.inspection) {
     ++mirrorModeGeneration; mirrorInspect = captureState.inspection; mirrorPointer = null; mirrorFrame = null; mirrorUi();
-    if (previewEnabled) { ++previewGeneration; await api('preview', {enabled: true, mode: mirrorInspect ? 'inspect' : mirrorMode, connectionId}); }
+    if (previewEnabled) { ++previewGeneration; await syncMirrorMode(connectionId); }
   }
   $('phone-recordings').replaceChildren();
   for (const entry of result.items) {
@@ -566,7 +569,7 @@ function mirrorUi() {
   $('map').classList.toggle('inspecting', mirrorInspect);
   $('map').hidden = !previewEnabled;
   $('mode-inspect').textContent = mirrorInspect ? 'Done inspecting' : 'Inspect elements';
-  $('mirror-note').textContent = mirrorInspect ? 'Click any outlined Compose element to inspect it. Host taps are paused. Tree search does not hide outlines.' : control ? 'Click, drag, wheel scroll or hold to long press. The whole phone is visible; frames stay in memory.' : 'Read-only preview. Touch and navigation controls are paused. Enable Inspect to select elements.';
+  $('mirror-note').textContent = mirrorInspect ? 'Click any outlined Compose element to inspect it. Host taps are paused. Tree search does not hide outlines.' : control ? 'Click, drag, wheel scroll, hold to long press or type with the mirror focused. The whole phone is visible; frames stay in memory.' : 'Read-only preview. Touch and navigation controls are paused. Enable Inspect to select elements.';
   connectionButtons();
 }
 async function setMirrorMode(mode, inspect = false) {
@@ -584,7 +587,15 @@ async function setMirrorMode(mode, inspect = false) {
   }
   if (connectionId !== workbench?.connectionId) throw Error('Connection changed. Choose the mirror mode again.');
   mirrorMode = mode; mirrorInspect = inspect; mirrorUi();
-  if (previewEnabled) { ++previewGeneration; await api('preview', {enabled: true, mode: inspect ? 'inspect' : mode, connectionId: workbench.connectionId}); await previewFrame(); }
+  if (previewEnabled) {
+    ++previewGeneration;
+    await syncMirrorMode(workbench.connectionId);
+    if (legacyMirror()) await previewFrame();
+  }
+}
+async function syncMirrorMode(connectionId) {
+  const result = await api('preview', {enabled: true, mode: mirrorInspect ? 'inspect' : mirrorMode, streamId: mirrorStream?.streamId, connectionId}, connectionId);
+  if (!legacyMirror() && connectionId === workbench?.connectionId && previewEnabled && result.streamId === mirrorStream?.streamId && result.modeEpoch >= mirrorStream.modeEpoch) { mirrorStream = {...result, connectionId}; liveMirror.mode(result); }
 }
 $('mode-control').onclick = () => perform(() => setMirrorMode('control'));
 $('mode-preview').onclick = () => perform(() => setMirrorMode('preview'));
@@ -594,22 +605,35 @@ $('mode-inspect').onclick = () => perform(async () => {
   await setMirrorMode(mirrorMode, enabled);
 });
 async function stopPreview() {
+  const owned = mirrorStream; mirrorStream = null; liveMirror?.stop();
   previewGeneration++; previewEnabled = false; mirrorPointer = null; mirrorFrame = null; $('preview-toggle').textContent = 'Start mirror';
   $('screen-image').hidden = true; $('screen-image').removeAttribute('src');
+  $('screen-video').hidden = true;
   if (previewUrl) URL.revokeObjectURL(previewUrl); previewUrl = '';
   $('mirror-empty').hidden = false; $('map').classList.remove('selectable'); $('map').hidden = true;
   $('mirror-state').textContent = 'Mirror off · no screen frames are captured';
-  if (workbench?.connection && session) { try { await api('preview', {enabled: false, connectionId: workbench.connectionId}); } catch (_) { /* Local UI always stops sampling. */ } }
+  if (workbench?.connection && session && (legacyMirror() || owned)) { try { await api('preview', {enabled: false, streamId: owned?.streamId, connectionId: owned?.connectionId || workbench.connectionId}); } catch (_) { /* Local UI always stops displaying. */ } }
   connectionButtons();
 }
 $('preview-toggle').onclick = () => perform(async () => {
   if (previewEnabled) { await stopPreview(); return; }
   await setMirrorMode(mirrorMode, mirrorInspect);
-  await api('preview', {enabled: true, mode: mirrorInspect ? 'inspect' : mirrorMode, connectionId: workbench?.connectionId});
+  if (!legacyMirror() && !liveMirror.supported()) throw Error('Live mirror needs Chrome/Edge or another browser with WebCodecs. Open desktop window is also available.');
+  const connectionId = workbench?.connectionId;
+  if (!legacyMirror() && !workbench.mirrorReady) { status('Setting up the verified scrcpy 5.0 server…'); await api('mirror/setup', {}, connectionId); workbench.mirrorReady = true; }
+  if (connectionId !== workbench?.connectionId || document.hidden || location.hash !== '#landing') throw Error('Mirror start cancelled because the page or phone changed.');
+  const result = await api('preview', {enabled: true, mode: mirrorInspect ? 'inspect' : mirrorMode, connectionId});
+  if (connectionId !== workbench?.connectionId || document.hidden || location.hash !== '#landing') {
+    if (result.streamId) { try { await api('preview', {enabled: false, streamId: result.streamId, connectionId}, connectionId); } catch (_) {} }
+    throw Error('Mirror start cancelled because the page or phone changed.');
+  }
   previewGeneration++; previewEnabled = true; $('preview-toggle').textContent = 'Stop mirror';
-  await previewFrame(); mirrorUi();
+  if (legacyMirror()) await previewFrame();
+  else { mirrorStream = {...result, connectionId}; await liveMirror.start(result, connectionId); }
+  mirrorUi();
 });
 async function previewFrame() {
+  if (!legacyMirror()) return;
   if (!previewEnabled || previewBusy || mirrorPointer || mirrorInputBusy || document.hidden || location.hash !== '#landing' || Date.now() - lastPreviewRequest < 1000) return;
   previewBusy = true;
   lastPreviewRequest = Date.now();
@@ -647,8 +671,8 @@ async function inspectPoint(point, frame) {
     await refresh();
     if (!mirrorInspect || connectionId !== workbench.connectionId || !snapshot || snapshot.connectionId !== connectionId) return;
     const viewport = snapshot.screenViewport || snapshot.viewport;
-    if (frame.width !== viewport.width || frame.height !== viewport.height) throw Error('Screen rotated. Wait for a fresh frame and inspect again.');
-    const x = point.x * frame.width - (snapshot.viewport.originX || 0), y = point.y * frame.height - (snapshot.viewport.originY || 0);
+    if (!QaLensScrcpy.aligned(frame, viewport)) throw Error('Screen rotated. Wait for a fresh frame and inspect again.');
+    const x = point.x * viewport.width - (snapshot.viewport.originX || 0), y = point.y * viewport.height - (snapshot.viewport.originY || 0);
     const candidates = snapshot.nodes.filter(n => x >= n.bounds.left && x <= n.bounds.right && y >= n.bounds.top && y <= n.bounds.bottom);
     candidates.sort((a,b) => (a.bounds.right-a.bounds.left)*(a.bounds.bottom-a.bounds.top) - (b.bounds.right-b.bounds.left)*(b.bounds.bottom-b.bounds.top));
     if (candidates[0]) await choose(candidates[0]); else status('No public Compose element at that position.');
@@ -672,29 +696,69 @@ async function sendMirrorGesture(gesture, frame) {
   finally { mirrorInputBusy = false; connectionButtons(); void previewFrame(); }
 }
 const canvas = $('phone-canvas');
+const liveMirror = QaLensScrcpy.create({
+  env: globalThis,
+  canvas: $('screen-video'), api, fetch: (...args) => fetch(...args), session: () => session,
+  visible: () => !document.hidden && location.hash === '#landing' && previewEnabled && workbench?.connected,
+  canControl: () => !document.hidden && previewEnabled && !mirrorInspect && mirrorMode === 'control' && !busy && workbench?.connected,
+  onFrame(frame) {
+    mirrorFrame = frame;
+    if (!frame) { mirrorPointer = null; $('phone-canvas').classList.remove('gesturing'); return; }
+    $('screen-video').hidden = false; $('screen-image').hidden = true; $('mirror-empty').hidden = true; $('map').hidden = false;
+    const note = `${mirrorInspect ? 'Inspect' : mirrorMode === 'control' ? 'Control' : 'Preview'} · scrcpy 5.0 live video · memory only`;
+    if ($('mirror-state').textContent !== note) $('mirror-state').textContent = note;
+  },
+  onAlive(state) { if (mirrorFrame && mirrorFrame.revision === state.revision && mirrorFrame.width === state.width && mirrorFrame.height === state.height) { mirrorFrame.at = Date.now(); mirrorFrame.modeEpoch = state.modeEpoch; } },
+  onMode(state) { if (mirrorFrame) mirrorFrame.modeEpoch = state.modeEpoch; },
+  onHidden: () => { void stopPreview(); },
+  onError(message) { void stopPreview().then(() => { $('mirror-state').textContent = message; status(message); }); }
+});
 canvas.addEventListener('pointerdown', event => {
   if (event.button !== 0 || busy || mirrorInputBusy || liveSelecting || mirrorPointer || (!mirrorInspect && mirrorMode !== 'control')) return;
   const point = mirrorPoint(event); if (!point) return;
   event.preventDefault(); canvas.focus({preventScroll: true}); canvas.setPointerCapture(event.pointerId);
   mirrorPointer = {pointerId: event.pointerId, point, frame: mirrorFrame, at: Date.now()}; canvas.classList.add('gesturing');
+  if (!legacyMirror() && !mirrorInspect) liveMirror.send({action: 'touch', state: 'down', ...point}, mirrorFrame);
+});
+canvas.addEventListener('pointermove', event => {
+  if (legacyMirror() || mirrorInspect || !mirrorPointer || event.pointerId !== mirrorPointer.pointerId) return;
+  const point = mirrorPoint(event, true); if (point) liveMirror.send({action: 'touch', state: 'move', ...point}, mirrorFrame);
 });
 canvas.addEventListener('pointerup', event => {
   const start = mirrorPointer; mirrorPointer = null; canvas.classList.remove('gesturing');
   if (!start || event.pointerId !== start.pointerId) return;
-  const end = mirrorPoint(event, true, start.frame); if (!end) return;
+  const end = mirrorPoint(event, true, start.frame);
+  if (!end) {
+    // A long press can outlive its original displayed frame. Never leave a finger held down.
+    if (!legacyMirror() && !mirrorInspect) liveMirror.send({action: 'touch', state: 'cancel'}, mirrorFrame);
+    return;
+  }
   if (mirrorInspect) {
     if (Math.hypot((end.x - start.point.x) * start.frame.width, (end.y - start.point.y) * start.frame.height) < 15) void inspectPoint(end, start.frame);
-  } else void sendMirrorGesture(QaLensMirror.gesture(start.point, end, Date.now() - start.at, start.frame.width, start.frame.height), start.frame);
+  } else if (legacyMirror()) void sendMirrorGesture(QaLensMirror.gesture(start.point, end, Date.now() - start.at, start.frame.width, start.frame.height), start.frame);
+  else { liveMirror.send(busy ? {action: 'touch', state: 'cancel'} : {action: 'touch', state: 'up', ...end}, mirrorFrame); scheduleMirrorTree(); }
 });
-for (const event of ['pointercancel', 'lostpointercapture']) canvas.addEventListener(event, () => { mirrorPointer = null; canvas.classList.remove('gesturing'); });
+for (const event of ['pointercancel', 'lostpointercapture']) canvas.addEventListener(event, () => {
+  if (mirrorPointer && !legacyMirror() && !mirrorInspect) liveMirror.send({action: 'touch', state: 'cancel'}, mirrorFrame);
+  mirrorPointer = null; canvas.classList.remove('gesturing');
+});
 canvas.addEventListener('wheel', event => {
   const point = mirrorPoint(event);
   if (!point || mirrorInspect || mirrorMode !== 'control' || mirrorPointer) return;
   event.preventDefault();
   const scale = event.deltaMode === 1 ? 32 : event.deltaMode === 2 ? mirrorFrame.height : 1;
-  void sendMirrorGesture(QaLensMirror.wheel(point, event.deltaX * scale, event.deltaY * scale, mirrorFrame.width, mirrorFrame.height), mirrorFrame);
+  if (legacyMirror()) void sendMirrorGesture(QaLensMirror.wheel(point, event.deltaX * scale, event.deltaY * scale, mirrorFrame.width, mirrorFrame.height), mirrorFrame);
+  else { liveMirror.send({action: 'scroll', ...point, horizontal: Math.max(-16, Math.min(16, -event.deltaX * scale / 100)), vertical: Math.max(-16, Math.min(16, -event.deltaY * scale / 100))}, mirrorFrame); scheduleMirrorTree(); }
 }, {passive: false});
 canvas.addEventListener('keydown', event => {
+  if (!legacyMirror()) {
+    if (!mirrorFrame || !previewEnabled || !workbench?.connected || mirrorMode !== 'control' || mirrorInspect || busy || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+    const keycode = {Escape: 4, Enter: 66, Backspace: 67, Delete: 112, Tab: 61, ArrowUp: 19, ArrowDown: 20, ArrowLeft: 21, ArrowRight: 22, Home: 122, End: 123}[event.key];
+    if (keycode || event.key?.length === 1) {
+      event.preventDefault(); liveMirror.send(keycode ? {action: 'key', keycode} : {action: 'text', text: event.key}, mirrorFrame); scheduleMirrorTree();
+    }
+    return;
+  }
   if (event.key !== 'Escape' || !previewEnabled || !workbench?.connected || mirrorMode !== 'control' || mirrorInspect || busy || mirrorInputBusy) return;
   event.preventDefault(); void perform(async () => { const result = await api('adb', {action: 'back', connectionId: workbench.connectionId}); status(result.notice); });
 });
@@ -703,7 +767,15 @@ $('fast-mirror').onclick = () => perform(async () => { status((await api('adb', 
 // The former map click path is deliberately replaced by pointer routing on the complete canvas.
 $('map').onclick = null;
 document.addEventListener('visibilitychange', () => { if (document.hidden) { mirrorPointer = null; void stopPreview(); } });
-window.addEventListener('pagehide', () => { previewEnabled = false; mirrorPointer = null; if (previewUrl) URL.revokeObjectURL(previewUrl); if (screenshotUrl) URL.revokeObjectURL(screenshotUrl); });
+window.addEventListener('pagehide', () => { liveMirror.stop(); previewEnabled = false; mirrorPointer = null; if (previewUrl) URL.revokeObjectURL(previewUrl); if (screenshotUrl) URL.revokeObjectURL(screenshotUrl); });
+function scheduleMirrorTree() {
+  clearTimeout(treeRefreshTimer);
+  const id = workbench?.connectionId;
+  treeRefreshTimer = setTimeout(async () => {
+    if (id !== workbench?.connectionId || busy || choosing || document.hidden || location.hash !== '#landing') return;
+    try { await refresh(); } catch (_) { $('screen').textContent = 'Return to the QaLens app, then Refresh the tree.'; }
+  }, 350);
+}
 
 function connectionButtons() {
   const ready = !!workbench?.connected && (!workbench.phase || workbench.phase === 'connected');

@@ -140,18 +140,32 @@ not an archive-format change or a company service. The release no-op exposes ide
 without transport work. Pairing tokens are memory-only and host-owned.
 
 `workbench.py` owns profiles, explicit component persistence and trusted pipeline jobs. `desktop.py`
-owns shared viewer assets, bounded recording/Downloads transfers and installed scrcpy lifecycle.
+owns shared viewer assets, bounded recording/Downloads transfers and native scrcpy lifecycle.
 Landing has resizable mirror/selection/tree panes. `mirror-controls.js` shares aspect-ratio geometry
-for inspection, touch/wheel and pane layout. Explicit whole-phone adb preview issues two short-lived
-frame leases; only Control accepts finite normalized touch input. Mode/stop/connection changes and
-known rotation revoke leases. Preview is read-only; Inspect highlights without a host action.
+for inspection, touch/wheel and pane layout. The default `scrcpy_mirror.Session` starts a checksum-pinned
+5.0 server through adb, owns a random phone jar/forward and relays bounded H.264 records on authenticated
+chunked loopback HTTP. `scrcpy-stream.js` decodes with WebCodecs directly into canvas, closes frames
+and limits decode/input queues. Audio and automatic clipboard synchronization are disabled; no
+mirrored media persists. SDK masks do not cover these whole-phone pixels.
+
+Continuous native touch/wheel/text messages require current stream, connection, dimensions/revision
+and mode epoch. Only Control dispatches input; mode changes, rotation and Stop cancel held touches.
+Preview is read-only; Inspect maps scaled video to the SDK display/window coordinates and highlights
+without a host action. A single viewer and authenticated heartbeats own the stream; seven-second
+page expiry, phone-auth revocation and transport/decoder failures stop it. SDK pairing auto-reconnect
+does not replay input or restart a stopped stream. Explicit Start retries video. The original PNG/
+adb implementation remains behind `mirror_flags.ENABLE_LEGACY_MIRROR`, false by default, with its
+older frame leases. This is a PC adapter change; SDK public/no-op APIs and host dependencies are unchanged.
 The SDK's internal recording/inspection/screenshot endpoints retain phone approval, main dispatch
 deadlines, recorder privacy/OS consent and existing masked PixelCopy with overlay restoration. PNG
 encoding stays on IO. The GUI detects these capabilities, polls capture state, marks deferred clips
 and can explicitly copy the exact saved master into replay. No public facade or archive schema changes.
 The browser shell embeds both existing viewers through same-origin parent messages into their
 existing reader paths. Capture status polls metadata while Landing/Recordings is visible. Automatic
-archive copying is opt-in and resets with connection changes/errors; Replay after Stop is a separate,
+archive copying is opt-in and resets with connection changes/auth revocation; transient copy errors
+keep it enabled with bounded retry. Long archive reads/validation use a captured source and a separate
+publication lock, so they do not hold the workbench lock needed by mirror/input/heartbeats.
+Replay after Stop is a separate,
 explicit choice for that exact session.
 Desktop files persist privately; pairing tokens and unsaved component previews do not.
 

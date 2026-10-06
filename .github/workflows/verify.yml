@@ -46,13 +46,16 @@ jobs:
           python3 tools/local-bridge/test_connection.py
           python3 tools/local-bridge/test_desktop.py
           python3 tools/local-bridge/test_controls.py
+          python3 tools/local-bridge/test_scrcpy.py
           node --check tools/local-bridge/app.js
           node --check tools/local-bridge/mirror-controls.js
           node --check tools/local-bridge/diagnostics.js
+          node --check tools/local-bridge/scrcpy-stream.js
           node tools/local-bridge/test_recording_transfer.js
           node tools/local-bridge/test_polling.js
           node tools/local-bridge/test_selectors.js
           node tools/local-bridge/test_mirror.js
           node tools/local-bridge/test_diagnostics.js
+          node tools/local-bridge/test_scrcpy_stream.js
       - name: Backend regression tests
         run: python3 backend/tests/test_backend.py

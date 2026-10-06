@@ -163,7 +163,8 @@ is an advanced compatibility path, not onboarding.
 
 Verify phone selection → browser attributes and browser selection → SDK highlight with
 **Link phone & web selection** enabled. Tree/Inspect selection is inspect-only; Control-mode mirror
-taps/drags/wheel/long-press operate the whole phone through adb. Preview mode pauses input. Check
+taps/continuous drags/wheel/long-press/basic text operate the whole phone through scrcpy over adb.
+Preview mode pauses input. Check
 letterboxing, known rotation, stale-frame/device guards, Inspect outlines/selection and Control
 return against the real host. Refresh updates same-element attributes. Search, supported actions, selector
 builder/match checks and XML/JSON downloads are in Landing. **Send to PC**/Receive is a separate
@@ -173,14 +174,19 @@ does not save a component file.
 Auto connect remembers an app/profile and still requires fresh phone approval. Auto reconnect
 repairs the owned forward in an approved session and never repeats a host action. Recording
 collection is independently opt-in and copies newly completed masters/clips after stop. Screen
-preview is separately opt-in, whole-phone, unmasked, memory-only and includes other apps.
-Leaving/hiding Landing stops browser sampling; this does not sanitize a downloaded file.
+mirroring is separately opt-in, whole-phone, unmasked, memory-only and includes other apps.
+Leaving/hiding Landing stops video; this does not sanitize a downloaded file. The PC uses a pinned
+scrcpy 5.0 server and H.264 WebCodecs (Chrome/Edge); first Start downloads the checksum-verified
+official server. It adds no host dependency or sample-only requirement. Keep the old PNG mirror
+behind its default-off code flag; do not silently downgrade after a video failure. Stream ownership,
+rotation/mode revisions and phone-auth heartbeats guard input. Failed streams need explicit Start;
+SDK Auto reconnect does not repeat host actions. See setup/offline/rollback in the desktop guide.
 See [desktop persistence and limits](../tools/local-bridge/README.md).
 
 Verify Landing Start/Stop through the SDK recorder, Frames privacy masks, HD host opt-in and OS
 consent/pending/cancel, clip marking without stopping, completed master/clip replay, and clean versus
 Include overlay screenshots with visibility restored. Screenshot PNGs follow the masked app-window
-policy; the sampled mirror is whole-phone/unmasked. Capability detection disables new capture
+policy; the live mirror is whole-phone/unmasked. Capability detection disables new capture
 controls on an older SDK; an offline/reconnecting phone is a transport issue, not proof of SDK age.
 Clip export still occurs after normal Stop. Replay after Stop is explicitly opted in and waits for
 the exact master; disconnect/device change/navigation cancels it. Closing the desktop never silently

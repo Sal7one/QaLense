@@ -1,7 +1,24 @@
 # Current backlog
 
-Updated 2026-10-05. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
+Updated 2026-10-06. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
+
+## Embedded scrcpy mirror — 2026-10-06
+
+- [x] Make pinned official scrcpy 5.0 H.264/WebCodecs the inline default; retain the prior PNG/adb
+  backend behind a default-off code-only flag with deliberate rollback and no silent fallback.
+- [x] Connect continuous touch/wheel/basic text to Control and existing SDK selection/attributes
+  to Inspect; guard scaling, rotation/mode/connection revisions and single-page stream ownership.
+- [x] Bound stream/decode/input queues, cancel held fingers, expire abandoned pages, check phone
+  authorization and clean up only owned adb resources. Keep video unmasked, explicit and memory-only.
+- [x] Stop long recording copies holding the workbench lock used by mirror/input/heartbeats.
+- [x] Pass 52 Python/six JS/web-reader checks, instrumentation APK build, real API 36 native input/
+  scroll/rotation/selection/HTTP decoding/restart and concurrent SDK Frames/HD/clip/screenshot cases.
+  Decode real HD master/clip archives and official native macOS scrcpy headless MP4; document setup/license.
+- [ ] Complete browser canvas rendering/Control/Inspect/keyboard/resizing/hidden-tab/revocation
+  acceptance. The UI tool still exposes no browser; protocol/controller tests are not visual proof.
+- [ ] Validate physical/OEM phone concurrent encoders, actual USB loss, other OS/browsers, native
+  window/hardware-decoder latency and hour-long endurance before claiming those supported/tested.
 
 ## Desktop diagnostics and data tools — 2026-10-05
 
@@ -33,7 +50,7 @@ baselines and project context. Older changelog entries are historical, not uncom
   refusal and visibility/cancellation/transport handling. Fix concurrent screenshot/recording races.
 - [x] Verify protocol/browser/native regressions, actual consent-approved HD master/clip decoding,
   screenshots/layout, build/lint/isolation and full Android runner; update host-agent guidance.
-- Physical phones, other platforms/runtimes, installed scrcpy and hour-long recording still need
+- Physical phones, other platforms/runtimes, native scrcpy window UI and hour-long recording still need
   their own acceptance. Browser PNG download completion is unconfirmed in Codex's browser.
 
 ## Completed 2026-10-05: desktop startup recovery
@@ -143,7 +160,8 @@ baselines and project context. Older changelog entries are historical, not uncom
   selection, four detail tabs, SDK Send, remembered-app restart/fresh approval, auto reconnect,
   Receive/collection, recording replay/Back and wide/narrow layouts. Fix inbox polling starving
   connection health and recording discovery; add real-app timer wiring regression to CI.
-- Physical phones/OEM receiver behavior, TalkBack and real scrcpy remain open.
+- Physical phones/OEM receiver behavior and TalkBack remain open. The current scrcpy transport/
+  device acceptance and remaining browser/native-window checks are recorded above.
 
 ## Completed 2026-10-04: host lifecycle and PC transfer reliability
 
@@ -182,7 +200,8 @@ baselines and project context. Older changelog entries are historical, not uncom
   resolutions and validate encoded samples. Pass real API 36 consent, HD master/clip playback,
   a >5-minute continuity check, automatic PC collection and GUI file push/pull.
 - Still validate full-hour endurance, physical-phone encoders/rotation/consent recovery and TalkBack;
-  actual scrcpy mirroring is unverified here because scrcpy is not installed. See
+  actual scrcpy was not installed during that earlier check; current 5.0 native/transport coverage
+  and remaining browser acceptance are recorded above. See
   [recording clips](docs/RECORDING_CLIPS.md) for budgets and evidence/timing limits.
 
 ## Completed 2026-10-02: PC component workbench

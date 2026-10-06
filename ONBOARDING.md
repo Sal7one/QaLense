@@ -279,12 +279,15 @@ See [startup recovery](tools/local-bridge/README.md#startup-recovery).
    Selection never taps the app. **Attributes**, **Selectors**, **Semantics**, **Tree position** and
    **Diagnostics** separate the details; tap/type/scroll use explicit buttons. Refresh after changes.
    Search tags/text/roles/actions and filter by action, role or tag presence.
-4. **Start mirror** shows sampled live phone pixels (about 1 fps), including other apps. It is
-   explicit, memory-only, unmasked and stops when leaving Landing/hiding the tab/disconnecting.
-   **Control** is the default: tap, drag, wheel scroll and long-press operate the phone through adb.
+4. **Start mirror** streams scrcpy 5.0 H.264 into Landing, including other apps. Use Chrome/Edge
+   with WebCodecs; first Start downloads and verifies the official pinned server into the PC cache.
+   It is explicit, memory-only, unmasked and stops when leaving Landing/hiding the tab/disconnecting.
+   **Control** is the default: tap, continuous drag, wheel scroll, long-press and basic focused text/
+   editing keys operate the phone through scrcpy over adb.
    **Preview** pauses input; **Inspect elements** shows all visible Compose outlines and selects
    without clicking the host. Selecting a linked tree item enters inspection; Control/Done returns
-   to touch. **Fast mirror** opens installed scrcpy for lower-latency viewing in its own window.
+   to touch. **Open desktop window** optionally opens a native scrcpy client. A failed video stream
+   requires Start mirror again; pairing Auto reconnect never repeats phone input.
 5. On the phone use **Inspect elements → Search selectors & tags**, or
    **Review evidence → Elements → Search**. Select a result; **Actions & XPath selectors** offers copyable
    selectors with match counts. In the browser **Selectors** adds a builder, live match checking and
@@ -301,9 +304,12 @@ Single taps inspect; two-finger drags scroll Activity content in inspect/tag mod
 **Move inspector** to reposition filters/details. The bubble/dock use physical bounds in RTL/LTR.
 Separate-window gesture forwarding and physical-device behavior still need broader testing.
 
-Device tools offer Back/Home/Wake/Settings, explicit app launch, optional installed scrcpy in its
-own window, and file push/pull through Downloads. Files are limited to 32 MiB; push replaces a
-same-name file, and pull writes under PC `transfers/`. The desktop does not install scrcpy.
+Device tools offer Back/Home/Wake/Settings, explicit app launch, an optional installed/cached native
+scrcpy window, and file push/pull through Downloads. Files are limited to 32 MiB; push replaces a
+same-name file, and pull writes under PC `transfers/`. Embedded video installs only the pinned server;
+it adds no Android SDK dependency. The previous PNG mirror remains behind a hidden code-only flag.
+[Setup, offline preparation, limits and rollback](tools/local-bridge/README.md#scrcpy-setup-and-fallback)
+also explain browser requirements and unverified platform/performance coverage.
 
 Landing also offers **Start recording / Stop**, Frames or host-enabled HD with Android consent,
 10/20/60-second or custom 1–300-second **Mark clip**, and **Watch latest**. Clips keep capture running
@@ -313,7 +319,7 @@ controls require the updated SDK in the consuming app; no sample-only code is ne
 
 **Take screenshot** temporarily hides/restores the in-window overlay by default; **Include overlay**
 keeps its current visibility. This is a masked foreground app-window PNG, while the mirror is an
-unmasked whole-phone sample. Review, Save PNG or Copy image where supported; no automatic gallery
+unmasked whole-phone stream. Review, Save PNG or Copy image where supported; no automatic gallery
 or PC workspace save. Secure windows reject capture. Phone recording continues if the browser closes.
 
 In **Recordings**, check completed phone archives, **Copy to PC** or **Watch** to open replay.
