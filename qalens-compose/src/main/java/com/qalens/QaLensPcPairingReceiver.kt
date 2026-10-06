@@ -16,6 +16,13 @@ class QaLensPcPairingReceiver : BroadcastReceiver() {
         if (intent.action == "com.qalens.action.CANCEL_PC_PAIRING") {
             QaLensPcPairing.cancel(intent.getStringExtra("token")); return
         }
+        if (intent.action == "com.qalens.action.QUERY_PC_PAIRING") {
+            // Same DUMP sender gate and exact in-memory credential; no app data or token returned.
+            val (code, port) = QaLensPcPairing.status(intent.getStringExtra("token"))
+            resultCode = code
+            resultData = port?.toString()
+            return
+        }
         if (intent.action != "com.qalens.action.REQUEST_PC_PAIRING") return
         QaLens.rememberApplication(context.applicationContext as? android.app.Application ?: return)
         resultCode = QaLensPcPairing.offer(intent.getStringExtra("token"), intent.getIntExtra("port", 8766))
@@ -41,7 +48,24 @@ internal object QaLensPcPairing {
     }
 
     @Synchronized fun clear() { mutableRequest.value = null; handler.removeCallbacksAndMessages(null) }
-    @Synchronized fun cancel(token: String?) { if (token != null && mutableRequest.value?.token == token) clear() }
+    fun cancel(token: String?) {
+        if (token == null) return
+        synchronized(this) { if (mutableRequest.value?.token == token) clear() }
+        // Approval can beat the PC's Cancel response. Revoke only that exact session, without
+        // holding the request lock while acquiring the listener lock or stopping a newer token.
+        QaLensLocalBridge.cancelPairing(token)
+    }
+
+    /** Codes 10–14 distinguish support from older receivers which ignore QUERY (result 0). */
+    @Synchronized fun status(token: String?): Pair<Int, Int?> {
+        if (token == null || !token.matches(Regex("[A-Za-z0-9_-]{24,128}"))) return 13 to null
+        if (!QaLens.config.value.enabled) return 14 to null
+        val pending = mutableRequest.value
+        if (pending?.token == token && pending.expires > SystemClock.elapsedRealtime()) return 10 to pending.port
+        val active = QaLensLocalBridge.pairing.value
+        if (active?.token != token) return 13 to null
+        return (if (QaLensLocalBridge.status.value.startsWith("Listening")) 12 else 11) to active.port
+    }
 
     fun approve(offered: Request): Boolean {
         synchronized(this) {

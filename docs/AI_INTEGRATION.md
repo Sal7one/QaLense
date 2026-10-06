@@ -163,6 +163,14 @@ checkout, open the shown local URL and select the intended device/applicationId 
 No sample Settings, backend, pip/npm, Appium or Robot integration is needed. Manual token pairing
 is an advanced compatibility path, not onboarding.
 
+Connection approval is separate from host UI readiness. Current desktop health uses authenticated
+`/v1/health` on IO, without main-thread/capture/disk work. On handshake failure, the DUMP-protected
+receiver answers only the exact offered credential's state/port. Phone approval alone never enables
+capture/input; `connecting` must become authenticated `connected`. Do not start a new manual token
+after approval, infer consent from an open port, scan other app ports, or require the sample.
+Rebuild/reinstall the host SDK, restart Python and refresh the page together when updating this path.
+Older SDK 404 responses retain the recordings-based fallback. Local device HTTP bypasses proxies.
+
 Verify phone selection → browser attributes and browser selection → SDK highlight with
 **Link phone & web selection** enabled. Tree/Inspect selection is inspect-only; Control-mode mirror
 taps/continuous drags/wheel/long-press/basic text operate the whole phone through scrcpy over adb.
@@ -293,6 +301,7 @@ failure by suppressing the host's errors or weakening its capture/security polic
 | Clip button produces no file yet | It marks while capture continues; stop normally and inspect the finished master/clip list and declared omissions |
 | HD crash/foreground-service failure | Record exact OS/app/SDK version and redacted stack; verify consent/resume/start error; keep StrictMode and OS permission rules intact |
 | PC cannot find/connect app | Authorized adb device/serial and installed applicationId; active SDK exposes Control launcher; phone approval before listener starts |
+| Phone listening but desktop waits for approval | Update host SDK/Python/browser together; verify same serial/package/port and no manual-token rotation; current SDK reports approved-but-connecting separately and Auto reconnect repairs only owned forwards |
 | Desktop 404/missing selectors | Installed host artifact, Python bridge and browser are different revisions; update/restart/refresh all three |
 | Transfers stop or collection appears empty | Same approved connection/device, selected opt-in, a newly finished file and retained session; revoke on auth changes; do not persist/reuse tokens |
 | Preview selection refused | Fresh screen/tree dimensions and window origin must agree; reconnect/refresh instead of applying mismatched coordinates |

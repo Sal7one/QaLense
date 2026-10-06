@@ -48,7 +48,9 @@ internal class DesktopTransferChecks(private val test: Instrumentation) {
             test.waitForIdleSync()
             stage.writeText("saved")
             await("PC did not copy master and clip") { signal.readTextOrEmpty() == "copied" }
-            test.runOnMainSync { QaLens.startLocalBridge(token.reversed(), if (phoneApproval) 8766 else 18768) }
+            val connectedPort = QaLens.localBridgeStatus.value.substringAfterLast(':').toIntOrNull()
+                ?: error("Fixture lost its listening port before rotation")
+            test.runOnMainSync { QaLens.startLocalBridge(token.reversed(), connectedPort) }
             await("Rotated bridge did not listen") { QaLens.localBridgeStatus.value.startsWith("Listening") }
             stage.writeText("rotated")
             await("PC did not reject revoked pairing") { signal.readTextOrEmpty() == "done" }

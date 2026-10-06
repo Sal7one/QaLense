@@ -325,9 +325,13 @@ The Landing connection flow has opt-in disposable-emulator checks after installi
 ```sh
 adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e pcPairingOnly true \
   com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
-python3 tools/local-bridge/test_device_pairing.py emulator-SERIAL
+python3 tools/local-bridge/test_device_pairing.py emulator-SERIAL --device-port 8767
 ```
 
-The latter creates its own temporary server/storage/forward and uses actual SDK phone approval,
-attributes/save/dedup, adb screen PNG, forward repair, paused-host Send/recording copies and revoked
-access. It does not test browser rendering; verify Landing separately in the GUI.
+The latter creates its own temporary server/storage/forward and uses actual SDK phone approval on
+8767, exact-request status/port and authenticated lightweight health. It removes its forward during
+approval to require truthful `connecting` and recovery without reapproval, then checks attributes/
+save/dedup, default scrcpy H.264, forward repair, paused-host Send/recording copies and revoked access.
+The focused `pcPairingOnly` runner additionally holds main busy to verify independent health,
+recording-control timeout and sender/privacy gates. These do not test browser rendering; verify
+Landing separately in the GUI.

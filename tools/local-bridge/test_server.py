@@ -1,11 +1,14 @@
 import importlib.util
 import json
+import os
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from unittest.mock import patch
+import device_http
 
 spec = importlib.util.spec_from_file_location("bridge", Path(__file__).with_name("server.py"))
 bridge = importlib.util.module_from_spec(spec)
@@ -63,5 +66,21 @@ class BridgeTests(unittest.TestCase):
         port = self.server.device_port; self.server.device_port = 1
         try: self.assertEqual(self.call("/api/snapshot", headers={"Authorization": f"Bearer {TOKEN}"})[0], 502)
         finally: self.server.device_port = port
+    def test_company_proxy_settings_never_receive_loopback_device_credentials(self):
+        received = []
+        class Proxy(BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                received.append(self.path)
+                self.send_response(502); self.send_header("Content-Length", "0"); self.end_headers()
+        proxy = HTTPServer(("127.0.0.1", 0), Proxy)
+        threading.Thread(target=proxy.serve_forever, daemon=True).start()
+        try:
+            with patch.dict(os.environ, {"http_proxy": f"http://127.0.0.1:{proxy.server_port}", "no_proxy":""}, clear=True):
+                request = Request(f"http://127.0.0.1:{self.server.server_port}/api/snapshot", headers={"Authorization":f"Bearer {TOKEN}"})
+                with device_http.urlopen(request, timeout=3) as response:
+                    self.assertEqual(response.code, 200); self.assertTrue(json.loads(response.read())["authorized"])
+            self.assertEqual(received, [], "A proxy saw the PC or forwarded phone request")
+        finally: proxy.shutdown(); proxy.server_close()
 
 if __name__ == "__main__": unittest.main()

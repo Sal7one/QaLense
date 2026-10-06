@@ -29,8 +29,14 @@ internal object QaLensLocalBridge {
     private var client: Socket? = null
     private var job: Job? = null
 
-    @Synchronized fun stop() {
-        QaLensPcPairing.clear()
+    @Synchronized fun cancelPairing(token: String) {
+        if (mutablePairing.value?.token == token) stopLocked(clearRequest = false)
+    }
+
+    @Synchronized fun stop() = stopLocked(clearRequest = true)
+
+    private fun stopLocked(clearRequest: Boolean) {
+        if (clearRequest) QaLensPcPairing.clear()
         epoch++
         job?.cancel(); job = null
         runCatching { client?.close() }; client = null
@@ -127,6 +133,12 @@ internal object QaLensLocalBridge {
                 return
             }
             when {
+                request.method == "GET" && request.path == "/v1/health" -> {
+                    // Approval/transport must not depend on host resume, main-thread work or disk.
+                    requireSession(generation)
+                    mapOf("ok" to true, "schema" to "qalens.bridge.health", "version" to 1,
+                        "package" to QaLens.appContext?.packageName, "port" to pairing.value?.port)
+                }
                 request.method == "GET" && request.path == "/v1/recordings" -> {
                     if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
                     val context = QaLens.appContext ?: throw QaLensBridgeFailure(503, "No app context")

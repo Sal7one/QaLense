@@ -10,10 +10,11 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 const drain = async () => { for (let i = 0; i < 8; i++) await new Promise(setImmediate); };
 
 function fixture() {
-  const elements = new Map(), timers = [], requests = [], inbox = deferred();
+  const elements = new Map(), timers = [], requests = [], inbox = deferred(), listeners = {};
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
       checked: false, disabled: false, value: '', style: {}, dataset: {},
+      options: [], setAttribute() {},
       classList: {toggle() {}, add() {}, remove() {}},
       replaceChildren() {}, append() {}, addEventListener() {},
       contentWindow: {postMessage() {}}
@@ -25,7 +26,8 @@ function fixture() {
     profiles: [], pipelines: [], jobs: [], items: [{name: 'existing.sal'}], health: null};
   const json = payload => ({ok: true, json: async () => payload});
   const document = {hidden: false, body: element('body'), getElementById: element,
-    querySelectorAll: () => [], querySelector: element, createElement: element, addEventListener() {}};
+    querySelectorAll: () => [], querySelector: element, createElement: element, createElementNS: (_namespace, id) => element(id),
+    addEventListener: (name, callback) => { listeners[name] = callback; }};
   const context = vm.createContext({document, location: {hash: '#landing', origin: 'http://fixture'},
     history: {replaceState() {}}, window: {scrollTo() {}, addEventListener() {}},
     QaLensScrcpy: require('./scrcpy-stream.js'), QaLensRecordingTransfer: RecordingTransfer,
@@ -36,6 +38,7 @@ function fixture() {
       if (url === '/api/inbox') return inbox.promise;
       if (url === '/api/connection/check') return state.health ? state.health.promise : json({...state});
       if (url === '/api/workbench') return json({...state});
+      if (url === '/api/snapshot') return json({connectionId: state.connectionId, nodes: [], screen: 'Synthetic host', viewport: {width:100,height:200}});
       if (url === '/api/recordings/device') return json({connectionId: state.connectionId, items: state.items});
       if (url === '/api/recordings/receive') return json({size: 1024});
       if (url === '/api/recordings/local') return json({items: []});
@@ -48,7 +51,7 @@ function fixture() {
   element('receive').checked = true; element('auto-reconnect').checked = true;
   const [receive, health] = timers.filter(t => t.delay === 2500).map(t => t.callback);
   const transfer = timers.find(t => t.delay === 5000).callback;
-  return {context, state, requests, inbox, document, element, receive, health, transfer};
+  return {context, state, requests, inbox, document, element, receive, health, transfer, listeners};
 }
 
 async function run() {
@@ -85,6 +88,26 @@ async function run() {
     assert.equal(f.element('receive').checked, true, 'Stale health response changed the replacement connection');
   }
   {
+    const f = fixture();
+    vm.runInContext('workbench = {...workbench, phase:"awaiting-approval", connected:false};', f.context);
+    f.state.phase = 'connecting'; f.state.connected = false; f.state.notice = 'Phone approved. Connecting to device port 8767.';
+    await f.health();
+    assert.equal(f.element('connection').textContent, 'Phone approved · connecting…');
+    assert.equal(f.element('quick-connect').textContent, 'Cancel connection');
+    assert.equal(f.element('preview-toggle').disabled, true, 'Approval alone must not enable capture');
+    assert.equal(f.element('receive').disabled, true);
+    f.state.phase = 'connected'; f.state.connected = true;
+    f.document.hidden = true; await f.health();
+    assert.equal(f.requests.filter(r => r.url === '/api/connection/check').length, 1);
+    f.document.hidden = false; f.listeners.visibilitychange(); await drain();
+    assert.equal(f.element('connection').textContent, 'synthetic.sample');
+    assert.equal(f.element('quick-connect').textContent, 'Connect again');
+    assert.equal(f.element('receive').checked, true);
+    assert.equal(f.element('preview-toggle').disabled, false);
+    assert.equal(f.requests.filter(r => r.url === '/api/snapshot').length, 1,
+      'Returning after phone approval must authenticate and load the tree immediately');
+  }
+  {
     const f = fixture(); f.document.hidden = true;
     await f.receive(); await f.health();
     await vm.runInContext('recordingTransfer.enable()', f.context);
@@ -94,6 +117,6 @@ async function run() {
     await f.health(); f.transfer(); await drain();
     assert.deepEqual(f.requests.map(r => r.url), ['/api/bootstrap']);
   }
-  console.log('OK: competing inbox/health/transfer timers, baseline/new copy/dedup, stale connection and hidden/busy guards');
+  console.log('OK: phone approval/connecting/ready UI, visible-page handoff, competing inbox/health/transfer timers, baseline/new copy/dedup, stale connection and hidden/busy guards');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

@@ -13,7 +13,8 @@ import time
 import threading
 import struct
 import zipfile
-from urllib.request import Request, urlopen
+from urllib.request import Request
+from device_http import urlopen
 from urllib.error import HTTPError, URLError
 from http.client import IncompleteRead
 from workbench import prepare_directory
@@ -213,6 +214,7 @@ class Desktop:
         if not current or body.get("connectionId") != self.bench.connection_id:
             raise ValueError("Device connection changed; reconnect before running a device task")
         if self.bench.phase == "awaiting-approval": raise ValueError("Approve desktop access on the phone first")
+        if self.bench.phase == "connecting": raise ValueError("Phone approved; wait for the inspector connection")
         return current
 
     def task(self, body):

@@ -48,8 +48,26 @@ The PC creates a strong random credential internally, offers it through an expli
 restricted to senders with Android's `DUMP` permission (authorized adb shell), and opens Control Room
 without credentials in Activity extras. The pending request expires after two minutes, stays stable
 under repeated offers, and is rejected by Deny, cancellation or SDK disable. A listener starts only
-after phone approval. **Cancel pairing** cancels the pending request. Ordinary other app UIDs cannot
+after phone approval. **Cancel pairing**/**Cancel connection** cancels this exact pending or
+newly approved request, including approval racing Cancel. A different token's listener or newer
+approval prompt is preserved. Ordinary other app UIDs cannot
 offer pairing. The host's own code remains trusted and can use the existing API.
+
+With the current SDK, pairing health uses authenticated `/v1/health`, which needs no foreground
+Activity, main-thread recording controls or directory scan. If transport fails during approval,
+the PC asks the same protected receiver for **this request's** state and port. **Phone approved ·
+connecting…** means consent succeeded but the inspector is still unreachable; a missing owned adb
+forward is repaired with Auto reconnect. The PC can use a different phone-reported port only for
+its exact credential; it never scans ports or accepts another manual token. Mirror/actions stay
+disabled until authenticated transport succeeds. Denied/cancelled/failed requests report an ended
+connection instead of waiting indefinitely. Local phone HTTP bypasses company/system proxies.
+
+If the phone says **Listening on 127.0.0.1:8767** but Landing still waits, rebuild/reinstall the
+host with the current SDK, restart Python and refresh the desktop page, then Connect and approve
+once. Do not also press **Start PC inspector**/**New pairing token**: those create a separate manual
+credential. Check the chosen USB serial/package and enable Auto reconnect. Returning to the visible
+desktop immediately checks approval. Older SDKs retain the recordings-based health fallback after
+`/v1/health` returns 404 and cannot provide the new independent approval status.
 
 **Auto connect saved app** is opt-in after connecting once. It remembers that profile ID and
 requests approval when the desktop starts with that authorized phone available; new access still
@@ -412,7 +430,7 @@ This trusts the local OS/adb environment; it is not a remotely exposed or multi-
 |---|---|
 | `POST /api/apps` | `{serial}` → launcher activities with QaLens availability |
 | `POST /api/pair` | `{profile}` → memory-only request for explicit phone approval |
-| `POST /api/connection/check` | `{reconnect}` → status, bounded health read / owned forward repair |
+| `POST /api/connection/check` | `{reconnect}` → pending/connecting/connected status, authenticated `/v1/health`, exact-request phone approval/port query and owned forward repair; recordings fallback only for old SDK 404 |
 | `POST /api/preview` | `{enabled,mode,connectionId,streamId?}`; returns owned scrcpy stream ID/dimensions/revision/mode epoch; require its ID to change/stop |
 | `POST /api/mirror/setup` | Desktop session only; checksum-pinned server cache setup, no capture |
 | `GET /api/mirror/video` | Desktop session + `X-Qalens-Connection`/`X-Qalens-Mirror`; one chunked H.264 viewer, memory-only |
@@ -514,7 +532,8 @@ adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e pcPairingOnly true \
 ```
 
 It checks a distinct app UID cannot offer access, no listener before approval, Deny/cancel/expiry,
-real approval returning to a manual-root host, authenticated reads and disable/re-enable.
+real approval returning to a manual-root host, exact-request status/port, normal-app query denial,
+authenticated health while main is busy, recording-control timeouts and disable/re-enable.
 
 The SDK pairing UI also has a focused regression (with Startup installation removed):
 
@@ -531,7 +550,7 @@ The optional end-to-end transfer check requires installed sample/test APKs, Node
 
 ```sh
 node tools/local-bridge/test_device_transfer.js emulator-SERIAL
-python3 tools/local-bridge/test_device_pairing.py emulator-SERIAL
+python3 tools/local-bridge/test_device_pairing.py emulator-SERIAL --device-port 8767
 ```
 
 Use a disposable emulator. The check owns its temporary server/storage/forward and generates a

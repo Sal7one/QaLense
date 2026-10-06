@@ -2,6 +2,20 @@
 
 ## Unreleased — post-0.9.0
 
+### Phone approval handoff — 2026-10-06
+
+- Confirm pairing through bounded authenticated health independent of the host Activity, main
+  thread and recording storage; retain an older SDK fallback only after health 404.
+- Query the offered credential's approval state/actual port through the existing DUMP-protected
+  receiver. Distinguish approved-but-connecting from pending approval, handle ended requests and
+  repair only owned forwards without reapproval or trusting a different manual session.
+- Cancel during the approval handoff revokes only its matching pending/approved request, including
+  the phone approving before the PC learns it; a newer/different token's listener/prompt is preserved.
+- Check immediately after Connect/desktop visibility returns; keep input/capture disabled before
+  authenticated readiness. Bypass company/system proxies for loopback phone requests.
+- Add real API 36 busy-main/approval/security and port-8767 handoff/stream/transfer/revocation checks,
+  plus legacy/identity/transport/proxy and actual desktop JavaScript state regressions.
+
 ### Compose dialog inspection — 2026-10-06
 
 - Automatically discover visible host Compose Dialog/AlertDialog/Popup windows on Android 10/API 29+

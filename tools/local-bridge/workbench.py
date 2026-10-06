@@ -13,7 +13,9 @@ import tempfile
 import threading
 import time
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
+from http.client import IncompleteRead
+from device_http import urlopen
 
 KILL = getattr(signal, "SIGKILL", signal.SIGTERM)
 MAX_DOCUMENT = 256 * 1024
@@ -130,6 +132,9 @@ class Workbench:
         self.phase = "disconnected"
         self.pair_deadline = 0
         self.approved = False
+        self.phone_approved = False
+        self.approval_query_supported = None
+        self.health_supported = None
         self.last_check = 0
         self.connection_notice = "Connect your phone to begin."
         self.jobs = {}
@@ -198,11 +203,11 @@ class Workbench:
             write_json(self.root / "desktop.json", clean)
             return clean
 
-    def adb_call(self, arguments, serial=None):
+    def adb_call(self, arguments, serial=None, timeout=10):
         if not self.adb: raise ValueError("adb unavailable; pass --adb /path/to/adb")
         command = [self.adb] + (["-s", serial] if serial else []) + arguments
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
         except (OSError, subprocess.TimeoutExpired) as error:
             raise ValueError("adb unavailable or timed out; check the device") from error
         if result.returncode: raise ValueError("adb rejected the request; check connection/authorization/package")
@@ -232,6 +237,7 @@ class Workbench:
             self.connection = dict(clean, actualPlatformVersion=version)
             server.device_port = port; server.token = token
             self.phase = "connected"; self.approved = True
+            self.phone_approved = False; self.approval_query_supported = None; self.health_supported = None
             self.last_check = 0
             self.connection_notice = "Connected. App data preserved."
         return self.connection
@@ -239,7 +245,7 @@ class Workbench:
     def disconnect(self, server):
         self.desktop.stop_mirror()
         with self.lock:
-            if self.connection and self.phase == "awaiting-approval" and server.token:
+            if self.connection and self.phase in ("awaiting-approval", "connecting") and server.token:
                 try:
                     self.adb_call(["shell", "am", "broadcast", "-n", self.connection["package"] + "/com.qalens.QaLensPcPairingReceiver",
                         "-a", "com.qalens.action.CANCEL_PC_PAIRING", "--es", "token", server.token], self.connection["serial"])
@@ -248,6 +254,7 @@ class Workbench:
             self.remove_owned_forward()
             self.connection = None
             self.phase = "disconnected"; self.approved = False; self.pair_deadline = 0
+            self.phone_approved = False; self.approval_query_supported = None; self.health_supported = None
             self.connection_notice = "Disconnected. Choose your app and Connect."
             self.desktop.stop_preview()
             self.connection_id = secrets.token_hex(16)
@@ -292,6 +299,63 @@ class Workbench:
                 raise ValueError(str(error)) from error
             return self.connection
 
+    def check_phone_approval(self, server):
+        """Read only the offered credential's state; never approve or scan other ports/apps."""
+        if self.approval_query_supported is False: return None
+        current = self.connection
+        try:
+            result = self.adb_call(["shell", "am", "broadcast", "--receiver-foreground", "-n",
+                current["package"] + "/com.qalens.QaLensPcPairingReceiver", "-a", "com.qalens.action.QUERY_PC_PAIRING",
+                "--es", "token", server.token], current["serial"], timeout=2)
+        except ValueError: return None
+        match = re.search(r"Broadcast completed: result=(\d+)", result)
+        if not match: return None
+        code = int(match.group(1))
+        if code == 0:
+            self.approval_query_supported = False  # Older SDK: authenticated HTTP remains the proof.
+            return None
+        if code not in (10, 11, 12, 13, 14): return None
+        self.approval_query_supported = True
+        if code in (11, 12):
+            self.phone_approved = True
+            port_match = re.search(r'data="(\d+)"', result)
+            if port_match:
+                port = int(port_match.group(1))
+                if 1024 <= port <= 65535 and port != current["devicePort"]:
+                    # The phone proves this port belongs to our exact approved request. Allocate a
+                    # fresh forward, then release only our old one; never rebind someone else's port.
+                    try:
+                        forwarded = int(self.adb_call(["forward", "tcp:0", f"tcp:{port}"], current["serial"]).strip())
+                        if not 1 <= forwarded <= 65535: raise ValueError("Invalid adb port")
+                    except ValueError: return code
+                    self.remove_owned_forward()
+                    self.connection = dict(current, devicePort=port)
+                    self.owned_forward = (current["serial"], forwarded); server.device_port = forwarded
+        return code
+
+    def probe_connection(self, server):
+        route = "/v1/recordings" if self.health_supported is False else "/v1/health"
+        while True:
+            request = Request(f"http://127.0.0.1:{server.device_port}{route}", headers={"Authorization": f"Bearer {server.token}"})
+            try:
+                with urlopen(request, timeout=2) as response:
+                    limit = 512 * 1024 if route == "/v1/recordings" else 4096
+                    payload = response.read(limit + 1)
+                    if len(payload) > limit: raise ValueError("Bridge response exceeds limit")
+                    value = json.loads(payload)
+                    if response.code != 200 or not isinstance(value, dict) or value.get("ok") is not True:
+                        raise ValueError("Bridge unavailable")
+                    if route == "/v1/health":
+                        if (value.get("schema") != "qalens.bridge.health" or type(value.get("version")) is not int or value["version"] != 1 or
+                            value.get("package") != self.connection["package"] or value.get("port") != self.connection["devicePort"]):
+                            raise ValueError("Unexpected bridge identity")
+                        self.health_supported = True
+                    return
+            except HTTPError as error:
+                if route != "/v1/health" or error.code != 404: raise
+                error.close()
+                self.health_supported = False; route = "/v1/recordings"
+
     def check_connection(self, server, reconnect=True):
         with self.lock:
             if not self.connection or not server.token: return self.connection_state(server)
@@ -299,26 +363,35 @@ class Workbench:
             if now - self.last_check < 1: return self.connection_state(server)
             self.last_check = now
             if not self.approved and now >= self.pair_deadline:
+                approved_on_phone = self.phone_approved
                 self.disconnect(server); self.phase = "expired"
-                self.connection_notice = "Phone approval expired or was denied. Click Connect to try again."
+                self.connection_notice = ("Phone approved, but the PC could not reach its inspector. Check USB/adb and click Connect again." if approved_on_phone else
+                    "Phone approval expired or was denied. Click Connect to try again.")
                 return self.connection_state(server)
+            failure = None
             try:
-                request = Request(f"http://127.0.0.1:{server.device_port}/v1/recordings", headers={"Authorization": f"Bearer {server.token}"})
-                with urlopen(request, timeout=2) as response:
-                    payload = response.read(512 * 1024 + 1)
-                    if len(payload) > 512 * 1024: raise ValueError("Bridge response exceeds limit")
-                    if response.code != 200 or not json.loads(payload).get("ok"): raise ValueError("Bridge unavailable")
+                self.probe_connection(server)
                 self.phase = "connected"; self.approved = True
                 self.connection_notice = "Connected. Select a component to inspect it."
             except HTTPError as error:
                 if error.code in (401, 403) and self.approved:
                     self.disconnect(server); self.phase = "revoked"
                     self.connection_notice = "Phone revoked access. Click Connect and approve again."
-                elif not self.approved: self.phase = "awaiting-approval"
-                else: self.phase = "reconnecting"
+                else: failure = error.code
                 error.close()
-            except (URLError, TimeoutError, ConnectionError, ValueError):
-                if not self.approved: self.phase = "awaiting-approval"
+            except (URLError, OSError, ValueError, IncompleteRead):
+                failure = "transport"
+            if failure is not None:
+                if not self.approved:
+                    code = self.check_phone_approval(server)
+                    if code in (13, 14):
+                        self.disconnect(server); self.phase = "ended"
+                        self.connection_notice = ("QaLens is disabled on the phone. Enable it, then Connect again." if code == 14 else
+                            "The phone request ended or its inspector could not start. Click Connect again; avoid starting a separate manual pairing.")
+                        return self.connection_state(server)
+                    self.phase = "connecting" if self.phone_approved else "awaiting-approval"
+                    self.connection_notice = (f"Phone approved. Connecting to its inspector on device port {self.connection['devicePort']}… Check USB/adb if this persists." if self.phone_approved else
+                        f"Approve desktop access on your phone (device port {self.connection['devicePort']}).")
                 else:
                     self.phase = "reconnecting"
                     self.connection_notice = "Phone temporarily unavailable. Reconnecting…" if reconnect else "Phone unavailable. Auto reconnect is off."

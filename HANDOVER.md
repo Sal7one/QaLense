@@ -48,6 +48,41 @@ assuming a named class or public signature is unchanged.
 
 ## Latest local verification
 
+### Phone approval handoff — 2026-10-06
+
+Desktop previously confirmed approval by reading `/v1/recordings`, which calls main-thread recorder
+controls and scans storage. Any failure before the first success stayed labeled waiting for approval.
+Current SDK adds authenticated `/v1/health` on IO with only protocol/package/port metadata; no host
+Activity, main or disk dependency. Current desktop uses it, verifies identity and falls back to the
+old recordings check only for health 404. All local phone HTTP bypasses system/company proxies.
+
+On a failed initial handshake, the existing DUMP-protected receiver answers only the offered
+credential's pending/starting/listening/inactive/disabled state and approved port. Desktop can adjust
+to that exact request's port using a new owned forward, never port scans/another manual session.
+`connecting` acknowledges consent while authenticated readiness is still false; ended requests
+clear access instead of remaining pending. Cancel during handoff revokes only the matching pending/
+approved phone session, including approval racing Cancel, preserving a newer prompt/listener.
+Initial/visible-page checks run immediately. Rebuild/
+reinstall the host SDK, restart Python and refresh the page together; do not create a new manual
+token after Approve. No public facade/no-op API, manifest/dependency or `.sal` format change.
+
+API 36 `pcPairingOnly` passes real shell/ordinary-app sender and query gates, pending/mismatched/
+denied/disabled status, actual phone approval/port, health authentication and fast health while main
+is deliberately held busy; the previous recordings probe cannot succeed during that hold.
+`test_device_pairing.py` passes on **8767** with real approval, a forward removed during approval,
+truthful `connecting` then recovery without reapproval, attributes/save/dedup, default scrcpy H.264,
+another forward repair, paused-host Send/master/clip copies and token revocation. `bridgeOnly` also
+passes existing semantics/actions/privacy/shutdown/RTL gestures. Current gates pass 37 Compose
+units, Compose lint, sample debug/test/release/isolation, independent consumer debug/release/
+isolation, 59 Python tests, six desktop JS suites and web-reader/CLI. Unchanged tasks were cached;
+the earlier full Android/240-unit baseline was not entirely rerun for this narrow change.
+
+Desktop JS executes the real pending/connecting/connected/visibility wiring in a controlled fixture;
+live browser visuals are unverified because the UI tool exposes no usable browser. Physical/company
+host acceptance still needs its own rebuild/test; the exact reported host trigger is unconfirmed.
+See [pairing setup/recovery](tools/local-bridge/README.md#start-and-pair) and
+[verification commands](CONTRIBUTING.md#focused-device-checks).
+
 ### Compose dialog inspection — 2026-10-06
 
 Android 10/API 29+ discovers attached, visible host Compose Dialog/AlertDialog/Popup windows through

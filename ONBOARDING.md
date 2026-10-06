@@ -272,6 +272,11 @@ See [startup recovery](tools/local-bridge/README.md#startup-recovery).
    choose the intended app and **Connect**. **Approve desktop** in the phone’s SDK Control Room.
    Credentials are generated and handled internally. This works in consuming QA apps without
    sample Settings or custom host code. **Device tools → Advanced manual pairing** supports older SDKs.
+   **Phone approved · connecting…** means approval succeeded but transport is still connecting;
+   keep Auto reconnect enabled. If the phone is listening while the PC still waits, update the host
+   SDK, restart Python and refresh the page, then Connect again. Start/New token in manual pairing
+   creates a separate session; it is unnecessary after Approve. See
+   [pairing recovery](tools/local-bridge/README.md#start-and-pair).
 2. Profiles remember the phone/app without credentials. **Auto reconnect** repairs temporary USB
    outages within this approved session. A restart, device switch or revoked token requires approval
    again. **Stop PC inspector** on the phone revokes access; no app data is reset.

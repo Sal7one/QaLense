@@ -28,7 +28,8 @@ async function perform(work) {
   if (busy) return;
   busy = true; document.querySelectorAll('button:not([data-tab]):not(#back)').forEach(b => { b.disabled = true; });
   try { await work(); } catch (error) { status(error.message); }
-  finally { busy = false; document.querySelectorAll('button').forEach(b => { b.disabled = false; }); componentButtons(); $('back').disabled = location.hash === '#landing'; void recordingTransfer.poll(); }
+  finally { busy = false; document.querySelectorAll('button').forEach(b => { b.disabled = false; }); componentButtons(); $('back').disabled = location.hash === '#landing'; void recordingTransfer.poll();
+    if (['awaiting-approval', 'connecting'].includes(workbench?.phase)) void pollConnection(); }
 }
 const pageNames = {landing: 'Landing', 'data-tools': 'Data tools', devices: 'Device tools', library: 'Saved elements', automation: 'Automation', recordings: 'Recordings', replay: 'Replay'};
 function tab(id, push = true) {
@@ -477,10 +478,10 @@ $('viewer-classic').onclick = () => { viewerLoaded = false; $('viewer').src = '/
 
 function connectionStatus(state) {
   const connected = state.connected, connection = state.connection;
-  $('connection').textContent = state.phase === 'awaiting-approval' ? 'Waiting for phone approval' : state.phase === 'reconnecting' ? 'Reconnecting…' : connected ? connection?.package || 'Terminal-paired bridge' : 'Not connected';
+  $('connection').textContent = state.phase === 'awaiting-approval' ? 'Waiting for phone approval' : state.phase === 'connecting' ? 'Phone approved · connecting…' : state.phase === 'reconnecting' ? 'Reconnecting…' : connected ? connection?.package || 'Terminal-paired bridge' : 'Not connected';
   $('connection').className = `badge ${state.phase || ''}`;
   $('connect-hint').textContent = state.notice || (connected ? 'Connected' : 'Connect USB and approve debugging.');
-  $('quick-connect').textContent = state.phase === 'awaiting-approval' ? 'Cancel pairing' : connected ? 'Connect again' : 'Connect';
+  $('quick-connect').textContent = state.phase === 'awaiting-approval' ? 'Cancel pairing' : state.phase === 'connecting' ? 'Cancel connection' : connected ? 'Connect again' : 'Connect';
 }
 async function discover() {
   const result = await api('devices', {}), current = $('quick-device').value || workbench?.connection?.serial;
@@ -515,7 +516,7 @@ async function discoverApps() {
 $('quick-scan').onclick = () => perform(discover);
 $('quick-device').onchange = () => perform(discoverApps);
 $('quick-connect').onclick = () => perform(async () => {
-  if (workbench?.phase === 'awaiting-approval') { await api('disconnect', {}); await loadWorkbench(); status('Pairing cancelled.'); return; }
+  if (['awaiting-approval', 'connecting'].includes(workbench?.phase)) { await api('disconnect', {}); await loadWorkbench(); status('Pairing cancelled.'); return; }
   const app = discoveredApps.find(a => a.package === $('quick-app').value);
   if (!app || !$('quick-device').value) throw Error('Choose an authorized phone and a QaLens app first.');
   const remembered = workbench.profiles.find(p => p.serial === $('quick-device').value && p.package === app.package);
@@ -529,7 +530,7 @@ async function requestConnection(profile) {
   $('receive').checked = false; clearComponent(); await loadWorkbench(); status('Approve desktop access on your phone. Credentials are handled automatically.');
 }
 
-setInterval(async () => {
+async function pollConnection() {
   // Receive shares this timer cadence. Skipping while it is polling can starve the health
   // check forever, so an owned forward never repairs. Health checks are bounded reads;
   // keep them independent of inbox/archive reads and guard their connection generation below.
@@ -548,7 +549,8 @@ setInterval(async () => {
     } else if (previous !== state.phase) status(state.notice);
   } catch (error) { status(error.message); }
   finally { connectPolling = false; }
-}, 2500);
+}
+setInterval(pollConnection, 2500);
 for (const item of document.querySelectorAll('[data-detail]')) item.onclick = () => {
   document.querySelectorAll('[data-detail]').forEach(b => b.classList.toggle('active', b === item));
   document.querySelectorAll('[data-detail-panel]').forEach(p => { p.hidden = p.dataset.detailPanel !== item.dataset.detail; });
@@ -765,7 +767,7 @@ canvas.addEventListener('contextmenu', event => event.preventDefault());
 $('fast-mirror').onclick = () => perform(async () => { status((await api('adb', {action: 'mirror', connectionId: workbench.connectionId})).notice); });
 // The former map click path is deliberately replaced by pointer routing on the complete canvas.
 $('map').onclick = null;
-document.addEventListener('visibilitychange', () => { if (document.hidden) { mirrorPointer = null; void stopPreview(); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { mirrorPointer = null; void stopPreview(); } else void pollConnection(); });
 window.addEventListener('pagehide', () => { liveMirror.stop(); previewEnabled = false; mirrorPointer = null; if (previewUrl) URL.revokeObjectURL(previewUrl); if (screenshotUrl) URL.revokeObjectURL(screenshotUrl); });
 function scheduleMirrorTree() {
   clearTimeout(treeRefreshTimer);

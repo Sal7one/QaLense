@@ -1,5 +1,34 @@
 # Android verification — 2026-10-04
 
+## Phone approval handoff addendum — 2026-10-06
+
+API 36 `pcPairingOnly` passes real shell offering/phone approval, ordinary-app offering/query denial,
+exact-credential pending/invalid/denied/disabled status and the actual approved port. Authenticated
+`/v1/health` succeeds within the fixture's one-second budget while main is deliberately blocked;
+the previous recordings-based probe cannot succeed during that hold. Wrong credentials reject
+health, expiry never approves and disable remains inert. Cancel after approval stops the matching
+session; mismatched cancellation preserves it, and cancel of an older active session leaves a
+newer phone prompt intact. Existing `bridgeOnly` passes semantics/
+actions/privacy/shutdown and LTR/RTL inspector gestures.
+
+The Python real-device harness passes on **8767** with phone approval, its forward removed during
+approval, `connecting` with readiness false, owned-forward recovery and authentication without
+another prompt. Actual attributes/private JSON save/dedup, default scrcpy H.264 headers/dimensions,
+another forward outage/recovery, SDK Send and completed master/clip copies with Control Room in
+front, and token rotation/revocation pass. All data is synthetic; owned resources are cleaned up.
+
+Current checks pass 37 Compose units, Compose lint with zero errors, sample debug/test/release/
+isolation, independent consumer debug/release/isolation, 59 Python tests, six desktop JS suites/
+syntax and web-reader/CLI. Unchanged tasks were cached. The previous full Android and 240-unit
+baseline below was not entirely rerun for this focused change. No public/no-op API, dependency,
+manifest or archive-format change. [Commands](../CONTRIBUTING.md#focused-device-checks).
+
+JS regressions execute actual pending/connecting/connected/visibility handlers; browser visual
+acceptance remains unverified because UI access exposes no usable browser. The reported company
+app's exact original trigger is unconfirmed; rebuild/reinstall its SDK, restart Python and refresh
+the page together before physical/host acceptance. The normal sample approval already succeeded
+before the change; failures were established through busy-main/proxy/transport cases.
+
 ## Compose dialog inspection addendum — 2026-10-06
 
 API 36 `dialogsOnly` passes real unhooked Compose Dialog, nested Material AlertDialog and Popup

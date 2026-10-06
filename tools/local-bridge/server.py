@@ -25,7 +25,8 @@ from mirror_flags import ENABLE_LEGACY_MIRROR
 from urllib.parse import urlsplit, parse_qs
 import mimetypes
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
+from device_http import urlopen
 
 MAX_BODY = 16_384
 MAX_RESPONSE = 4 * 1024 * 1024

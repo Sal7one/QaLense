@@ -8,6 +8,7 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
+from http.client import IncompleteRead
 from workbench import Workbench
 
 PROFILE = {"serial": "emulator-5560", "package": "com.example.app", "activity": ".MainActivity"}
@@ -18,19 +19,117 @@ class ConnectionTests(unittest.TestCase):
         self.bench = Workbench(self.temp.name, "fake-adb")
         self.server = Mock(token=None, device_port=None)
         self.forward = "emulator-5560 tcp:19333 tcp:8766\n"
-        def adb(args, serial=None):
+        self.approval = 'Broadcast completed: result=10, data="8766"\n'
+        def adb(args, serial=None, timeout=10):
             if args == ["devices", "-l"]: return "List of devices attached\nemulator-5560 device model:Pixel\n"
             if args[:3] == ["shell", "getprop", "ro.build.version.release"]: return "13\n"
             if args[:3] == ["shell", "pm", "path"]: return "package:/data/app/app.apk\n"
             if args[:2] == ["forward", "tcp:0"]: return "19333\n"
             if args == ["forward", "--list"]: return self.forward
+            if "com.qalens.action.QUERY_PC_PAIRING" in args: return self.approval
             return "Broadcast completed: result=1\n"
         self.bench.adb_call = Mock(side_effect=adb)
     def tearDown(self): self.bench.close(self.server); self.temp.cleanup()
     def approved_response(self):
-        response = Mock(code=200); response.read.return_value = b'{"ok":true,"items":[]}'
+        response = Mock(code=200)
+        response.read.return_value = json.dumps({"ok":True, "schema":"qalens.bridge.health", "version":1,
+            "package":PROFILE["package"], "port": self.bench.connection["devicePort"]}).encode()
         response.__enter__ = Mock(return_value=response); response.__exit__ = Mock(return_value=False)
         return response
+    def test_phone_approved_transport_unavailable_is_not_waiting_or_actionable(self):
+        self.bench.pair(self.server, dict(PROFILE, devicePort=8767))
+        ident, token = self.bench.connection_id, self.server.token
+        self.approval = 'Broadcast completed: result=12, data="8767"\n'
+        with patch("workbench.urlopen", side_effect=URLError("offline")):
+            state = self.bench.check_connection(self.server, False)
+        self.assertEqual(state["phase"], "connecting"); self.assertFalse(state["connected"])
+        self.assertIn("Phone approved", state["notice"]); self.assertIn("8767", state["notice"])
+        with self.assertRaisesRegex(ValueError, "wait for the inspector"):
+            self.bench.desktop.task({"action":"back", "connectionId":ident})
+        self.assertEqual(self.server.token, token)
+        self.bench.last_check = 0
+        with patch("workbench.urlopen", return_value=self.approved_response()) as network:
+            state = self.bench.check_connection(self.server)
+        self.assertTrue(state["connected"]); self.assertEqual(state["connectionId"], ident)
+        self.assertTrue(network.call_args.args[0].full_url.endswith("/v1/health"))
+        self.assertNotIn(token, json.dumps(state))
+    def test_only_exact_phone_approval_can_retarget_owned_forward_to_8767(self):
+        self.bench.pair(self.server, PROFILE)
+        ident = self.bench.connection_id
+        self.approval = 'Broadcast completed: result=12, data="8767"\n'
+        original = self.bench.adb_call.side_effect
+        self.bench.adb_call.side_effect = lambda args, serial=None, timeout=10: "19334\n" if args == ["forward", "tcp:0", "tcp:8767"] else original(args, serial, timeout)
+        with patch("workbench.urlopen", side_effect=URLError("offline")):
+            state = self.bench.check_connection(self.server, False)
+        self.assertEqual(state["phase"], "connecting")
+        self.assertEqual(state["connection"]["devicePort"], 8767)
+        self.assertEqual(self.bench.owned_forward, (PROFILE["serial"], 19334))
+        self.assertEqual(self.server.device_port, 19334)
+        self.assertEqual(self.bench.connection_id, ident)
+        self.bench.adb_call.assert_any_call(["forward", "--remove", "tcp:19333"], PROFILE["serial"])
+        query = next(c for c in self.bench.adb_call.call_args_list if "com.qalens.action.QUERY_PC_PAIRING" in c.args[0])
+        self.assertIn(self.server.token, query.args[0]); self.assertEqual(query.kwargs["timeout"], 2)
+        self.bench.last_check = 0
+        with patch("workbench.urlopen", return_value=self.approved_response()):
+            self.assertEqual(self.bench.check_connection(self.server)["phase"], "connected")
+    def test_pending_query_does_not_negotiate_or_grant_access_and_ended_request_cleans_up(self):
+        self.bench.pair(self.server, PROFILE)
+        self.approval = 'Broadcast completed: result=10, data="8767"\n'
+        with patch("workbench.urlopen", side_effect=URLError("offline")):
+            state = self.bench.check_connection(self.server, False)
+        self.assertEqual(state["phase"], "awaiting-approval")
+        self.assertEqual(state["connection"]["devicePort"], 8766)
+        self.assertFalse(state["connected"])
+        self.bench.last_check = 0; self.approval = "Broadcast completed: result=13\n"
+        with patch("workbench.urlopen", side_effect=URLError("offline")):
+            state = self.bench.check_connection(self.server)
+        self.assertEqual(state["phase"], "ended"); self.assertIsNone(self.server.token)
+        self.assertIsNone(self.bench.owned_forward); self.assertIn("Click Connect again", state["notice"])
+    def test_legacy_sdk_falls_back_only_on_health_404_and_does_not_requery_unsupported_receiver(self):
+        self.bench.pair(self.server, PROFILE)
+        self.approval = "Broadcast completed: result=0\n"
+        with patch("workbench.urlopen", side_effect=URLError("offline")):
+            self.bench.check_connection(self.server, False)
+        self.bench.last_check = 0
+        with patch("workbench.urlopen", side_effect=URLError("offline")):
+            self.bench.check_connection(self.server, False)
+        self.assertEqual(sum("com.qalens.action.QUERY_PC_PAIRING" in c.args[0] for c in self.bench.adb_call.call_args_list), 1)
+        self.bench.last_check = 0
+        response = self.approved_response(); response.read.return_value = b'{"ok":true,"items":[]}'
+        with patch("workbench.urlopen", side_effect=[HTTPError("http://localhost", 404, "old SDK", {}, io.BytesIO()), response]) as network:
+            state = self.bench.check_connection(self.server)
+        self.assertEqual(state["phase"], "connected")
+        self.assertEqual([c.args[0].full_url.rsplit("/", 1)[-1] for c in network.call_args_list], ["health", "recordings"])
+        self.bench.last_check = 0
+        with patch("workbench.urlopen", return_value=response) as network:
+            self.bench.check_connection(self.server)
+        self.assertTrue(network.call_args.args[0].full_url.endswith("/v1/recordings"))
+    def test_malformed_interrupted_or_wrong_identity_health_never_grants_access(self):
+        for payload in (b'[]', b'{"ok":"yes"}', b'{"ok":true,"schema":"qalens.bridge.health","version":1,"package":"other.app","port":8766}'):
+            self.bench.pair(self.server, PROFILE)
+            response = self.approved_response(); response.read.return_value = payload
+            with patch("workbench.urlopen", return_value=response):
+                self.assertFalse(self.bench.check_connection(self.server, False)["connected"])
+        self.bench.last_check = 0
+        with patch("workbench.urlopen", side_effect=IncompleteRead(b'partial', 10)):
+            self.assertFalse(self.bench.check_connection(self.server, False)["connected"])
+        self.bench.last_check = 0
+        with patch("workbench.urlopen", side_effect=HTTPError("http://localhost", 401, "wrong token", {}, io.BytesIO())) as network:
+            self.assertFalse(self.bench.check_connection(self.server, False)["connected"])
+        self.assertEqual(network.call_count, 1, "Authentication failure must never fall back to another route")
+    def test_approved_but_unreachable_expiry_reports_transport_and_repair_never_steals_foreign_forward(self):
+        self.bench.pair(self.server, PROFILE)
+        self.approval = 'Broadcast completed: result=12, data="8766"\n'
+        self.forward = "other-device tcp:19333 tcp:9999\n"
+        with patch("workbench.urlopen", side_effect=URLError("offline")):
+            state = self.bench.check_connection(self.server)
+        self.assertEqual(state["phase"], "connecting")
+        self.assertFalse(any(c.args[0][:2] == ["forward", "--remove"] for c in self.bench.adb_call.call_args_list))
+        self.bench.last_check = 0; self.bench.pair_deadline = 0
+        self.assertIn("Phone approved", self.bench.check_connection(self.server)["notice"])
+        self.assertIsNone(self.server.token)
+        self.assertTrue(any("com.qalens.action.CANCEL_PC_PAIRING" in c.args[0] for c in self.bench.adb_call.call_args_list),
+            "An expired connecting request must cancel its matching approved phone session")
     def test_pair_requires_phone_approval_and_never_returns_or_persists_credential(self):
         connected = self.bench.pair(self.server, PROFILE)
         token = self.server.token

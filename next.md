@@ -3,6 +3,19 @@
 Updated 2026-10-06. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Phone approval handoff — 2026-10-06
+
+- [x] Separate authenticated connection health from main-thread recorder controls and storage;
+  verify package/port/protocol identity, preserve old-SDK 404 fallback and bypass local HTTP proxies.
+- [x] Query only the offered credential's phone state/port with the existing sender permission;
+  distinguish approved-but-connecting, recover owned forwards and clear ended requests honestly.
+- [x] Verify busy-main and sender/auth/privacy gates on API 36, actual port-8767 approval with a
+  lost forward during handoff, default scrcpy/attributes/transfers/revocation, JS state wiring and
+  unit/build/lint/release gates. Update host/desktop recovery and agent docs.
+- [ ] Retest the reported company build after updating the SDK and Python/browser together;
+  verify live browser visuals and physical/OEM pairing/USB/proxy environments. Its exact original
+  trigger was not reproduced in the normal sample flow.
+
 ## Compose dialog inspection — 2026-10-06
 
 - [x] Automatically discover host Compose Dialog/AlertDialog/Popup windows through public API 29+
