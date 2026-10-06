@@ -61,6 +61,25 @@ Require the runner's `OK:` message. An adb process exit code alone does not prov
 The runner changes sample activity contents/preferences and creates synthetic recordings; HTTP
 fixtures bind loopback only.
 
+### Compose dialog inspection
+
+On a disposable API 29+ emulator with the debug/test APKs above:
+
+```sh
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e dialogsOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require `OK: Automatic Compose Dialog/AlertDialog/Popup discovery` and no `FAIL:`. The fixture
+uses unhooked host windows, a smaller background target underneath a dialog, and equal-sized popup
+containers. It checks real phone taps, All filtering, tag copying, mobile selector search, PC
+attributes/XPath/tap/type/scroll, hidden/password redaction, secure-flag inheritance/restoration,
+unchanged dialog focus/geometry,
+two-finger drag/no stationary click, screenshot ownership/dismissal, explicit-hook deduplication,
+stale IDs, popup selection, background/resume and disable. Only synthetic screenshots go to the
+sample's private cache. The full runner includes it on API 29+; API 23–28 still uses explicit roots
+and needs its own device acceptance. [Integration recipe](integration.md#compose-inspection-across-host-windows).
+
 ### scrcpy mirror checks
 
 Use the installed sample/debug-test APKs on a disposable emulator, Python desktop, adb and Chrome/

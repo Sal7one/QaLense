@@ -142,7 +142,9 @@ interactive buttons/fields and stable tagged ancestors where list items repeat. 
 human label, `qaTag` adds a tag/layout hint, and neither manufactures a host action. Tap/type/scroll
 require public Compose `OnClick`/`SetText`/`ScrollBy` semantics.
 
-Register dialog/popup content with `Modifier.qaInspectionRoot()`. Pair imperative
+Android 10/API 29+ automatically discovers visible Compose Dialog/AlertDialog/Popup windows belonging
+to the resumed host Activity. Use `Modifier.qaInspectionRoot()` on API 23–28, or keep existing hooks;
+automatic and explicit discovery deduplicate. Pair imperative
 `registerComposeRoot(view)`/`unregisterComposeRoot(view)` with attached window ownership. The
 context must resolve to the active Activity. See [window and tag recipes](../integration.md#compose-inspection-across-host-windows).
 
@@ -283,7 +285,7 @@ failure by suppressing the host's errors or weakening its capture/security polic
 | No foreground host / empty live tree | Return from Control Room to resumed host; root/Activity lifecycle context; install explicitly if Startup was removed; register separate roots |
 | Tagged element lacks actions | Tag must reach the node with real Compose action semantics; a tag/Box/name does not create a callback |
 | Duplicate/stale XPath or node ID | Refresh; narrow with stable ancestor/tag; node IDs/positions are live; check matches rather than bypassing ambiguity safeguards |
-| Dialog/lazy item absent | Register the attached separate window; scroll so lazy content exists; hidden/private/non-Compose content remains outside coverage |
+| Dialog/lazy item absent | On API 23–28 register the attached separate window; on API 29+ verify its context resolves to the resumed host Activity. Scroll so lazy content exists; hidden/private/non-Compose content remains outside coverage |
 | Network/log track empty | Hook the actual executing client/logger; confirm capture switches; emit an event; declaration alone is insufficient |
 | Data changes absent | Real Room table names, same db instance, Flow owner/subscription and a write after the initial emission; snapshots need a separate cached provider |
 | Overlay/Repro stutters | Check message size, expensive caller-thread regex, main-thread providers and synchronous report calls; keep Chucker's own load in view |

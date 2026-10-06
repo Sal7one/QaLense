@@ -2,6 +2,21 @@
 
 ## Unreleased — post-0.9.0
 
+### Compose dialog inspection — 2026-10-06
+
+- Automatically discover visible host Compose Dialog/AlertDialog/Popup windows on Android 10/API 29+
+  through public `WindowInspector`; retain explicit roots for API 23–28 and deduplicate both paths.
+- Put active phone inspection above extra windows, preserve host focus/geometry and direct
+  two-finger scrolling into their actual content. Clean up on dismissal, pause, disable and recording;
+  a stationary two-finger touch cancels instead of clicking the host.
+- Resolve hits in the foremost containing window, then prefer tagged/actionable/labeled components
+  over equal-sized empty containers. Add optional live window metadata and matching desktop hit rules.
+- Exclude SDK selector/pairing windows from discovery, retain dialog search/attributes/XPath/actions
+  and keep hidden/password filtering. Transform pixel-mask coordinates and share screenshot visibility
+  ownership across inspection-window changes; propagate secure capture flags to SDK inspection/
+  selector/pairing windows. Screenshots remain Activity-window capture.
+- Add real dialog/search/popup/gesture/lifecycle/capture regressions and API-level integration guidance.
+
 ### Embedded scrcpy mirror — 2026-10-06
 
 - Make official checksum-pinned scrcpy 5.0 H.264 the inline Landing mirror with WebCodecs decoding,

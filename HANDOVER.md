@@ -32,7 +32,7 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 | Area | Entry points |
 |---|---|
 | Public SDK and analysis | `qalens-compose/.../QaLens.kt`, `AnalysisEngine.kt`; pure policies/models in `qalens-core/` |
-| Host roots and overlay | `QaLensActivityInstaller`, `QaLensOverlayHost`, `QaLensInspectorPanel`; registered dialog/popup roots |
+| Host roots and overlay | `QaLensActivityInstaller`, `QaLensInspectionWindows`, `QaLensOverlayHost`, `QaLensInspectorPanel`; automatic API 29+ dialog/popup roots and explicit legacy hooks |
 | Capture and clips | `QaLensSessionRecorder`, `QaLensProjectionActivity`, `QaLensProjectionService`, `QaLensVideoClip`, `QaLensSystemChip` |
 | Evidence ownership | Core `RecordingLifecycle`, `RecordingWindow`, `RecordingEvidenceStore`, `RecordingClipWindow` |
 | Device/settings/transport | `qalens-android/`; active `QaLensLocalBridge`, `QaLensWebhook` and OSS adapters |
@@ -47,6 +47,43 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Compose dialog inspection — 2026-10-06
+
+Android 10/API 29+ discovers attached, visible host Compose Dialog/AlertDialog/Popup windows through
+public `WindowInspector`; API 23–28 keeps `qaInspectionRoot`/paired root registration. Context must
+resolve to the resumed host Activity. Both paths deduplicate; explicit registrations preserve order.
+Active inspection/tag mode or QA panels get one owned nonfocusable application window above the
+extra root, with Activity lifecycle owners, physical host coordinates and scoped dismissal/pause/
+disable/recording cleanup. The normal Activity bubble remains below a modal dialog when inspection
+is off; use Control Room → Open panel in app or the connected desktop for an already-open dialog.
+Done exits inspection; system Back retains the host dialog's normal dismissal behavior.
+
+Hit selection first chooses the foremost containing window and then the smallest meaningful node,
+preferring tags/actions/labels on equal bounds. A tiny background element cannot steal a dialog hit,
+and an empty popup container cannot steal its tagged child's hit. Snapshots add optional `windows`
+and node `windowId`; desktop mirror selection uses them. Two-finger gestures target the actual
+dialog/popup content, cancel the inspector tap, never fall through to a detached Activity and
+cancel stationary two-finger touches. SDK selector/pairing windows are marked/excluded so they do
+not become host roots or inspector anchors. No public facade/no-op API/dependency or `.sal` change.
+
+Pixel masks map each root to host coordinates. Screenshot visibility uses scoped reference counts
+and the inspection surface's prior visibility, including captures during window changes. Capture
+is still Activity-window PixelCopy, not separate dialog pixels. Secure host flags propagate to the
+inspection window and SDK selector/pairing dialogs at scans; no host flag is cleared. Rebuild/
+reinstall the SDK in the host and refresh the desktop. [Integration](integration.md#compose-inspection-across-host-windows)
+and [focused command](CONTRIBUTING.md#compose-dialog-inspection) own setup/acceptance.
+
+The focused API 36 fixture passes real unhooked Dialog/AlertDialog/Popup discovery, geometry/focus,
+foreground phone selection, All filtering, tags, mobile selector search, PC attributes/XPath/actions,
+hidden/password filtering, two-finger scrolling/no stationary click, explicit-hook deduplication,
+stale IDs, screenshot restoration/dismissal and background/resume/disable. Captured synthetic phone
+screenshots were inspected. The existing capture and full SDK runners pass; unit/build/lint/release
+gates are recorded in [Android verification](docs/ANDROID_VERIFICATION.md). Physical/OEM windows,
+API 23–28 explicit-window runtime, other Compose runtimes, custom window layering/multiple displays
+and live desktop visual acceptance remain separate. Secure propagation is a scan-time update,
+not a synchronous subscription to arbitrary host flag mutations. Native Views/WebViews/private
+state remain outside Compose inspection. These checks do not certify the consuming app's ANR/HD issue.
 
 ### Embedded scrcpy mirror — 2026-10-06
 
@@ -564,8 +601,9 @@ claim is made for crash/power-loss recovery of unsaved journals.
 - AndroidX Startup normally installs the active SDK. Quick actions is the default; Review
   evidence has five built-in views and host extensions, and Connect to PC has its own screen.
   Control Room/player use separate task affinities.
-- Public Compose semantics discover attached Activity roots and explicitly registered extra
-  windows. Private state, native Views/WebViews and unregistered roots are outside this coverage.
+- Public Compose semantics discover attached Activity roots and automatically discover the host's
+  visible Compose extra windows on API 29+; API 23–28 requires explicit roots. Private state,
+  native Views/WebViews and windows outside the resumed Activity are outside this coverage.
   IDs are live/root-scoped; tags must be unique for exact targeting. Hidden/password values and
   unsupported custom properties have explicit limits.
 - Dashboard log/network queues are bounded and published in one roughly 100 ms batch. Repro,
@@ -595,9 +633,10 @@ claim is made for crash/power-loss recovery of unsaved journals.
 - The device bridge is explicitly paired, authenticated and loopback-only. Disable closes it;
   re-enable requires restart. IO/JSON/redaction stay off main; semantics actions stay on main with
   timeout/generation guards. Already-running synchronous host actions cannot be safely interrupted.
-- Two-finger inspector drags forward to Activity content after cancelling the inspector tap.
+- Two-finger inspector drags forward to Activity content or the foremost dialog/popup content
+  after cancelling the inspector tap; a stationary two-finger touch cancels the host gesture.
   Bubble/dock positions use physical coordinates and safe system/IME bounds in LTR/RTL.
-  Registered dialog trees can be read; gesture forwarding stays in the Activity window.
+  Window membership/order and equal-bounds tie rules keep foreground selection meaningful.
 - Desktop Landing/Back embeds the exact `web/` sources. Profiles and opt-in auto-connect profile IDs persist without tokens; every new automatic request still needs phone approval;
   previews are memory-only until Save. Component hashes ignore timestamps/live IDs and include
   exported values, bounds, package/viewport and visible tree position. Fixed adb tasks/Downloads

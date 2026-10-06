@@ -167,7 +167,11 @@ internal fun QaLensSelectorBrowser(colors: QaLensOverlayColors, onChoose: (Strin
 
 @Composable
 internal fun QaLensSelectorDialog(colors: QaLensOverlayColors, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(
+        securePolicy = if (QaLensInspectionWindows.secureInspection) androidx.compose.ui.window.SecureFlagPolicy.SecureOn
+            else androidx.compose.ui.window.SecureFlagPolicy.Inherit
+    )) {
+        ExcludeQaLensWindowFromInspection()
         Surface(color = colors.panel, contentColor = colors.fg) {
             Column(Modifier.fillMaxWidth().fillMaxHeight(.85f).imePadding().padding(12.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

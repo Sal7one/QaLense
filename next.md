@@ -3,6 +3,20 @@
 Updated 2026-10-06. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Compose dialog inspection — 2026-10-06
+
+- [x] Automatically discover host Compose Dialog/AlertDialog/Popup windows through public API 29+
+  inventory; retain/deduplicate explicit API 23–28 hooks and exclude SDK-owned windows.
+- [x] Put active phone inspection above extra windows, retain geometry/focus, support meaningful
+  foreground/equal-bounds selection and route two-finger drags into dialog content without clicks.
+- [x] Expose optional window metadata to desktop mirror hit testing; preserve search, attributes,
+  tags, XPath/actions, hidden/password policy and stale-window/disable/background cleanup.
+- [x] Preserve secure window flags and capture visibility ownership; keep Activity-only screenshot
+  coverage explicit. Pass focused dialog/capture/full API 36 regressions and document integration.
+- [ ] Validate physical/OEM/custom layering, API 23–28 explicit-window runtime, other Compose
+  runtimes/multiple displays and live desktop visual acceptance. Dynamic secure flags propagate at
+  scans; arbitrary synchronous host flag transitions are not certified.
+
 ## Embedded scrcpy mirror — 2026-10-06
 
 - [x] Make pinned official scrcpy 5.0 H.264/WebCodecs the inline default; retain the prior PNG/adb

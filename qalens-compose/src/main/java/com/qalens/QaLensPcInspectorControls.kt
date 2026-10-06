@@ -38,7 +38,11 @@ internal fun QaLensPcInspectorLauncher(colors: QaLensOverlayColors) {
             fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Text("Inspect this app from the QaLens desktop", color = colors.fg2, fontSize = 11.sp)
     }
-    if (open) Dialog(onDismissRequest = { open = false }) {
+    if (open) Dialog(onDismissRequest = { open = false }, properties = androidx.compose.ui.window.DialogProperties(
+        securePolicy = if (QaLensInspectionWindows.secureInspection) androidx.compose.ui.window.SecureFlagPolicy.SecureOn
+            else androidx.compose.ui.window.SecureFlagPolicy.Inherit
+    )) {
+        ExcludeQaLensWindowFromInspection()
         Surface(color = colors.panel, contentColor = colors.fg) {
             Column(Modifier.fillMaxWidth().fillMaxHeight(.85f).imePadding().padding(16.dp)) {
                 Text("‹ Back", color = colors.accent, fontSize = 13.sp,

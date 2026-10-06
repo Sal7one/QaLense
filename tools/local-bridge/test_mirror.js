@@ -47,7 +47,7 @@ function fixture(live = false) {
       if (url === '/api/inspection') { state.controls.inspection = body.enabled; return state.holdInspection || json({ok: true}); }
       if (url === '/api/preview') { state.stream.modeEpoch++; return json({ok:true,...state.stream}); }
       if (url === '/api/adb') return json({ok: true, notice: 'Phone Back sent'});
-      if (url === '/api/snapshot') return json({connectionId: state.connectionId, viewport: {width: 100, height: 200}, nodes, screen: 'Cart', omittedNodes: 0});
+      if (url === '/api/snapshot') return json({connectionId: state.connectionId, viewport: {width: 100, height: 200}, nodes: state.nodes || nodes, windows: state.windows, screen: 'Cart', omittedNodes: 0});
       if (url === '/api/component') return json({document: {hash: 'a'.repeat(64), content: {component: {...nodes[0], attributes: []}, tree: {path: []}}}});
       if (url === '/api/selectors') return json({connectionId: state.connectionId, suggestions: [], omittedNodes: 0});
       if (url === '/api/command') { state.controls.inspection = true; return json({ok: true}); }
@@ -75,6 +75,25 @@ function fixture(live = false) {
   return {get, context, state, requests, posts, document, event};
 }
 async function run() {
+  {
+    const background = {id:'background', windowId:'main', bounds:{left:10,top:15,right:20,bottom:25}};
+    const dialog = {id:'dialog', windowId:'front', bounds:{left:0,top:0,right:30,bottom:40}};
+    const windows = [{id:'main',order:0,bounds:{left:0,top:0,right:100,bottom:200}},
+      {id:'front',order:1,bounds:{left:0,top:0,right:60,bottom:70}}];
+    assert.equal(Mirror.hit([background,dialog],windows,15,20),dialog,'Tiny background node stole a dialog hit');
+    assert.equal(Mirror.hit([background],windows,15,20),null,'Blank dialog space selected the host behind it');
+    assert.equal(Mirror.hit([background,dialog],undefined,15,20),background,'Older SDK selection contract changed');
+    const popupRoot={...dialog,id:'popup-root'}, popupText={...dialog,id:'popup-text',tag:'popup.label',text:['Popup']};
+    assert.equal(Mirror.hit([popupRoot,popupText],windows,15,20),popupText,'Equal-sized empty window root stole the component hit');
+    const f=fixture(true), canvas=f.get('phone-canvas');
+    f.state.nodes=[{...background,tag:'background',label:'Background',actions:[],enabled:true}, {...dialog,tag:'dialog',label:'Dialog',actions:[],enabled:true}]; f.state.windows=windows;
+    await f.get('preview-toggle').onclick(); await drain();
+    await f.get('mode-inspect').onclick(); await drain();
+    canvas.listeners.pointerdown(f.event(95,60)); canvas.listeners.pointerup(f.event(95,60)); await drain();
+    assert.equal(f.requests.filter(r=>r.url==='/api/command').at(-1).body.id,'dialog','App failed to use foreground window hit testing');
+    assert.equal(f.requests.filter(r=>r.url==='/api/mirror/input').length,0,'Dialog inspection clicked the host');
+    await vm.runInContext('stopPreview()',f.context);
+  }
   {
     const f=fixture(true), canvas=f.get('phone-canvas');
     await f.get('preview-toggle').onclick(); await drain();

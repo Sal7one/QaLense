@@ -63,6 +63,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var desktopPhoneApproval = false
     private var selectorsOnly = false
     private var desktopSelectors = false
+    private var dialogsOnly = false
     override fun onCreate(arguments: Bundle?) {
         videoDenyOnly = arguments?.getString("videoDenyOnly") == "true"
         clipsOnly = arguments?.getString("clipsOnly") == "true"
@@ -90,6 +91,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         desktopPhoneApproval = arguments?.getString("desktopPhoneApproval") == "true"
         selectorsOnly = arguments?.getString("selectorsOnly") == "true"
         desktopSelectors = arguments?.getString("desktopSelectors") == "true"
+        dialogsOnly = arguments?.getString("dialogsOnly") == "true"
         super.onCreate(arguments)
         start()
     }
@@ -98,6 +100,11 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         val result = Bundle()
         var consent: java.util.concurrent.FutureTask<Unit>? = null
         try {
+            if (dialogsOnly) {
+                DialogInspectionChecks(this).run()
+                result.putString("stream", "\nOK: Automatic Compose Dialog/AlertDialog/Popup discovery, foreground phone/PC selection, actions/attributes/privacy, two-finger dialog scrolling, focus/geometry, deduplication/dismissal and disable cleanup.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             if (scrcpyGuiSeconds > 0) {
                 ScrcpyDesktopChecks(this).hold(scrcpyGuiSeconds)
                 result.putString("stream", "\nOK: Disposable scrcpy fixture restored input UI, HD policy and bridge.\n")
@@ -220,6 +227,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             verifyRealDataStoreIntegration()
             verifyClientSafety()
             verifyComposeInspection()
+            if (android.os.Build.VERSION.SDK_INT >= 29) DialogInspectionChecks(this).run()
             LocalBridgeChecks(this).run()
             verifyContinuousOverlayLoad()
             val limited = record("budget", 100, "x".repeat(100_000), clearUi = false)

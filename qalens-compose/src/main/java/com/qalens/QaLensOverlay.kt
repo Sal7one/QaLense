@@ -80,11 +80,15 @@ internal fun QaLensOverlay() {
     val view = LocalView.current
     val colors = qaLensColorsFor(LocalContext.current)
 
+    LaunchedEffect(state.isInspectMode, state.isTagMode, state.isPanelOpen, state.isWatchMode, state.isRecording, state.overlayEnabled) {
+        QaLens.currentActivity?.let(QaLensInspectionWindows::sync)
+    }
+
     // Only refresh on inspect/tag mode toggle — not on panel open/close, which would capture the
     // panel's own nodes and create a "double UI" effect in the canvas.
     LaunchedEffect(state.isInspectMode, state.isTagMode) {
         if (state.isInspectMode || state.isTagMode) {
-            QaLens.refreshInspection(view.rootView)
+            QaLens.refreshInspection()
         }
     }
 
@@ -93,7 +97,7 @@ internal fun QaLensOverlay() {
     LaunchedEffect(state.isInspectMode, state.isTagMode, state.isWatchMode, view) {
         while ((state.isInspectMode || state.isTagMode) && !state.isWatchMode) {
             delay(500)
-            QaLens.refreshInspection(view.rootView)
+            if (view.isShown) QaLens.refreshInspection()
         }
     }
 
@@ -135,7 +139,7 @@ internal fun QaLensOverlay() {
                 warningCount = state.warnings.size,
                 colors = colors,
                 onTap = { QaLens.togglePanel() },
-                onLongPress = { QaLens.toggleInspectMode(); QaLens.refreshInspection(view.rootView) }
+                onLongPress = { QaLens.toggleInspectMode(); QaLens.refreshInspection() }
             )
         }
 
@@ -168,7 +172,7 @@ internal fun QaLensOverlay() {
                     modifier = Modifier.align(dockAlign),
                     state = state,
                     onClose = QaLens::closePanel,
-                    onRefresh = { QaLens.refreshInspection(view.rootView) }
+                    onRefresh = { QaLens.refreshInspection() }
                 )
             }
         }
@@ -210,9 +214,7 @@ private fun InspectCanvas(
                     val moved = (up.position - down.position).getDistance()
                     if (moved < viewConfiguration.touchSlop) {
                         up.consume()
-                        val selected = visibleNodes
-                            .filter { it.bounds.contains(down.position.x, down.position.y) }
-                            .minByOrNull { it.bounds.width * it.bounds.height }
+                        val selected = QaLensInspectionWindows.hit(visibleNodes, down.position.x, down.position.y)
                         onSelect(selected)
                     }
                 }
@@ -380,9 +382,7 @@ private fun TagCanvas(nodes: List<InspectNode>, colors: QaLensOverlayColors) {
                     val moved = (up.position - down.position).getDistance()
                     if (moved < viewConfiguration.touchSlop) {
                         up.consume()
-                        tagged
-                            .filter { it.bounds.contains(down.position.x, down.position.y) }
-                            .minByOrNull { it.bounds.width * it.bounds.height }
+                        QaLensInspectionWindows.hit(tagged, down.position.x, down.position.y)
                             ?.testTag?.let(::copyTag)
                     }
                 }

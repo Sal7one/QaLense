@@ -31,6 +31,17 @@
     sizes[index] += delta; sizes[index + 1] -= delta;
     return sizes.map(n => n / width);
   }
+  function hit(nodes, windows, x, y) {
+    const contains = b => b && x >= b.left && x <= b.right && y >= b.top && y <= b.bottom;
+    // New SDKs identify each window: empty dialog space must not hit the Activity underneath.
+    // Older SDKs retain their existing smallest-element selection contract.
+    const foreground = Array.isArray(windows) && windows.length
+      ? windows.filter(w => contains(w.bounds)).sort((a, b) => b.order - a.order)[0] : null;
+    if (Array.isArray(windows) && windows.length && !foreground) return null;
+    const rank = n => (n.tag ? 4 : 0) + (n.actions?.length ? 2 : 0) + (n.text?.length || n.description?.length ? 1 : 0);
+    return nodes.filter(n => contains(n.bounds) && (!foreground || n.windowId === foreground.id))
+      .sort((a, b) => (a.bounds.right-a.bounds.left)*(a.bounds.bottom-a.bounds.top) - (b.bounds.right-b.bounds.left)*(b.bounds.bottom-b.bounds.top) || rank(b) - rank(a))[0] || null;
+  }
   function installLayout(document, storage) {
     const workspace = document.getElementById('workspace');
     if (!workspace?.getBoundingClientRect) return; // Non-browser regression harnesses.
@@ -90,7 +101,7 @@
     document.getElementById('reset-layout').onclick = () => { layout = {...defaults, shares: [...defaults.shares]}; apply(true); };
     apply();
   }
-  const api = {point, gesture, wheel, split, installLayout};
+  const api = {point, gesture, wheel, split, hit, installLayout};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.QaLensMirror = api;
 })(typeof globalThis === 'undefined' ? this : globalThis);

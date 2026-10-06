@@ -404,7 +404,10 @@ Ordinary `setContent` and embedded `ComposeView`s in that window need no extra h
 layout hint. Repeated tags are matched to semantics by bounds, but unique test tags remain best for
 reliable macros and reports.
 
-A Compose `Dialog`, `Popup`, or other window has a separate root. Register it at the content root:
+A Compose `Dialog`, Material `AlertDialog`/modal sheet, or `Popup` has a separate window root.
+On Android 10 (API 29) and newer, QaLens discovers attached, visible Compose windows whose context
+belongs to the resumed host Activity through the public `WindowInspector` API. Ordinary dialogs
+need no QaLens modifier. On Android 6–9 (API 23–28), explicitly register each separate content root:
 
 ```kotlin
 Dialog(onDismissRequest = onDismiss) {
@@ -414,12 +417,28 @@ Dialog(onDismissRequest = onDismiss) {
 }
 ```
 
-The modifier unregisters the window when its composition ends and is inert in release builds. For
+The explicit hook remains supported on newer Android and deduplicates automatic discovery. It
+unregisters the window when its composition ends and is inert in release builds. For
 a host-managed window, pair `QaLens.registerComposeRoot(view)` after attaching its Compose view with
 `QaLens.unregisterComposeRoot(view)` when removing it. The view's context must belong to the active
 Activity. `QaLens.invalidateInspection()` requests a debounced scan after a semantics-only update;
 visual Inspect/Tag modes also refresh every 500 ms while open. Outside those modes there is no
-continuous polling. The no-op artifact exposes the same calls.
+continuous polling. The no-op artifact exposes the same calls. Native dialogs, WebViews, detached
+roots and windows whose context does not resolve to the active Activity remain outside coverage;
+an explicit hook cannot change a window's Activity ownership.
+
+While Inspect elements, Inspect tags or a QA panel is active, QaLens places its inspector above
+the foremost extra window without resizing it or taking keyboard focus. Two-finger drags target
+that dialog/popup's content; selecting/copying a tag never executes a host click. Done removes the
+extra inspection surface, and dismissal/background/disable also cleans it up. System Back retains
+the host dialog's normal dismissal behavior. For an already-open
+dialog, use Control Room → Open panel in app → Inspect elements/Inspect tags, or select its node
+from the connected desktop. The normal Activity bubble is still under a modal dialog when inspection is off.
+Live desktop snapshots include window membership/order/bounds so mirror selection can distinguish
+overlapping roots. Root/window IDs are ephemeral; keep stable tags for automation.
+SDK selector/pairing dialogs are excluded from the host tree. Secure capture flags propagate to
+the inspection surface and those SDK dialogs during scans; this is not a synchronous subscription
+to arbitrary window flag changes. Activity-only screenshot coverage stays unchanged.
 
 In Inspect mode, **Actions** shows interactive nodes by default. Switch to All, Tagged, or Issues
 when investigating, then tap an outline to see its redacted label, tag, size, and warnings or copy

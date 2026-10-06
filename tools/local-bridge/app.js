@@ -673,9 +673,8 @@ async function inspectPoint(point, frame) {
     const viewport = snapshot.screenViewport || snapshot.viewport;
     if (!QaLensScrcpy.aligned(frame, viewport)) throw Error('Screen rotated. Wait for a fresh frame and inspect again.');
     const x = point.x * viewport.width - (snapshot.viewport.originX || 0), y = point.y * viewport.height - (snapshot.viewport.originY || 0);
-    const candidates = snapshot.nodes.filter(n => x >= n.bounds.left && x <= n.bounds.right && y >= n.bounds.top && y <= n.bounds.bottom);
-    candidates.sort((a,b) => (a.bounds.right-a.bounds.left)*(a.bounds.bottom-a.bounds.top) - (b.bounds.right-b.bounds.left)*(b.bounds.bottom-b.bounds.top));
-    if (candidates[0]) await choose(candidates[0]); else status('No public Compose element at that position.');
+    const selected = QaLensMirror.hit(snapshot.nodes, snapshot.windows, x, y);
+    if (selected) await choose(selected); else status('No public Compose element at that position.');
   } catch (error) { status(error.message); }
   finally { liveSelecting = false; }
 }

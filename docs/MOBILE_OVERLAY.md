@@ -34,6 +34,15 @@ selected element shows copyable suggestions; **Send to PC** is an optional captu
 transfer. Live phone/browser selection is linked by the desktop's separate setting. See the
 [desktop contract](../tools/local-bridge/README.md#search-and-selectors).
 
+Compose Dialog/AlertDialog/Popup windows are discovered automatically on Android 10/API 29+;
+older supported devices need the host's `qaInspectionRoot` hook. Active elements/tags inspection
+and QA panels appear above these windows without changing their size or stealing keyboard focus.
+Two-finger drags scroll the foremost dialog's content. Done, dismissal, background and disabling
+QaLens remove the extra surface. Done exits inspection; system Back retains the host dialog's
+normal dismissal behavior. When inspection is off, the Activity bubble remains underneath
+a modal dialog; use Control Room → Open panel in app → Inspect elements/Inspect tags, or a connected PC, to inspect an already
+open dialog. This does not add native/View inspection or dialog pixels to Activity-only screenshots.
+
 ## Review observed evidence
 
 | View | Useful evidence |

@@ -20,7 +20,11 @@ import java.io.FileOutputStream
 
 internal object QaLensScreenCapture {
 
-    private const val OVERLAY_TAG = "qalens_overlay_compose_view"
+    private class HiddenOverlay(val visibility: Int, var captures: Int = 1)
+    private val hiddenOverlays = java.util.WeakHashMap<View, HiddenOverlay>()
+    fun visibilityBeforeCapture(view: View): Int = hiddenOverlays[view]?.visibility ?: view.visibility
+    fun isHiddenForCapture(view: View): Boolean = hiddenOverlays.containsKey(view)
+
     private const val PROVIDER_SUFFIX = ".qalens.fileprovider"
 
     private val deliveryWorker = java.util.concurrent.ThreadPoolExecutor(
@@ -40,7 +44,7 @@ internal object QaLensScreenCapture {
                 listOfNotNull(c.getOrNull(SemanticsProperties.EditableText)?.text) +
                 c.getOrNull(SemanticsProperties.ContentDescription).orEmpty()).joinToString(" ")
             if (c.contains(SemanticsProperties.Password) || c.getOrNull(QaHiddenFromReportsKey) == true || cfg.redact(text) != text)
-                node.boundsInWindow else null
+                QaLensActivityInstaller.mapToHostWindow(node.root as? View ?: error("Missing capture root"), node.boundsInWindow) else null
         }
     }.getOrNull()
 
@@ -56,8 +60,8 @@ internal object QaLensScreenCapture {
 
     /** Show/hide the QaLens overlay view (bubble + panel) on the given activity. */
     fun setOverlayVisible(activity: Activity, visible: Boolean) {
-        val overlay = activity.window.decorView.findViewWithTag<View>(OVERLAY_TAG)
-        overlay?.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+        val overlays = QaLensInspectionWindows.overlayViews(activity)
+        overlays.forEach { it.visibility = if (visible && it === overlays.lastOrNull() && !isHiddenForCapture(it)) View.VISIBLE else View.INVISIBLE }
     }
 
     /**
@@ -79,11 +83,25 @@ internal object QaLensScreenCapture {
         if (sourceWidth <= 0 || sourceHeight <= 0) { onResult(null); return }
         // Own only a visibility change made by this capture. An already-hidden recorder overlay
         // must not be restored to INVISIBLE after a concurrent phone Stop has made it visible.
-        val overlay = if (manageOverlay) decor.findViewWithTag<View>(OVERLAY_TAG)?.takeIf { it.visibility == View.VISIBLE } else null
-        val previousVisibility = overlay?.visibility
-        overlay?.visibility = View.INVISIBLE
+        val overlays = if (manageOverlay) QaLensInspectionWindows.overlayViews(activity).filter {
+            QaLensInspectionWindows.visibilityBeforeInspection(it) == View.VISIBLE || isHiddenForCapture(it)
+        } else emptyList()
+        overlays.forEach { view ->
+            val existing = hiddenOverlays[view]
+            if (existing != null) existing.captures++
+            else hiddenOverlays[view] = HiddenOverlay(QaLensInspectionWindows.visibilityBeforeInspection(view))
+            view.visibility = View.INVISIBLE
+        }
         val finish: (Bitmap?) -> Unit = { bmp ->
-            if (previousVisibility != null && !QaLens.state.value.isRecording) overlay?.visibility = previousVisibility
+            overlays.forEach { view ->
+                val hidden = hiddenOverlays[view]
+                if (hidden != null && --hidden.captures == 0) {
+                    hiddenOverlays.remove(view)
+                    if (!QaLens.state.value.isRecording && QaLens.config.value.enabled && QaLens.state.value.overlayEnabled &&
+                        view.isAttachedToWindow && view.visibility == View.INVISIBLE &&
+                        QaLensInspectionWindows.overlayViews(activity).lastOrNull() === view) view.visibility = hidden.visibility
+                }
+            }
             val after = if (bmp != null) maskBounds(activity) else emptyList()
             if (bmp != null && (!QaLens.config.value.enabled || epoch != QaLens.captureEpoch ||
                     activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0 || after == null ||
@@ -129,7 +147,7 @@ internal object QaLensScreenCapture {
         // PixelCopy snapshots the last *composited* frame, so a same-pass visibility toggle would
         // still capture the overlay (e.g. the in-window REC chip). Post so the hidden overlay gets
         // one frame to leave the surface — same pattern captureAndShare has always used.
-        if (overlay != null) decor.post(doCapture) else doCapture.run()
+        if (overlays.isNotEmpty()) decor.post(doCapture) else doCapture.run()
     }
 
     fun captureAndShare(

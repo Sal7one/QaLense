@@ -326,13 +326,14 @@ internal object QaLensLocalBridge {
                 "viewport" to mapOf<String, Any?>("width" to activity.window.decorView.width, "height" to activity.window.decorView.height,
                     "originX" to origin[0], "originY" to origin[1]),
                 "screenViewport" to mapOf("width" to displaySize.x, "height" to displaySize.y),
+                "windows" to QaLensInspectionWindows.snapshot(activity),
                 "omittedNodes" to (nodes.size - included.size),
                 "nodes" to nodes.take(1_000).map { node ->
                     val semantic = raw[node.id]
                     val password = QaLensBridgeComponents.password(semantic)
                     var parent = semantic?.parent
                     while (parent != null && QaLensActivityInstaller.semanticsId(parent) !in included) parent = parent.parent
-                    mapOf<String, Any?>("id" to node.id, "parentId" to parent?.let(QaLensActivityInstaller::semanticsId),
+                    mapOf<String, Any?>("id" to node.id, "windowId" to QaLensInspectionWindows.windowId(node.id), "parentId" to parent?.let(QaLensActivityInstaller::semanticsId),
                         "tag" to node.testTag, "label" to if (password) "[protected]" else node.label,
                         "text" to if (password) emptyList() else node.text.take(8),
                         "description" to if (password) emptyList() else node.contentDescription.take(4), "role" to node.role,

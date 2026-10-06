@@ -994,6 +994,7 @@ object QaLens {
     internal fun refreshInspection(rootView: View? = currentActivityRef?.get()?.window?.decorView) {
         val config = configState.value
         if (!config.enabled) return
+        currentActivity?.let(QaLensInspectionWindows::sync)
         val autoNodes = rootView
             ?.takeIf { config.enableSemanticsReflection }
             ?.let { QaLensActivityInstaller.readVisibleNodes(it) }
@@ -1116,11 +1117,13 @@ object QaLens {
         if (!configState.value.enabled) return
         if (manualNodes[node.id]?.let { it.node == node && it.view.get() === view } == true) return
         manualNodes[node.id] = ManualNode(node, WeakReference(view))
+        QaLensInspectionWindows.rememberManual(node.id, view)
         scheduleInspection()
     }
 
     internal fun unregisterManualNode(id: String) {
         manualNodes.remove(id)
+        QaLensInspectionWindows.forgetManual(id)
         scheduleInspection()
     }
 

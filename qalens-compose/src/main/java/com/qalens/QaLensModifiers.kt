@@ -66,7 +66,7 @@ fun Modifier.qaHiddenFromReports(): Modifier = semantics { qaLensHiddenFromRepor
 
 fun Modifier.qaContentDescription(value: String): Modifier = semantics { contentDescription = value }
 
-/** Include a separate Compose window such as a Dialog or Popup in QaLens inspection. */
+/** Include a separate Compose window on API 23–28. Optional/deduplicated on API 29+ discovery. */
 fun Modifier.qaInspectionRoot(): Modifier = composed {
     val view = LocalView.current
     DisposableEffect(view) {

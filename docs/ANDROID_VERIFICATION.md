@@ -1,5 +1,36 @@
 # Android verification — 2026-10-04
 
+## Compose dialog inspection addendum — 2026-10-06
+
+API 36 `dialogsOnly` passes real unhooked Compose Dialog, nested Material AlertDialog and Popup
+discovery through public `WindowInspector`. It verifies separate root/window IDs, mapped geometry,
+unchanged host size/focus, foreground selection over a smaller background target, All filtering,
+tag copying, SDK mobile selector search (without inspecting its own dialog), exported attributes/
+XPath, actual PC tap/type/scroll, hidden/password filtering and no click on selection. Secure flags
+propagate from the host dialog to the inspection/selector windows and clear after host restoration.
+Two-finger drags scroll the dialog; a stationary two-finger touch never clicks it. Equal-sized empty
+popup containers lose the selection tie to their tagged child. Explicit hooks deduplicate;
+dismissed IDs reject commands, and background/resume/disable cleans up/restores scoped windows.
+
+The fixture decodes a real app-window screenshot during dialog inspection, verifies the extra
+overlay restores while its underlying Activity overlay stays hidden, and finishes a screenshot
+while dismissing the dialog without losing the Activity controls. Synthetic native phone
+screenshots were visually inspected. Activity-only PixelCopy still does not capture separate
+dialog pixels. The raw token/sub-window attachment failure was reproduced and replaced with
+an owned nonfocusable application window; hit-testing's equal-area root tie was reproduced and fixed.
+
+Existing `desktopCaptureOnly` and the full runner pass recording/clip/consent/security/restoration,
+retention/privacy/OSS/data/bridge/RTL/traffic cases alongside the dialog checks. Local gates pass
+240 units (183/37/17/3), Compose/Android/sample lint with zero errors, sample debug/test/release/
+isolation, independent consumer debug/release/isolation, 52 Python tests, six desktop JS suites/
+syntax and web-reader/CLI. Some unchanged Gradle checks were cached. No public/no-op API/dependency
+or `.sal` schema change. [Reproduction](../CONTRIBUTING.md#compose-dialog-inspection).
+
+Automatic discovery requires API 29+; API 23–28 retains explicit roots but was not device-tested
+here. Other Compose runtimes, physical/OEM/custom window layering/multiple displays and live
+desktop visual acceptance remain unverified. Secure propagation occurs at scans, not as a
+synchronous callback for arbitrary host flag mutations. This is not consuming-app ANR/HD certification.
+
 ## Embedded scrcpy addendum — 2026-10-06
 
 The default desktop backend is pinned scrcpy 5.0 H.264/WebCodecs. The prior PNG/adb mirror remains

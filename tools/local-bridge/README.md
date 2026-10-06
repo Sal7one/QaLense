@@ -15,8 +15,14 @@ For integrating the SDK into another app, follow [integration.md](../../integrat
 [AI agent runbook](../../docs/AI_INTEGRATION.md). Pairing and inspection are SDK features; copying
 the sample app or adding the mock backend is unnecessary.
 
-Inspection coverage is visible Compose semantics from attached/registered roots in the foreground Activity.
-Native views, WebViews, arbitrary private state and unregistered windows are outside semantics inspection;
+Inspection coverage is visible Compose semantics from attached roots in the foreground Activity:
+API 29+ automatically discovers its Dialog/AlertDialog/Popup windows; API 23–28 requires
+`qaInspectionRoot` for separate windows. Existing explicit hooks deduplicate. New snapshots include
+`windows` (ephemeral ID, order, kind, app-window bounds) and each node's `windowId`. Mirror inspection
+uses the foremost containing window before choosing its smallest node, including empty-window
+space; older SDKs retain their existing geometry behavior. Search, attributes, tags, XPath and
+supported actions work on dialog nodes. Rebuild/reinstall the host SDK and refresh the desktop.
+Native views, WebViews, arbitrary private state and windows outside that Activity are outside semantics inspection;
 mirror touch input uses scrcpy over adb and can interact with whatever is visible on the whole phone.
 An accepted semantics action is not proof of the resulting app state: refresh/assert its effect.
 
@@ -418,7 +424,7 @@ This trusts the local OS/adb environment; it is not a remotely exposed or multi-
 | `GET /api/recordings/device` | `/v1/recordings`: completed items, `recording`, `saving`, `controls` phase/mode/capabilities |
 | `POST /api/recording` | `/v1/recording`: `{action:"start",video:boolean}`, `{action:"stop"}` or `{action:"clip",seconds:1..300,label?:string}` |
 | `POST /api/screenshot` | `/v1/screenshot`: `{includeOverlay:boolean}` → masked app-window PNG; <=16 MiB, no persisted screenshot |
-| `GET /api/snapshot` | `/v1/snapshot`: forest, viewport, parent IDs, tags, actions |
+| `GET /api/snapshot` | `/v1/snapshot`: forest, viewport, parent IDs, tags, actions, optional `windows`/node `windowId` |
 | `GET /api/selection` | `/v1/selection`: cached selected ID, no Compose walk |
 | `POST /api/selectors` | `/v1/selectors`: `{id}` → suggestions, match counts and redacted QaLens XML |
 | `POST /api/query` | `/v1/query`: `{xpath}` → current visible matches and omission counts |

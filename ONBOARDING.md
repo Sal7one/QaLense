@@ -122,8 +122,9 @@ Add `QaLensRoot { App() }` around the Compose root when useful, keep unique `Mod
 values, and observe the existing controller with `QaLensNavigationObserver` or report routes through
 `QaLens.setScreen`. `QaLensNavHost` is an optional wrapper with a limited signature; keep the
 existing typed-route/transition NavHost when observing. Ordinary Activity Compose
-roots are discovered; register separate Compose Dialog/Popup roots with `qaInspectionRoot` as
-shown in the integration guide. Private application state and arbitrary native/WebView controls
+roots and separate Compose Dialog/AlertDialog/Popup windows are discovered on Android 10/API 29+;
+use `qaInspectionRoot` for separate windows on API 23–28 as shown in the integration guide.
+Active inspection sits above a dialog and two-finger scrolling targets its content. Private application state and arbitrary native/WebView controls
 are not available through Compose semantics.
 
 If Startup was removed, the wrapper now tracks its own Activity and supplies the application

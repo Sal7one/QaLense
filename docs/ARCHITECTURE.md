@@ -34,8 +34,11 @@ analysis; avoid claiming a service-oriented rewrite is complete.
 - Startup installs lifecycle observation once. Host activity resume tracks the activity, attaches
   the overlay and frame observers; internal Control Room/player/projection screens are excluded.
 - `ComposeSemanticsReader` inside `QaLensActivityInstaller.kt` uses public Compose semantics APIs
-  across attached Activity roots and optionally registered Dialog/Popup roots, not the removed
-  private-method reflection path. Root-scoped IDs and mapped window coordinates keep nodes distinct.
+  across attached Activity roots and extra Compose windows. `QaLensInspectionWindows` uses public
+  `WindowInspector` on API 29+; explicit Dialog/Popup hooks cover API 23–28 and deduplicate on newer
+  devices. An owned nonfocusable application window puts active inspection above a dialog, restores the
+  Activity overlay on dismissal and routes two-finger drags into the actual extra-window content.
+  Root-scoped IDs, window membership and mapped coordinates distinguish overlapping windows.
   Legacy config naming (`enableSemanticsReflection`) remains. Route changes clear old nodes;
   coalesced invalidation and polling while Inspect/Tag is open cover semantics-only changes.
   Other Compose versions and physical-device windows still need validation.
