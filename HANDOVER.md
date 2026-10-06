@@ -48,6 +48,31 @@ assuming a named class or public signature is unchanged.
 
 ## Latest local verification
 
+### Mirror startup — 2026-10-06
+
+The user reported a blank mirror for about 15 seconds while using the phone. Cached scrcpy on the
+idle API 36 emulator delivers its first encoded frame in 0.21–0.34 seconds across three direct
+starts; the actual desktop HTTP/SDK path takes 0.20 seconds without phone input. These timings
+measure encoded arrival, not browser display, and do not identify the exact company-host trigger.
+
+The browser previously relied only on `optimizeForLatency`, a decoder hint that does not guarantee
+immediate output. Current `scrcpy-stream.js` flushes the first key once per configuration so an idle
+screen can appear, then re-seeds that same key before deltas because WebCodecs requires a key after
+flush. Duplicate output is closed without repainting. Rotation/Stop/restart guard outstanding flush,
+decoder errors, watchdogs and late reads. An eight-second first-frame watchdog stops a stalled
+browser stream; it starts after setup/phone startup, and also applies to each video size change.
+Landing shows preparation, first-time download, phone startup and first-frame stages, then the
+actual click-to-display elapsed time. This PC/browser change needs a Python restart/page refresh;
+there is no SDK/public facade/no-op/dependency or recording-format change.
+
+Six desktop JS suites pass, including a decoder fixture that holds outputs until flush, subsequent
+delta prediction, idle rotation, pending-flush cancellation, stale read/restart and startup timeout.
+The real HTTP emulator check passes native touch/text/wheel, rotation, linked selection, input
+refusal, Frames/last-ten-second marks/masked screenshots, FFmpeg decode and fresh restart. The
+59 Python tests also pass. HD/build/Kotlin gates are unchanged and were not rerun for this browser
+change. Live WebCodecs rendering/hardware latency remains unverified: the UI tool exposes no usable
+browser. Retest the actual phone/browser; first-time download can legitimately take longer.
+
 ### Phone approval handoff — 2026-10-06
 
 Desktop previously confirmed approval by reading `/v1/recordings`, which calls main-thread recorder

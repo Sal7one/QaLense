@@ -2,6 +2,16 @@
 
 ## Unreleased — post-0.9.0
 
+### Mirror startup — 2026-10-06
+
+- Flush the first video key once per decoder configuration so idle screens need no phone
+  interaction to appear; restore prediction with that same key before subsequent frames.
+- Show mirror preparation, first-time setup and video stages plus click-to-display elapsed time.
+  Stop stalled first-frame decoding after eight seconds of browser streaming, including rotation.
+- Guard pending flush errors, timers and late stream reads across rotation/Stop/restart; close
+  duplicate decoded output without repainting. Add buffered-decoder/race/UI regressions and
+  an idle-screen startup measurement to the real emulator HTTP check.
+
 ### Phone approval handoff — 2026-10-06
 
 - Confirm pairing through bounded authenticated health independent of the host Activity, main

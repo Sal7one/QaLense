@@ -188,8 +188,12 @@ mirroring is separately opt-in, whole-phone, unmasked, memory-only and includes 
 Leaving/hiding Landing stops video; this does not sanitize a downloaded file. The PC uses a pinned
 scrcpy 5.0 server and H.264 WebCodecs (Chrome/Edge); first Start downloads the checksum-verified
 official server. It adds no host dependency or sample-only requirement. Keep the old PNG mirror
-behind its default-off code flag; do not silently downgrade after a video failure. Stream ownership,
-rotation/mode revisions and phone-auth heartbeats guard input. Failed streams need explicit Start;
+behind its default-off code flag; do not silently downgrade after a video failure. Start on an idle
+phone and check the startup stage/actual display time without interacting to unblock it. First-time
+server download is separate from the eight-second browser first-frame watchdog. The PC flushes the
+first decoder key and re-seeds prediction, including rotation; the emulator's fast encoded arrival
+is not browser-rendering evidence. This startup fix only needs Python restart/page refresh.
+Stream ownership, rotation/mode revisions and phone-auth heartbeats guard input. Failed streams need explicit Start;
 SDK Auto reconnect does not repeat host actions. See setup/offline/rollback in the desktop guide.
 See [desktop persistence and limits](../tools/local-bridge/README.md).
 

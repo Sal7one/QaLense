@@ -51,7 +51,7 @@ def run(url, adb, fixture=False, hd=False):
     def shell(*args):
         return subprocess.check_output([adb, '-s', serial, 'shell', *args], timeout=10).decode().strip()
     owned = None; response = None; recording = False
-    stopped = threading.Event(); errors = []; stats = {'frames':0,'sizes':[]}
+    stopped = threading.Event(); errors = []; stats = {'frames':0,'sizes':[], 'firstFrameSeconds':None}
     modes = {'revision':0,'modeEpoch':1}
     def mirror_input(action, **fields):
         return api('mirror/input', {'streamId':owned['streamId'], 'connectionId':connection, **modes, 'action':action, **fields})
@@ -82,6 +82,7 @@ def run(url, adb, fixture=False, hd=False):
                     return bool(current['nodes']) and (not fixture or any(n.get('tag')=='scrcpy.title' for n in current['nodes']))
                 except Exception: return False
             wait('Sample Compose UI did not become ready',ready)
+            started_at=time.monotonic()
             api('inspection',{'enabled':False})
             owned=api('preview',{'enabled':True,'mode':'control','connectionId':connection})
             modes['modeEpoch']=owned['modeEpoch']
@@ -106,7 +107,9 @@ def run(url, adb, fixture=False, hd=False):
                                 assert 0<size<=2*1024*1024
                                 payload=exact(size)
                                 if written+size<8*1024*1024: output.write(payload); output.flush(); written+=size
-                                if not header[0]&64: stats['frames']+=1
+                                if not header[0]&64:
+                                    stats['frames']+=1
+                                    if stats['firstFrameSeconds'] is None: stats['firstFrameSeconds']=time.monotonic()-started_at
                 except Exception as error:
                     if not stopped.is_set(): errors.append(str(error))
             receiver=threading.Thread(target=receive,daemon=True); receiver.start()
@@ -118,6 +121,8 @@ def run(url, adb, fixture=False, hd=False):
             keeper=threading.Thread(target=keep_alive,daemon=True); keeper.start()
             wait('No live H.264 frames',lambda:stats['frames']>3 and bool(stats['sizes']))
             assert not errors,errors
+            if fixture: assert stats['firstFrameSeconds']<5, f"Idle emulator mirror startup took {stats['firstFrameSeconds']:.2f}s"
+            print(f"PASS: idle screen's first encoded HTTP frame in {stats['firstFrameSeconds']:.3f}s without phone input (browser display measured separately)")
             print('PASS: authenticated HTTP video, initial frames and scaled dimensions',stats['sizes'][0])
             if fixture:
                 tap('scrcpy.tap'); wait('Native tap did not change the fixture',lambda:'Taps: 1' in json.dumps(snapshot()))

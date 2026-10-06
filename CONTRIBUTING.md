@@ -101,13 +101,18 @@ it cannot target a physical/customer app. Wait for fixture UI/bridge readiness b
 Omit it for input/Frames/HTTP coverage; without `--fixture`, the tool needs an already approved normal
 sample emulator. It tests real touch/text (fixture), wheel movement, rotation, SDK selection,
 Preview/Inspect input refusal, screenshot/recording coexistence, encoded-video decoding when FFmpeg
-is present and fresh stream restart. Temporary PC media is removed; synthetic phone archives persist.
+is present and fresh stream restart. Before any phone input it reports first encoded HTTP arrival;
+the disposable fixture also requires arrival within five seconds. This is separate from browser
+click-to-display timing. Temporary PC media is removed; synthetic phone archives persist.
 Let the fixture finish: require its `OK: Disposable scrcpy fixture restored` message. It restores
 HD policy/UI/bridge after 1–600 seconds, and is absent from the SDK/release APK.
 
 For manual browser acceptance, use the held fixture with Advanced manual pairing's same **synthetic**
 test token `synthetic-scrcpy-desktop-0123456789`, device port `18766` and intended emulator/package.
-Start mirror; verify moving video, tap counter, actual text field, drag/wheel, focus keys, Back,
+Start mirror with the phone idle: verify startup stages, first-frame appearance without tapping,
+and the reported click-to-display time. First-time download is a separate stage; an eight-second
+browser first-frame stall must stop with an actionable message. Check idle rotation and Stop/restart
+during startup as well. Then verify moving video, tap counter, actual text field, drag/wheel, focus keys, Back,
 letterboxing, resizable panes and portrait/landscape. Inspect/tree selection should highlight/read
 SDK attributes without a host click; Preview blocks input. Return to Control, test Frames/HD with
 normal OS consent, recent clip marks, screenshots and master/clip replay. Stop/restart, hide/leave

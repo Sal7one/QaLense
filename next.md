@@ -3,6 +3,17 @@
 Updated 2026-10-06. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
 
+## Mirror startup — 2026-10-06
+
+- [x] Flush the initial key once per WebCodecs configuration and restore prediction without
+  waiting for phone interaction; guard rotation/Stop/restart/late reads and close duplicate outputs.
+- [x] Show preparation/download/phone/video stages and measured click-to-display time; stop a
+  first-frame stall after eight seconds of browser streaming, including after rotation.
+- [x] Verify buffered static-screen/delta/race behavior in actual desktop JS wiring and the stream
+  controller; measure idle encoded arrival over real adb and desktop HTTP, rerun Python/JS gates.
+- [ ] Retest the reported 15-second delay on the actual browser/phone. The emulator's 0.20-second
+  encoded HTTP arrival does not certify browser display or prove the original host trigger.
+
 ## Phone approval handoff — 2026-10-06
 
 - [x] Separate authenticated connection health from main-thread recorder controls and storage;

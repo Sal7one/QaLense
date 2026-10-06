@@ -12,7 +12,7 @@ let mirrorModeGeneration = 0;
 let lastPreviewRequest = 0, treeRefreshTimer = null;
 let captureChecked = false, captureIssue = '';
 let diagnostics = null;
-let mirrorStream = null;
+let mirrorStream = null, mirrorStartingAt = null;
 const legacyMirror = () => workbench?.mirrorBackend === 'legacy';
 const status = text => { $('status').textContent = text; };
 async function api(path, command, connectionId = workbench?.connectionId) {
@@ -607,6 +607,7 @@ $('mode-inspect').onclick = () => perform(async () => {
   await setMirrorMode(mirrorMode, enabled);
 });
 async function stopPreview() {
+  mirrorStartingAt = null;
   const owned = mirrorStream; mirrorStream = null; liveMirror?.stop();
   previewGeneration++; previewEnabled = false; mirrorPointer = null; mirrorFrame = null; $('preview-toggle').textContent = 'Start mirror';
   $('screen-image').hidden = true; $('screen-image').removeAttribute('src');
@@ -619,20 +620,28 @@ async function stopPreview() {
 }
 $('preview-toggle').onclick = () => perform(async () => {
   if (previewEnabled) { await stopPreview(); return; }
-  await setMirrorMode(mirrorMode, mirrorInspect);
-  if (!legacyMirror() && !liveMirror.supported()) throw Error('Live mirror needs Chrome/Edge or another browser with WebCodecs. Open desktop window is also available.');
-  const connectionId = workbench?.connectionId;
-  if (!legacyMirror() && !workbench.mirrorReady) { status('Setting up the verified scrcpy 5.0 server…'); await api('mirror/setup', {}, connectionId); workbench.mirrorReady = true; }
-  if (connectionId !== workbench?.connectionId || document.hidden || location.hash !== '#landing') throw Error('Mirror start cancelled because the page or phone changed.');
-  const result = await api('preview', {enabled: true, mode: mirrorInspect ? 'inspect' : mirrorMode, connectionId});
-  if (connectionId !== workbench?.connectionId || document.hidden || location.hash !== '#landing') {
-    if (result.streamId) { try { await api('preview', {enabled: false, streamId: result.streamId, connectionId}, connectionId); } catch (_) {} }
-    throw Error('Mirror start cancelled because the page or phone changed.');
+  const starting = message => { $('mirror-state').textContent = message; status(message); };
+  mirrorStartingAt = Date.now();
+  try {
+    if (!legacyMirror() && !liveMirror.supported()) throw Error('Live mirror needs Chrome/Edge or another browser with WebCodecs. Open desktop window is also available.');
+    starting('Preparing phone inspection controls…');
+    await setMirrorMode(mirrorMode, mirrorInspect);
+    const connectionId = workbench?.connectionId;
+    if (!legacyMirror() && !workbench.mirrorReady) { starting('First-time mirror setup: downloading the verified scrcpy 5.0 server…'); await api('mirror/setup', {}, connectionId); workbench.mirrorReady = true; }
+    if (connectionId !== workbench?.connectionId || document.hidden || location.hash !== '#landing') throw Error('Mirror start cancelled because the page or phone changed.');
+    starting('Starting phone video…');
+    const result = await api('preview', {enabled: true, mode: mirrorInspect ? 'inspect' : mirrorMode, connectionId});
+    if (connectionId !== workbench?.connectionId || document.hidden || location.hash !== '#landing') {
+      if (result.streamId) { try { await api('preview', {enabled: false, streamId: result.streamId, connectionId}, connectionId); } catch (_) {} }
+      throw Error('Mirror start cancelled because the page or phone changed.');
+    }
+    previewGeneration++; previewEnabled = true; $('preview-toggle').textContent = 'Stop mirror';
+    if (legacyMirror()) { await previewFrame(); mirrorStartingAt = null; }
+    else { mirrorStream = {...result, connectionId}; await liveMirror.start(result, connectionId); }
+    mirrorUi();
+  } catch (error) {
+    await stopPreview(); $('mirror-state').textContent = error.message; throw error;
   }
-  previewGeneration++; previewEnabled = true; $('preview-toggle').textContent = 'Stop mirror';
-  if (legacyMirror()) await previewFrame();
-  else { mirrorStream = {...result, connectionId}; await liveMirror.start(result, connectionId); }
-  mirrorUi();
 });
 async function previewFrame() {
   if (!legacyMirror()) return;
@@ -702,17 +711,23 @@ const liveMirror = QaLensScrcpy.create({
   canvas: $('screen-video'), api, fetch: (...args) => fetch(...args), session: () => session,
   visible: () => !document.hidden && location.hash === '#landing' && previewEnabled && workbench?.connected,
   canControl: () => !document.hidden && previewEnabled && !mirrorInspect && mirrorMode === 'control' && !busy && workbench?.connected,
+  onStage(message) { if (previewEnabled && !mirrorFrame) { $('mirror-state').textContent = message; status(message); } },
   onFrame(frame) {
     mirrorFrame = frame;
     if (!frame) { mirrorPointer = null; $('phone-canvas').classList.remove('gesturing'); return; }
     $('screen-video').hidden = false; $('screen-image').hidden = true; $('mirror-empty').hidden = true; $('map').hidden = false;
     const note = `${mirrorInspect ? 'Inspect' : mirrorMode === 'control' ? 'Control' : 'Preview'} · scrcpy 5.0 live video · memory only`;
     if ($('mirror-state').textContent !== note) $('mirror-state').textContent = note;
+    if (mirrorStartingAt !== null) { status(`Mirror ready in ${((Date.now() - mirrorStartingAt) / 1000).toFixed(1)} seconds.`); mirrorStartingAt = null; }
   },
   onAlive(state) { if (mirrorFrame && mirrorFrame.revision === state.revision && mirrorFrame.width === state.width && mirrorFrame.height === state.height) { mirrorFrame.at = Date.now(); mirrorFrame.modeEpoch = state.modeEpoch; } },
   onMode(state) { if (mirrorFrame) mirrorFrame.modeEpoch = state.modeEpoch; },
   onHidden: () => { void stopPreview(); },
-  onError(message) { void stopPreview().then(() => { $('mirror-state').textContent = message; status(message); }); }
+  onError(message) {
+    // Report immediately while owned phone cleanup finishes. A delayed Stop response must
+    // never overwrite the ready message of a replacement stream.
+    void stopPreview(); $('mirror-state').textContent = message; status(message);
+  }
 });
 canvas.addEventListener('pointerdown', event => {
   if (event.button !== 0 || busy || mirrorInputBusy || liveSelecting || mirrorPointer || (!mirrorInspect && mirrorMode !== 'control')) return;

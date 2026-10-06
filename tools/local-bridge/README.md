@@ -193,6 +193,14 @@ the tree and detail views keep independent scrolling. No credentials/components 
 only. The default is scrcpy 5.0 H.264 decoded directly into Landing's canvas with browser WebCodecs;
 there is no intermediate PNG/JPEG encoding. Use Chrome/Edge with H.264 WebCodecs support. First Start
 downloads the pinned official server after a SHA-256 check; see [setup](#scrcpy-setup-and-fallback).
+Startup shows preparation, first-time download, phone video and first-frame progress, then the
+measured click-to-display time. You should not need to tap around for an idle screen to appear.
+The browser flushes its first key once, restores prediction and repeats this after rotation;
+WebCodecs' latency option alone is a [hint](https://www.w3.org/TR/webcodecs/#dom-videodecoderconfig-optimizeforlatency).
+If no frame appears within eight seconds of browser streaming, capture stops with a restart
+message. This timeout excludes first-time download/phone startup. Retry explicitly with Start;
+check the displayed stage when diagnosing slow startup. Restart Python and refresh the page
+to load these PC changes; a host rebuild is unnecessary for this startup change alone.
 Leaving Landing, hiding the page, stopping or disconnecting ends the stream. **Control** is the
 default: click to tap, drag to swipe, wheel to scroll and hold to long-press. Type with the mirror
 focused; supported printable text and navigation/editing keys go to Android. Escape sends Phone Back.

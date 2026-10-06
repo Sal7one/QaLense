@@ -52,15 +52,24 @@
   }
   function create(options) {
     const env = options.env || globalThis;
-    let active = null, decoder = null, abort = null, heartbeat = null, pending = 0;
+    let active = null, decoder = null, abort = null, heartbeat = null, firstFrameTimer = null, pending = 0;
     let generation = 0, revision = 0, width = 0, height = 0, csd = null, needKey = true, displayed = null;
     let pipeline = Promise.resolve(), inputQueue = [], sending = false;
     const supported = () => !!env.VideoDecoder && !!env.EncodedVideoChunk;
+    function clearFirstFrameTimer() { if (firstFrameTimer !== null) env.clearTimeout(firstFrameTimer); firstFrameTimer = null; }
+    function waitForFirstFrame(mine, expectedRevision) {
+      clearFirstFrameTimer();
+      firstFrameTimer = env.setTimeout(() => {
+        if (mine !== generation || expectedRevision !== revision || displayed) return;
+        fail(Error('No phone video appeared within 8 seconds. Stop and Start mirror again; check the phone and USB connection if it persists.'), mine);
+      }, 8000);
+    }
     function closeDecoder() { if (decoder) { try { decoder.close(); } catch (_) {} decoder = null; } }
     function stop() {
       generation++; active = null; csd = null; displayed = null; needKey = true; inputQueue = []; options.onFrame?.(null);
       if (abort) abort.abort(); abort = null;
       if (heartbeat) env.clearInterval(heartbeat); heartbeat = null;
+      clearFirstFrameTimer();
       closeDecoder();
       options.canvas?.getContext?.('2d')?.clearRect(0, 0, options.canvas.width, options.canvas.height);
     }
@@ -76,19 +85,25 @@
       if (!support.supported) throw Error('This browser cannot decode the phone video. Use Chrome/Edge or Open desktop window.');
       if (mine !== generation || expectedRevision !== revision) return;
       closeDecoder(); csd = packet.data; needKey = true;
+      let lastTimestamp = null;
       decoder = new env.VideoDecoder({
         output(frame) {
           try {
             if (!active || mine !== generation || expectedRevision !== revision || !options.visible()) return;
+            // The startup key is decoded again after flush to restore prediction state. Its
+            // duplicate output still needs closing, but must not repaint or refresh input age.
+            if (frame.timestamp === lastTimestamp) return;
             const canvas = options.canvas;
             if (frame.displayWidth !== width || frame.displayHeight !== height) throw Error('Phone video dimensions changed without a fresh configuration');
             if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
             canvas.getContext('2d').drawImage(frame, 0, 0, width, height);
+            lastTimestamp = frame.timestamp;
             displayed = {id: active.streamId, connectionId: active.connectionId, width, height, revision, modeEpoch: active.modeEpoch, at: Date.now()};
+            clearFirstFrameTimer();
             options.onFrame?.(displayed);
           } catch (error) { fail(error, mine); }
           finally { frame.close(); }
-        }, error: error => fail(error, mine)
+        }, error: error => { if (expectedRevision === revision) fail(error, mine); }
       });
       decoder.configure(support.config || config);
     }
@@ -96,6 +111,7 @@
       if (!supported()) throw Error('Live mirror needs a browser with WebCodecs, such as Chrome or Edge. Open desktop window is also available.');
       stop(); active = {...state, connectionId}; const mine = generation;
       revision = 0; width = height = 0; pending = 0; pipeline = Promise.resolve();
+      options.onStage?.('Connecting phone video…'); waitForFirstFrame(mine, revision);
       const controller = new env.AbortController(); abort = controller;
       let beatBusy = false;
       heartbeat = env.setInterval(async () => {
@@ -115,9 +131,11 @@
         finally { beatBusy = false; }
       }, 2000);
       const parser = new Packets(packet => {
+        if (!active || mine !== generation) return;
         if (packet.kind === 'size') {
           revision++; width = packet.width; height = packet.height; csd = null; needKey = true;
           closeDecoder(); displayed = null; options.onFrame?.(null);
+          options.onStage?.('Waiting for the first phone frame…'); waitForFirstFrame(mine, revision);
         }
         const expectedRevision = revision;
         if (++pending > 90) throw Error('Browser decoding could not keep up. Restart the mirror.');
@@ -127,12 +145,23 @@
           else if (packet.kind === 'frame' && decoder) {
             if (decoder.decodeQueueSize > 8) throw Error('Browser decoding could not keep up. Restart the mirror.');
             if (needKey && !packet.key) return;
+            const firstKey = needKey, currentDecoder = decoder;
             let data = packet.data;
             if (packet.key && csd) { data = new Uint8Array(csd.length + packet.data.length); data.set(csd); data.set(packet.data, csd.length); }
-            decoder.decode(new env.EncodedVideoChunk({type: packet.key ? 'key' : 'delta', timestamp: packet.timestamp, data}));
+            const chunk = new env.EncodedVideoChunk({type: packet.key ? 'key' : 'delta', timestamp: packet.timestamp, data});
+            if (firstKey) options.onStage?.('Displaying the first phone frame…');
+            currentDecoder.decode(chunk);
             needKey = false;
+            if (firstKey) {
+              // optimizeForLatency is only a hint: a hardware decoder may hold an idle
+              // screen's first key until more inputs arrive. Flush exactly once per codec
+              // configuration, then re-seed with the same key because flush requires a
+              // key before subsequent deltas. Never depend on QA interacting with the app.
+              await currentDecoder.flush();
+              if (mine === generation && expectedRevision === revision && decoder === currentDecoder) currentDecoder.decode(chunk);
+            }
           }
-        }).catch(error => fail(error, mine)).finally(() => { if (mine === generation) pending--; });
+        }).catch(error => { if (expectedRevision === revision) fail(error, mine); }).finally(() => { if (mine === generation) pending--; });
       });
       void (async () => {
         let reader;

@@ -17,10 +17,12 @@ function fixture(live = false) {
   const json = payload => ({ok: true, headers: {get: () => 'frame'}, json: async () => payload, blob: async () => ({}), arrayBuffer: async () => new ArrayBuffer(3)});
   const document = {hidden: false, body: get('body'), getElementById: get, querySelectorAll: () => [], querySelector: get, createElement: make, createElementNS: make, addEventListener() {}};
   class FakeDecoder {
-    constructor(callbacks) { this.callbacks=callbacks; this.decodeQueueSize=0; }
+    constructor(callbacks) { this.callbacks=callbacks; this.decodeQueueSize=0; this.pending=[]; }
     static async isConfigSupported(config) { return {supported:true,config}; }
     configure(config) { this.config=config; }
-    decode() { this.callbacks.output({displayWidth:this.config.codedWidth,displayHeight:this.config.codedHeight,close(){}}); }
+    output(chunk) { this.callbacks.output({timestamp:chunk.timestamp,displayWidth:this.config.codedWidth,displayHeight:this.config.codedHeight,close(){}}); }
+    decode(chunk) { this.pending.push(chunk); if(this.pending.length>1) this.output(this.pending.shift()); }
+    async flush() { while(this.pending.length) this.output(this.pending.shift()); }
     close() {}
   }
   function liveBytes() {
@@ -39,13 +41,14 @@ function fixture(live = false) {
     fetch: async (url, options = {}) => {
       const body = options.body && JSON.parse(options.body); requests.push({url, body, headers: options.headers});
       if (url === '/api/bootstrap') return new Promise(() => {});
-      if (url === '/api/mirror/video') return {ok:true,body:new ReadableStream({start(c){c.enqueue(liveBytes());options.signal.addEventListener('abort',()=>c.error(Object.assign(Error('aborted'),{name:'AbortError'})),{once:true});}})};
+      if (url === '/api/mirror/video') return {ok:true,body:new ReadableStream({start(c){state.videoController=c;c.enqueue(liveBytes());options.signal.addEventListener('abort',()=>c.error(Object.assign(Error('aborted'),{name:'AbortError'})),{once:true});}})};
       if (url === '/api/mirror/input') return state.holdInput || json({ok:true});
       if (url === '/api/mirror/heartbeat') return json({...state.stream,width:100,height:200});
       if (url === '/api/screen') return json({});
       if (url === '/api/input') return state.holdInput ? state.holdInput : json({ok: true});
       if (url === '/api/inspection') { state.controls.inspection = body.enabled; return state.holdInspection || json({ok: true}); }
-      if (url === '/api/preview') { state.stream.modeEpoch++; return json({ok:true,...state.stream}); }
+      if (url === '/api/mirror/setup') return state.holdSetup || json({ok:true});
+      if (url === '/api/preview') { state.stream.modeEpoch++; return !body.enabled && state.holdStop ? state.holdStop : json({ok:true,...state.stream}); }
       if (url === '/api/adb') return json({ok: true, notice: 'Phone Back sent'});
       if (url === '/api/snapshot') return json({connectionId: state.connectionId, viewport: {width: 100, height: 200}, nodes: state.nodes || nodes, windows: state.windows, screen: 'Cart', omittedNodes: 0});
       if (url === '/api/component') return json({document: {hash: 'a'.repeat(64), content: {component: {...nodes[0], attributes: []}, tree: {path: []}}}});
@@ -75,6 +78,51 @@ function fixture(live = false) {
   return {get, context, state, requests, posts, document, event};
 }
 async function run() {
+  {
+    const f=fixture(true); let release;
+    f.state.holdInspection=new Promise(resolve=>{release=resolve;});
+    const starting=f.get('preview-toggle').onclick(); await drain();
+    assert.equal(f.get('mirror-state').textContent,'Preparing phone inspection controls…');
+    assert.equal(f.requests.some(r=>r.url==='/api/preview'),false,'Video must not bypass phone inspection controls');
+    release({ok:true,json:async()=>({ok:true})}); await starting; await drain();
+    assert.equal(f.get('screen-video').hidden,false,'An idle phone must appear through actual app wiring');
+    assert.match(f.get('status').textContent,/Mirror ready in [0-9.]+ seconds/);
+    await vm.runInContext('stopPreview()',f.context);
+  }
+  {
+    const f=fixture(true); let release;
+    vm.runInContext('workbench.mirrorReady=false;',f.context);
+    f.state.holdSetup=new Promise(resolve=>{release=resolve;});
+    const starting=f.get('preview-toggle').onclick(); await drain();
+    assert.match(f.get('mirror-state').textContent,/First-time mirror setup/);
+    assert.equal(f.requests.some(r=>r.url==='/api/preview'),false);
+    release({ok:true,json:async()=>({ok:true})}); await starting; await drain();
+    assert.equal(f.get('screen-video').hidden,false);
+    assert.equal(vm.runInContext('workbench.mirrorReady',f.context),true);
+    await vm.runInContext('stopPreview()',f.context);
+  }
+  {
+    const f=fixture(true);
+    vm.runInContext('workbench.mirrorReady=false;',f.context);
+    f.state.holdSetup=Promise.resolve({ok:false,json:async()=>({error:'Synthetic setup failed'})});
+    await f.get('preview-toggle').onclick(); await drain();
+    assert.equal(vm.runInContext('previewEnabled',f.context),false);
+    assert.equal(f.get('preview-toggle').textContent,'Start mirror');
+    assert.equal(f.get('mirror-state').textContent,'Synthetic setup failed');
+    assert.equal(f.requests.some(r=>r.url==='/api/preview'),false,'Failed setup must not capture phone frames');
+  }
+  {
+    const f=fixture(true); await f.get('preview-toggle').onclick(); await drain();
+    let release; f.state.holdStop=new Promise(resolve=>{release=resolve;});
+    f.state.videoController.enqueue(new Uint8Array(12)); await drain();
+    const error=f.get('mirror-state').textContent;
+    assert.match(error,/video packet/i,'A stream failure must show its error before slow phone cleanup completes');
+    f.state.stream.streamId='replacement'; await f.get('preview-toggle').onclick(); await drain();
+    assert.match(f.get('mirror-state').textContent,/live video/);
+    release({ok:true,json:async()=>({ok:true})}); await drain();
+    assert.match(f.get('mirror-state').textContent,/live video/,'Old cleanup must not overwrite a replacement stream\'s ready status');
+    f.state.holdStop=null; await vm.runInContext('stopPreview()',f.context);
+  }
   {
     const background = {id:'background', windowId:'main', bounds:{left:10,top:15,right:20,bottom:25}};
     const dialog = {id:'dialog', windowId:'front', bounds:{left:0,top:0,right:30,bottom:40}};
