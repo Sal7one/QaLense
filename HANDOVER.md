@@ -94,9 +94,12 @@ narrow rebuild and consumer isolation checks.
 Merged sample and consumer release manifests contain no active QaLens components or debug network
 exception. Build checks are not consuming-host runtime evidence.
 
-The full native SDK runner passes on an owned API 36 emulator: recording retention/storage, Compose
+The earlier full native SDK runner passed on the owned API 36 emulator: recording retention/storage, Compose
 dialog/semantics inspection, bridge privacy/actions/RTL gestures, real Room/DataStore changes, byte
 budget disclosures, Chucker/OSS adapters, SQL/macros/replay/webhook and continuous log/network traffic.
+The final broad rerun is **not green**: after fixing its snapshot-readiness predicate, it stops at
+`LocalBridgeChecks.kt`'s LTR inspector-handle drag assertion with unchanged bounds. That check's cause
+remains unverified; do not present this revision as a complete Android feature certification.
 Focused `insightsOnly` also passes native discovery/consent, saved frame and HD still preparation,
 both targets/runtime, actual HTTP cancellation/recovery, background/resume and precise citation
 seeking. Synthetic phone setup/report screenshots were inspected. See

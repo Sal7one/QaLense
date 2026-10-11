@@ -17,9 +17,11 @@ baselines and project context. Older changelog entries are historical, not uncom
   preserve capture consent, host network policy, production/no-op isolation and existing mirroring.
 - [x] Document model setup, privacy/context limits, cached host-player telemetry and AI-agent
   integration. Add synthetic archive/provider and cross-surface HTTP regression fixtures to CI.
-- [x] Pass Kotlin/build/lint/release-isolation gates, Python/JS/HTTP regressions and the full API 36
-  SDK runner. Execute native Insights text/still/HD/runtime/consent/cancel/resume/seek checks and
+- [x] Pass Kotlin/build/lint/release-isolation gates and Python/JS/HTTP regressions. Execute native
+  Insights text/still/HD/runtime/consent/cancel/resume/seek checks and actual phone-to-PC handoff;
   inspect synthetic setup/report screenshots; record the evidence and remaining limits in HANDOVER.
+- [ ] Diagnose the final broad API 36 runner's inspector-handle drag assertion, then repeat that
+  SDK runner. Earlier full coverage passed; the final rerun's unchanged LTR dock bounds need investigation.
 - [ ] Evaluate actual installed chat/vision models against known causes, ambiguous symptoms,
   missing/contradictory evidence and smaller context budgets. Fixtures are not reasoning evaluations.
 - [ ] Complete live browser layout/media/keyboard/accessibility acceptance for standalone and

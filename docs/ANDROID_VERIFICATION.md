@@ -11,11 +11,14 @@ Both merged release manifests
 have no active QaLens components or debug HTTP exception. The optional replay INTERNET permission
 does not override a consuming host's network-security policy. No API 23 device run is claimed.
 
-The full SDK runner passes on the owned **API 36** emulator with continuous retained network/log
+The earlier full SDK runner passed on the owned **API 36** emulator with continuous retained network/log
 traffic, durable/shareable archives and migration, Compose dialogs/hidden nodes/semantics updates,
 bridge authentication/actions/privacy/shutdown and LTR/RTL gestures, real Room/DataStore state,
 byte-budget disclosures, Chucker/adapters/crash capture, SQL/macros/replay/webhook retry and privacy/
-disable/resume. The previously running unrelated emulator was left untouched.
+disable/resume. The previously running unrelated emulator was left untouched. The final broad rerun
+is not green: the snapshot readiness check now retries valid transient 503/504 responses, but the
+runner stops at the LTR inspector-handle drag assertion (`LocalBridgeChecks.kt`, unchanged bounds).
+Its cause is unverified. The final focused Insights/actual PC handoff below passes independently.
 
 Focused `insightsOnly` additionally passes actual phone UI → saved archive → local HTTP provider
 → report → playback seeking. It verifies chat discovery/embedding exclusion without evidence upload,
