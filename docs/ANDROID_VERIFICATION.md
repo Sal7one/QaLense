@@ -1,4 +1,51 @@
-# Android verification — 2026-10-04
+# Android verification
+
+## Lens 2.0 addendum — 2026-10-11
+
+The branch's local gates pass **259 Kotlin units**: 185 core, 40 Compose, 31 replay and 3 no-op.
+Compose, Android, navigation, replay and sample debug lint pass with zero errors. Sample debug/test/
+release APKs and release isolation pass; the independent coordinate-based consumer passes debug/
+release/isolation and a separate Foundation 1.8.2 debug/test build. Final saved-image transfer metadata
+validation and native readiness changes pass the narrow build/unit/lint and consumer rebuild.
+Both merged release manifests
+have no active QaLens components or debug HTTP exception. The optional replay INTERNET permission
+does not override a consuming host's network-security policy. No API 23 device run is claimed.
+
+The full SDK runner passes on the owned **API 36** emulator with continuous retained network/log
+traffic, durable/shareable archives and migration, Compose dialogs/hidden nodes/semantics updates,
+bridge authentication/actions/privacy/shutdown and LTR/RTL gestures, real Room/DataStore state,
+byte-budget disclosures, Chucker/adapters/crash capture, SQL/macros/replay/webhook retry and privacy/
+disable/resume. The previously running unrelated emulator was left untouched.
+
+Focused `insightsOnly` additionally passes actual phone UI → saved archive → local HTTP provider
+→ report → playback seeking. It verifies chat discovery/embedding exclusion without evidence upload,
+text-only disclosure/consent, original network/log/state/connectivity IDs, one opted-in saved frame,
+saved-HD still extraction/approximate-time disclosure, separate current-player runtime and its
+nonseek citation, question/focus/target invalidation, HOME/resume without automatic analysis, a real
+in-flight slow-request Cancel and subsequent successful analysis. Image and network citations seek
+to 52.000 and 50.200 seconds respectively. Both pre-analysis and final report screenshots were
+inspected; they are private synthetic artifacts, not committed. Early fixture attempts failed due
+to native label ownership/offscreen accessibility handling; the corrected harness searches and
+scrolls using native accessibility actions. Only the final complete `OK:` run counts as passing.
+
+The final native fixture also checks tester Expected/Actual invalidation, captured QA steps, Markdown/
+JSON copying, reportless and completed-report Send to PC, saved-still transfer, wrong authentication,
+the nonexported receiver, invalid envelopes, acknowledgement, four-entry overflow and stop cleanup.
+An actual native → owned adb forward → Python HTTP run passes receive/ack, explicit private save,
+hash dedup/reopen and PC model reanalysis with the transferred saved HD still. The image-size metadata
+rejection found during this check is fixed and covered by a JVM regression and the passing device run.
+
+Replay units cover bounded cross-source selection during error-log floods, original IDs and strict
+windows, nested shortening without invented error values, duplicate-source handling, endpoint/model/
+report validation, redaction, current-player provenance and saved-image consent/coverage. These are
+separate from native UI/HTTP checks and from an actual model's reasoning or pixel interpretation.
+
+The synthetic local provider is a controlled fixture, **not an LLM/VLM**. The installed compatible
+server exposes only an embedding model and Ollama has no model weights; actual inference quality
+remains unverified. Physical/OEM/company-host playback/capture, browser rendering/accessibility,
+other Compose runtimes and the original consuming-app ANR/HD failures still need separate acceptance.
+See [Lens 2.0 setup](LENS_2.md), [focused commands](../CONTRIBUTING.md#local-model-insights-checks)
+and [current backlog](../next.md).
 
 ## Phone approval handoff addendum — 2026-10-06
 

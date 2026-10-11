@@ -182,7 +182,7 @@ private fun PlayerRoot(initialUri: Uri?) {
 }
 
 private enum class Track(val label: String) {
-    SUMMARY("Summary"), TIMELINE("Timeline"), NETWORK("Network"), LOGS("Logs"), STATE("State")
+    SUMMARY("Summary"), TIMELINE("Timeline"), NETWORK("Network"), LOGS("Logs"), STATE("State"), INSIGHTS("Insights")
 }
 
 private fun scoreColor(score: Int): Color = when {
@@ -208,6 +208,7 @@ private fun PlayerScreen(session: PlayerSession, onClose: () -> Unit) {
     var videoError by remember { mutableStateOf<String?>(null) }
     var fullscreen by remember { mutableStateOf(false) }
     var track by remember { mutableStateOf(Track.TIMELINE) }
+    val insights = remember(session) { InsightsUiState() }
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val timelineList = rememberLazyListState()
@@ -327,6 +328,40 @@ private fun PlayerScreen(session: PlayerSession, onClose: () -> Unit) {
     } }
     val videoWindow = clock.videoWindow(videoDuration)
 
+    BackHandler(enabled = track == Track.INSIGHTS && !fullscreen) { track = Track.TIMELINE }
+    if (track == Track.INSIGHTS && !fullscreen) {
+        val runtime = remember(session, playhead, insights.runtimeRevision) {
+            InsightsRuntime(System.currentTimeMillis(), playhead - session.startMs, linkedMapOf(
+                "mediaKind" to when { session.videoFile != null -> "video"; session.frames.isNotEmpty() -> "frames"; else -> "none" },
+                "playing" to playing, "scrubbing" to scrubbing, "followEvents" to followEvents,
+                "videoPositionMs" to exo?.currentPosition, "videoDurationMs" to videoDuration,
+                "videoStartMs" to session.videoStartMs?.minus(session.startMs),
+                "videoWindowStartMs" to videoWindow?.startMs?.minus(session.startMs),
+                "videoWindowEndMs" to videoWindow?.endMs?.minus(session.startMs),
+                "decoderPlaybackState" to exo?.playbackState, "decoderPlaying" to exo?.isPlaying,
+                "buffering" to videoBuffering, "lastPlayerError" to videoError,
+                "savedFrameCount" to session.frames.size,
+                "currentSavedFrameMs" to session.frameAt(playhead)?.ts?.minus(session.startMs),
+                "recordingWarnings" to session.recordingWarnings.take(5).joinToString(" ").take(600)
+            ))
+        }
+        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).padding(12.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("‹ Recording", color = Accent, fontSize = 13.sp,
+                    modifier = Modifier.clickable(role = Role.Button) { track = Track.TIMELINE }.padding(vertical = 8.dp))
+                Spacer(Modifier.weight(1f))
+                Text(session.appLabel, color = Muted, fontSize = 11.sp, maxLines = 1,
+                    modifier = Modifier.weight(2f), overflow = TextOverflow.Ellipsis)
+            }
+            Box(Modifier.weight(1f)) {
+                InsightsPane(session, playhead - session.startMs, runtime, insights) { relative ->
+                    seekTo(session.startMs + relative); track = Track.TIMELINE
+                }
+            }
+        }
+        return
+    }
+
     if (fullscreen) {
         // ── Theatre mode: media fills the screen; slim transport overlaid at the bottom ──
         Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -381,6 +416,10 @@ private fun PlayerScreen(session: PlayerSession, onClose: () -> Unit) {
             }
             Text("${fmtFine(playhead - session.startMs)} / ${fmt(session.durationMs)}", color = Muted, fontSize = 11.sp,
                 modifier = Modifier.semantics { contentDescription = "Playback time" })
+            Text("Insights", color = Accent, fontSize = 12.sp,
+                modifier = Modifier.clickable(role = Role.Button) {
+                    playing = false; exo?.pause(); track = Track.INSIGHTS
+                }.padding(start = 8.dp, top = 8.dp, bottom = 8.dp))
         }
 
         Spacer(Modifier.height(8.dp))
@@ -442,7 +481,10 @@ private fun PlayerScreen(session: PlayerSession, onClose: () -> Unit) {
                 Text(t.label, color = if (active) Accent else Muted,
                     fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal, fontSize = 12.sp,
                     modifier = Modifier.semantics { selected = active }
-                        .clickable(role = Role.Tab) { track = t; followEvents = true }
+                        .clickable(role = Role.Tab) {
+                            if (t == Track.INSIGHTS) { playing = false; exo?.pause() }
+                            track = t; followEvents = true
+                        }
                         .padding(horizontal = 8.dp, vertical = 4.dp))
             }
         }

@@ -1,6 +1,6 @@
 # QaLens onboarding
 
-Updated 2026-10-05. This guide is for QA testers, Android integrators and engineers evaluating
+Updated 2026-10-11. This guide is for QA testers, Android integrators and engineers evaluating
 QaLens for a team. It explains the Android SDK, browser players, Python desktop and local test
 backend, then walks through capture, inspection, replay and sharing. Start with synthetic data.
 
@@ -13,6 +13,7 @@ analysis services; the included backend is a local development mock.
 | Your goal | Start here | Android needed |
 |---|---|---|
 | Explore a recording and try sending it | Web demo below | No |
+| Investigate a bug with a local model | [Lens 2.0 workflow](docs/LENS_2.md) | No for web/desktop saved files |
 | Replay files and manage a QA phone from one window | Python desktop below | Only for phone tools |
 | Add QaLens to your app | SDK setup below, then [integration](integration.md) | Yes |
 | Have an AI agent integrate into an existing app | [AI integration runbook](docs/AI_INTEGRATION.md), [consumer example](integration-tests/consumer/README.md) | For runtime acceptance |
@@ -20,12 +21,12 @@ analysis services; the included backend is a local development mock.
 | Change the project | [HANDOVER.md](HANDOVER.md), [CONTRIBUTING.md](CONTRIBUTING.md), [next.md](next.md) | Depends on the change |
 
 Use commands from the repository root unless a step says otherwise. The current development work
-is on `dev`; pin an evaluated commit or an internal artifact version for repeatable team builds.
+is on `lens-2.0`, based on the latest `dev`; pin an evaluated commit or an internal artifact version for repeatable team builds.
 No Maven Central publication is claimed. The default local coordinates are version `0.9.0`;
 that version alone does not identify which Git commit a team published internally.
 
 ```sh
-git clone --branch dev https://github.com/Sal7one/QaLense.git
+git clone --branch lens-2.0 https://github.com/Sal7one/QaLense.git
 cd QaLense
 ```
 
@@ -34,17 +35,36 @@ cd QaLense
 | Part | What you get | Source |
 |---|---|---|
 | Active Android SDK | QA bubble, tester actions, Control Room, Compose inspection, diagnostics, capture and upload | `qalens-compose/`, supported by `qalens-core/` and `qalens-android/` |
-| Optional Android integrations | Navigation Compose route reporting and an on-device archive player | `qalens-navigation-compose/`, `qalens-replay/` |
+| Optional Android integrations | Navigation Compose route reporting and an on-device archive player with local-model Insights | `qalens-navigation-compose/`, `qalens-replay/` |
 | Release SDK | Matching public entry points with capture and UI disabled | `qalens-noop/` |
 | Sample app | Synthetic banking flows, OSS examples and device regression fixtures | `sample-app/` |
-| Web app | Modern/classic replay, comparison, reports, explicit backend send; classic configuration editor | `web/` |
-| Python desktop | Browser GUI with onboarding, pairing, components, recording library, adb tools and processors | `tools/local-bridge/` |
+| Web app | Modern/classic replay, comparison, reports, explicit backend send; modern local-model Insights, classic configuration editor | `web/` |
+| Python desktop | Browser GUI with onboarding, pairing, components, recording library, adb tools, processors and shared web investigation | `tools/local-bridge/` |
 | Python test backend | Upload/chunk endpoints, local dashboard and deterministic verdicts | `backend/` |
 | Node CLI | Reports and comparisons for scripts or CI | `web/tools/sal_report.js` |
 
 The Python desktop serves the existing web viewer files directly. There is one replay reader and
 no copied viewer implementation in the Python directory. Its GUI opens in your browser; it is not
 a native desktop application. The Python backend is a separate process with a different purpose.
+
+## Investigate a recorded bug
+
+Open a `.sal`, pause at the symptom and choose **Insights**. Enter an Ollama or OpenAI-compatible
+local model URL, discover an installed chat model, choose **Recorded app** or **QaLens player** and
+review the selected evidence before Analyze.
+Enter tester **Expected result** and **Actual result** when known. The QA report includes captured
+action context and a readable Markdown copy; missing expectations/actions are disclosed.
+The result links observations and possible causes to captured moments and lists missing evidence
+and suggested checks. The Python desktop uses the existing modern player and a local authenticated
+model service; a phone connection is unnecessary for already saved files.
+The phone player's **Send to PC** hands off selected evidence and an existing report through an
+approved connection. On Landing, open **Phone investigations** to review or analyze; receiving
+does not run a model or save the case automatically.
+
+One reviewed recorded still is optional for a vision model. Audio/full video are not sent. Missing
+logs or a plausible model explanation cannot establish what caused a bug. Model weights are not
+downloaded for you. Phone addresses/network policy, web CORS, captured data/omissions and useful
+video-player hooks are explained in [Lens 2.0](docs/LENS_2.md).
 
 ## Try the web demo
 

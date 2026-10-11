@@ -21,6 +21,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from workbench import Workbench, MAX_DOCUMENT, StorageUnavailable
 from desktop import WEB_ROOT, WEB_ASSETS, MAX_TRANSFER, png_size, native_scrcpy
 import scrcpy_mirror
+import insights
+import investigations
 from mirror_flags import ENABLE_LEGACY_MIRROR
 from urllib.parse import urlsplit, parse_qs
 import mimetypes
@@ -35,12 +37,20 @@ MAX_RESPONSE = 4 * 1024 * 1024
 class BridgeServer(ThreadingHTTPServer):
     daemon_threads = True
     def __init__(self, address, device_port, token, workbench=None):
+        # TCPServer calls server_close itself if bind fails, before construction completes.
+        self.insights = None
         super().__init__(address, Handler)
         self.device_port = device_port
         self.token = token
         self.workbench = workbench
+        self.insights = insights.Service() if workbench else None
         if workbench and token:
             workbench.phase = "connected"; workbench.approved = True
+
+    def server_close(self):
+        if self.insights:
+            self.insights.close()
+        super().server_close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -92,6 +102,7 @@ class Handler(BaseHTTPRequestHandler):
         assets["/mirror-controls.js"] = ("mirror-controls.js", "text/javascript; charset=utf-8")
         assets["/diagnostics.js"] = ("diagnostics.js", "text/javascript; charset=utf-8")
         assets["/scrcpy-stream.js"] = ("scrcpy-stream.js", "text/javascript; charset=utf-8")
+        assets["/investigation-inbox.js"] = ("investigation-inbox.js", "text/javascript; charset=utf-8")
         if self.command == "GET" and self.path in assets:
             name, mime = assets[self.path]
             return self.reply(200, Path(__file__).with_name(name).read_bytes(), mime)
@@ -103,12 +114,22 @@ class Handler(BaseHTTPRequestHandler):
         endpoints.update({(method, f"/api/{name}"): f"/v1/{name}" for method in ("GET", "POST") for name in ("data", "sql")})
         route = endpoints.get((self.command, self.path))
         binary = parsed.path == "/api/recordings/file"
-        if not route and not (bench and (self.path in WORKBENCH_ROUTES or binary)):
+        insight_route = bench and parsed.path in INSIGHT_ROUTES
+        investigation_route = bench and parsed.path in INVESTIGATION_ROUTES
+        if not route and not (bench and (self.path in WORKBENCH_ROUTES or binary or insight_route or investigation_route)):
             return self.reply(404, {"ok": False, "error": "Unknown endpoint"})
         desktop = bench and hmac.compare_digest(self.headers.get("X-Qalens-Session", "").encode(), bench.session.encode())
         device = self.server.token and hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode())
         if not (desktop or device):
             return self.reply(401, {"ok": False, "error": "Reload the desktop page to renew its session. Scripts require a valid pairing token."})
+        if insight_route and not desktop:
+            return self.reply(401, {"ok": False, "error": "Open the desktop page to analyze evidence with a local model"})
+        if insight_route and (self.command, parsed.path) not in INSIGHT_METHODS:
+            return self.reply(405, {"ok": False, "error": "Use the documented insight endpoint method"})
+        if investigation_route and not desktop:
+            return self.reply(401, {"ok": False, "error": "Open the desktop page to receive or save an investigation"})
+        if investigation_route and (self.command, parsed.path) not in INVESTIGATION_METHODS:
+            return self.reply(405, {"ok": False, "error": "Use the documented investigation endpoint method"})
         if (self.path.startswith("/api/mirror/") or (not ENABLE_LEGACY_MIRROR and self.path == "/api/preview")) and not desktop:
             return self.reply(401, {"ok": False, "error": "Open the desktop page to use the mirror"})
         if self.path == "/api/mirror/video" and self.command == "GET" and bench:
@@ -159,7 +180,7 @@ class Handler(BaseHTTPRequestHandler):
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             return self.reply(400, {"ok": False, "error": "Invalid content length"})
-        limit = MAX_TRANSFER if self.path == "/api/file/push" else MAX_DOCUMENT + 4096 if self.path == "/api/import" else MAX_BODY
+        limit = MAX_TRANSFER if self.path == "/api/file/push" else MAX_DOCUMENT + 4096 if self.path == "/api/import" else insights.MAX_BODY if parsed.path == "/api/insights/analyze" else MAX_BODY
         if not 0 <= size <= limit:
             return self.reply(413, {"ok": False, "error": "Command too large"})
         if self.path == "/api/file/push" and self.command == "POST" and bench:
@@ -180,6 +201,20 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TimeoutError, RecursionError):
                 return self.reply(400, {"ok": False, "error": "Invalid command JSON"})
         try:
+            if investigation_route:
+                return self.investigations_request(parsed, json.loads(body) if body else {})
+            if insight_route:
+                value = json.loads(body) if body else {}
+                if parsed.path == "/api/insights/models":
+                    return self.reply(200, self.server.insights.models(value.get("config")))
+                if parsed.path == "/api/insights/analyze":
+                    return self.reply(200, self.server.insights.submit(value.get("config"), value.get("bundle"), value.get("includeImage") is True))
+                if parsed.path == "/api/insights/cancel":
+                    return self.reply(200, self.server.insights.cancel(value.get("id")))
+                ident = parse_qs(parsed.query).get("id", [""])
+                if len(ident) != 1:
+                    raise ValueError("Choose one insight job")
+                return self.reply(200, self.server.insights.get(ident[0]))
             if bench and self.path in WORKBENCH_ROUTES:
                 return self.reply(200, self.workbench_request(json.loads(body) if body else {}))
             if not self.server.token or not self.server.device_port:
@@ -217,22 +252,101 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, TimeoutError):
             return self.reply(500, {"ok": False, "error": "Local storage unavailable; nothing was confirmed saved"})
 
-    def proxy(self, route, body, method):
-        headers = {"Authorization": f"Bearer {self.server.token}", "Content-Type": "application/json"}
-        request = Request(f"http://127.0.0.1:{self.server.device_port}{route}", data=body, headers=headers, method=method)
+    def proxy(self, route, body, method, phone=None, strict=False, response_limit=MAX_RESPONSE):
+        device_port, token = phone if phone else (self.server.device_port, self.server.token)
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        request = Request(f"http://127.0.0.1:{device_port}{route}", data=body, headers=headers, method=method)
         try:
             try: response = urlopen(request, timeout=5)
             except HTTPError as error: response = error
             with response:
-                data = response.read(MAX_RESPONSE + 1)
-                if len(data) > MAX_RESPONSE: raise ValueError("Device response exceeds limit")
+                data = response.read(response_limit + 1)
+                if len(data) > response_limit: raise ValueError("Device response exceeds limit")
                 declared = response.headers.get("Content-Length")
                 if declared is not None and int(declared) != len(data): raise ValueError("Device response interrupted")
-                payload = json.loads(data)
+                payload = insights._parse_json(data) if strict else json.loads(data)
                 if not isinstance(payload, dict): raise ValueError("Invalid device response")
                 return response.code, payload
-        except (URLError, TimeoutError, ConnectionError, ValueError, IncompleteRead):
+        except (URLError, TimeoutError, ConnectionError, ValueError, IncompleteRead, RecursionError):
             return 502, {"ok": False, "error": "Phone unavailable. Check USB and return to the app. UI actions are never retried automatically."}
+
+    def investigations_request(self, parsed, body):
+        bench = self.server.workbench
+        store = bench.investigations
+        # Every local lookup also discards obsolete unsaved phone cases; saved documents are independent.
+        with bench.lock:
+            store.bind(bench.connection_id)
+        if parsed.path == "/api/investigations/previews":
+            return self.reply(200, store.previews())
+        if parsed.path == "/api/investigations/saved":
+            return self.reply(200, store.saved())
+        if parsed.path == "/api/investigations/save":
+            return self.reply(200, store.save(body.get("hash")))
+        if parsed.path == "/api/investigations/document":
+            digests = parse_qs(parsed.query).get("hash", [""])
+            if len(digests) != 1:
+                raise ValueError("Choose one investigation hash.")
+            return self.reply(200, store.document(digests[0]))
+        if not store.receive_lock.acquire(blocking=False):
+            return self.reply(409, {"ok": False, "error": "Investigation reception is already running; wait for it to finish."})
+        try:
+            with bench.lock:
+                identity = bench.connection_id
+                if self.headers.get("X-Qalens-Connection") != identity:
+                    return self.reply(409, {"ok": False, "error": "Device connection changed; refresh before receiving cases."})
+                phone = (self.server.device_port, self.server.token)
+                if not phone[0] or not phone[1] or not (bench.approved or bench.connection is None):
+                    return self.reply(503, {"ok": False, "error": "Connect and approve your phone before receiving investigations."})
+            # A slow inbox read never blocks device switching or another independent model request.
+            code, payload = self.proxy("/v1/investigations/inbox", None, "GET", phone=phone, strict=True)
+            if code != 200 or payload.get("ok") is not True:
+                return self.reply(502, {"ok": False, "error": "Phone investigation inbox is unavailable. Check approval and update its QaLens SDK."})
+            transfers, dropped = investigations.validate_inbox(payload)
+            prepared, invalid = [], 0
+            for transfer in transfers:
+                ident = transfer.get("id") if isinstance(transfer, dict) else None
+                if not isinstance(ident, str) or not investigations.TRANSFER_ID.fullmatch(ident):
+                    invalid += 1
+                    continue
+                try:
+                    digest, document, size = investigations.validate_document(transfer.get("document"))
+                    prepared.append((ident, digest, document, size))
+                except (ValueError, TypeError, RecursionError):
+                    invalid += 1
+            with bench.lock:
+                if identity != bench.connection_id or phone != (self.server.device_port, self.server.token):
+                    return self.reply(409, {"ok": False, "error": "Phone changed during reception; no stale cases were accepted or acknowledged."})
+                ids, received, duplicates, blocked = [], 0, 0, 0
+                for ident, digest, document, size in prepared:
+                    try:
+                        outcome = store.accept(digest, document, size)
+                    except (ValueError, OSError):
+                        invalid += 1
+                        continue
+                    if outcome == "blocked":
+                        blocked += 1
+                        continue
+                    ids.append(ident)
+                    if outcome == "duplicate": duplicates += 1
+                    else: received += 1
+                # Serialize the small acknowledgement with identity switching: it cannot acknowledge a new phone.
+                acknowledged = True
+                if ids:
+                    ack_code, ack = self.proxy("/v1/investigations/ack", json.dumps({"ids": ids}).encode(), "POST",
+                                               phone=phone, strict=True, response_limit=MAX_BODY)
+                    acknowledged = ack_code == 200 and ack.get("ok") is True
+                result = {**store.previews(), "connectionId": identity, "received": received,
+                          "duplicates": duplicates, "invalid": invalid, "blocked": blocked, "dropped": dropped,
+                          "acknowledged": acknowledged, "acknowledgedCount": len(ids) if acknowledged else 0}
+            if blocked:
+                result["notice"] = "Save a received case to make room. Overflow cases remain on the phone."
+            elif invalid:
+                result["notice"] = "Some investigations were invalid and remain unacknowledged on the phone."
+            elif not acknowledged:
+                result["notice"] = "Received cases are held in PC memory; phone acknowledgement failed. A refresh is safe."
+            return self.reply(200, result)
+        finally:
+            store.receive_lock.release()
 
     @staticmethod
     def stream_packets(first, packets):
@@ -320,6 +434,15 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/run": return {"ok": True, "job": bench.run_pipeline(body.get("pipeline"), body.get("hash"))}
         raise ValueError("Unknown operation")
 
+
+INSIGHT_METHODS = {("POST", "/api/insights/models"), ("POST", "/api/insights/analyze"),
+                   ("GET", "/api/insights/jobs"), ("POST", "/api/insights/cancel")}
+INSIGHT_ROUTES = {path for _, path in INSIGHT_METHODS}
+
+INVESTIGATION_METHODS = {("GET", "/api/investigations/inbox"), ("GET", "/api/investigations/previews"),
+                         ("POST", "/api/investigations/save"), ("GET", "/api/investigations/saved"),
+                         ("GET", "/api/investigations/document")}
+INVESTIGATION_ROUTES = {path for _, path in INVESTIGATION_METHODS}
 
 WORKBENCH_ROUTES = {"/api/workbench", "/api/saved", "/api/previews", "/api/devices", "/api/packages",
                     "/api/mirror/setup", "/api/mirror/video", "/api/mirror/heartbeat", "/api/mirror/input",

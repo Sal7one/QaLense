@@ -1,6 +1,6 @@
 # QaLens engineering handover
 
-Updated 2026-10-06. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
+Updated 2026-10-11. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
 the user/integrator overview; [AI integration](docs/AI_INTEGRATION.md) is the host-agent work order;
 [next.md](next.md) is the only current backlog;
 [CONTRIBUTING.md](CONTRIBUTING.md) owns portable build/device commands. This handover records
@@ -16,9 +16,11 @@ Control Room, Compose inspection, observed network/log/data/crash evidence, scre
 and portable `.sal` recordings. Android and web players replay files; a Node CLI reports/compares.
 
 The Python desktop combines existing web replay with adb pairing, a component workbench, saved
-files, trusted processing pipelines and optional phone tools. The separate Python backend is an
-unauthenticated loopback upload mock with deterministic verdicts. No hosted AI, multi-tenant
-company service, Maven Central publication or iOS capture is claimed.
+files, trusted processing pipelines and optional phone tools. On `lens-2.0`, Android and shared
+web/desktop replay add explicit local-model investigation for recorded-app bugs and current QaLens
+player problems. See [Lens 2.0](docs/LENS_2.md) for setup, evidence boundaries and agent contracts.
+The separate Python backend remains an unauthenticated loopback upload mock with deterministic
+verdicts. No hosted AI, multi-tenant company service, Maven Central publication or iOS capture is claimed.
 
 The user wants a free, professional tool that companies can integrate easily. Prioritize host-app
 reliability, clear tester controls, honest evidence coverage and supported OSS contracts. The user
@@ -39,6 +41,9 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 | Optional Android tools | `qalens-navigation-compose/`, `qalens-replay/` |
 | Production API mirror | `qalens-noop/`, `NoopParityCheck`; independent `integration-tests/consumer/` |
 | Browser/CLI | `web/app-v2.js`, `web/app.js`, shared `web/sal.js`, `web/tools/sal_report.js` |
+| Local investigation | `qalens-replay/.../InsightsPane.kt`, `InsightsEvidence.kt`, `InsightsQaReport.kt`, `LocalModelClient.kt`; shared `web/insights.js`, `insights-ui.js`, `recording-still.js`; `tools/local-bridge/insights.py` |
+| Investigation handoff | Private `QaLensInvestigationReceiver`, `QaLensBridgeInvestigations`; replay `PcInvestigationSender`; desktop `investigations.py`, `investigation-inbox.js` |
+| Investigation contracts/fixtures | `docs/insights-evidence.schema.json`, `docs/insights-report.schema.json`, `docs/insights-transfer.schema.json`, `tools/insights-tests/` |
 | Desktop/automation | `tools/local-bridge/server.py`, `workbench.py`, `desktop.py`, `scrcpy_mirror.py`, `scrcpy-stream.js`, `diagnostics.js`, `process.py`, `recording-transfer.js` |
 | Upload test service | `backend/server.py`, `backend/tests/test_backend.py` |
 | Executed device fixtures | `sample-app/src/androidTest/.../RecordingRetentionInstrumentation.kt` and focused checks |
@@ -47,6 +52,72 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Lens 2.0 local-model investigation — 2026-10-11
+
+`lens-2.0` starts from fetched `origin/dev` at `22ae84d7a6c2217c06fa5c246b69fa2985aed961`.
+Android saved replay and the shared modern web/embedded desktop player now investigate either the
+recorded app or current QaLens replay state. OpenAI-compatible local URLs are preferred; Ollama is
+also supported. The Python model service requires the desktop session and does not require phone
+pairing. No public SDK facade, active/no-op dependency selection or `.sal` format changes are needed.
+
+Analysis submits the exact reviewed bounded bundle, not a fresh reconstruction at Analyze. Changing
+the question, model settings, target or window revokes consent/results. Original source-array IDs,
+strict window timestamps, preceding state/connectivity and cross-source reserves survive error-log
+floods. Nested detail limits disclose shortening and retain essential actual scalar/null values;
+truncation markers must never become an HTTP error. Reports require the shared shape; unknown
+citations are removed, unsupported hypotheses are downgraded and model text is rendered without
+execution. Current-player runtime has separate observation time/provenance; its citation displays
+the snapshot rather than seeking to a fictitious captured host event.
+
+One optional reviewed saved frame/HD still is separately consented and bounded. Image preparation,
+archive/evidence work and model HTTP run off the Android main thread. Images retain their actual
+saved clock, with approximate video extraction disclosed; HD pixels are unmasked. Navigation,
+backgrounding, explicit Cancel, deadlines and generation guards discard stale work. Local endpoints
+accept only supported private/loopback literals or pinned localhost, with no redirects/proxies or
+TLS bypass. Keys and analysis payloads are not persisted by the service. Host Android network policy
+still applies; only the sample's debug manifest supplies its existing scoped HTTP exception.
+
+QA reports derive captured steps from selected timeline actions/navigation/screens and preserve
+tester expected/actual wording separately from model interpretations. Unknown expected behavior
+is left missing; captured host actions never become current-player reproduction steps. Explicit
+Send to PC queues the exact reviewed selection and available finished report through a nonexported
+same-package receiver and the existing approved bridge. Receiving never analyzes or saves. The PC
+imports the selected case into the shared player, requires renewed image consent for model use,
+and offers explicit hash-deduplicated private saving. Original video needs the full `.sal` file.
+
+Local gates pass **259 Kotlin units** (185 core / 40 Compose / 31 replay / 3 no-op), Compose/Android/
+navigation/replay/sample lint with zero errors, sample debug/test/release APKs and release isolation.
+Independent coordinate-based consumer debug/release/isolation and Foundation 1.8.2 debug/test builds
+also pass. Final saved-image metadata validation and instrumentation readiness changes pass their
+narrow rebuild and consumer isolation checks.
+Merged sample and consumer release manifests contain no active QaLens components or debug network
+exception. Build checks are not consuming-host runtime evidence.
+
+The full native SDK runner passes on an owned API 36 emulator: recording retention/storage, Compose
+dialog/semantics inspection, bridge privacy/actions/RTL gestures, real Room/DataStore changes, byte
+budget disclosures, Chucker/OSS adapters, SQL/macros/replay/webhook and continuous log/network traffic.
+Focused `insightsOnly` also passes native discovery/consent, saved frame and HD still preparation,
+both targets/runtime, actual HTTP cancellation/recovery, background/resume and precise citation
+seeking. Synthetic phone setup/report screenshots were inspected. See
+[Android verification](docs/ANDROID_VERIFICATION.md) for execution details.
+The final focused native run also passes QA field/copy/consent and reportless/completed/still Send to
+PC, authentication/private receiver/queue bounds/stop cleanup. The actual native → adb → desktop
+HTTP check passes case receive/ack, explicit private save/dedup and model reanalysis with the HD still.
+Python's **101 tests**, the web reader/CLI, seven desktop JS suites, three investigation JS suites and
+ten cross-surface archive/provider/desktop HTTP cases pass. The synthetic provider exercises both
+protocols, image consent/transport, runtime provenance, stable citations, malformed responses and
+flood bounds, QA context, inbox acknowledgement, explicit save/dedup and shared web case import;
+it is not an LLM or vision model. CI is configured for this branch; local results do
+not establish a remote workflow's outcome.
+
+The local LM Studio endpoint currently exposes only an embedding model, and Ollama has no installed
+models. Actual chat/vision quality is therefore **unverified**, and weights were not downloaded.
+The UI tool exposes no usable browser, so controlled DOM/media-adapter checks and real HTTP do not
+certify browser layout, codecs or keyboard/accessibility acceptance. Physical/company-host behavior,
+other providers/context limits and the original host ANR/HD cause remain separate acceptance work.
+[Lens 2.0](docs/LENS_2.md) owns setup/contracts; [CONTRIBUTING](CONTRIBUTING.md#local-model-insights-checks)
+owns reproducible commands, and [next.md](next.md) records remaining acceptance.
 
 ### Mirror startup — 2026-10-06
 

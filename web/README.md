@@ -25,6 +25,23 @@ behavior need checks in both viewers. Classic keyboard shortcuts include Space, 
 
 ## Data, privacy and compatibility
 
+The modern **Insights** page supports a local Ollama or OpenAI-compatible chat server: choose a
+bug moment/window, inspect the exact context, connect/discover a model and explicitly Analyze.
+Reports include cited observations, uncertain causes, missing evidence and next checks. Click a
+citation to seek to its actual captured time. Offline signals remain separate from model results.
+QA format includes captured action context and tester expected/actual fields with readable Markdown.
+The desktop can also open phone handoffs in this same UI; copied-evidence citations review their
+actual facts when the original video is absent. Receiving a case never runs a model automatically.
+An optional reviewed saved still requires explicit selection and a vision model; complete video,
+audio and live mirror pixels are never sent by this workflow. The classic viewer links to modern
+Insights. [Lens 2.0](../docs/LENS_2.md) owns the protocol/privacy contract and setup instructions.
+
+Standalone browsers call the chosen local URL and require its CORS/network policy. The Python
+desktop serves these exact same files and proxies authenticated model jobs through its existing
+same-origin parent bridge. There is no duplicated desktop player implementation or model dependency.
+Analysis evidence, stills, API keys and results remain in memory unless explicitly exported; existing
+recording-recents/preferences follow the storage behavior below.
+
 LocalStorage stores preferences; IndexedDB supports cached recents and can be cleared in settings.
 Reading an archive does not upload it. Explicit **Send to backend** uses the configured Backend URL:
 raw archives post as multipart `file` to `/webhook`; summary-only sessions post JSON to `/api/ingest`.
@@ -70,6 +87,10 @@ off stdout. The built-in demo intentionally produces exit 1.
 
 ```sh
 node web/test/read.test.js
+node web/test/insights.test.js
+node web/test/insights-ui.test.js
+node web/test/recording-still.test.js
+python3 tools/insights-tests/test_e2e.py
 ```
 
 The shared reader and CLI are exercised by this script, including v1/v2 nested compression,

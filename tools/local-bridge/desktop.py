@@ -27,7 +27,8 @@ RECORDING = re.compile(r"(?:session|clip)_[A-Za-z0-9_]+\.sal")
 HASH_FILE = re.compile(r"[a-f0-9]{64}\.sal")
 REMOTE_FILE = re.compile(r"/sdcard/Download/[A-Za-z0-9_.-]{1,128}")
 WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
-WEB_ASSETS = {"index-v2.html", "app-v2.js", "styles-v2.css", "index.html", "app.js", "styles.css", "sal.js", "sample.sal"}
+WEB_ASSETS = {"index-v2.html", "app-v2.js", "styles-v2.css", "index.html", "app.js", "styles.css", "sal.js", "sample.sal",
+              "insights.js", "insights-ui.js", "insights.css", "recording-still.js"}
 
 
 def native_scrcpy():

@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application>
+        <!-- Replay may explicitly queue its already-reviewed investigation in this same package. -->
+        <receiver android:name="com.qalens.QaLensInvestigationReceiver" android:exported="false" />
         <!-- Only authorized adb/shell (DUMP) can offer a request; QA still approves on the phone. -->
         <receiver
             android:name="com.qalens.QaLensPcPairingReceiver"

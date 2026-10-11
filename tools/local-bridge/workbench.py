@@ -118,10 +118,12 @@ class Workbench:
     def __init__(self, data_dir, adb=None, pipeline_config=None):
         self.root = Path(data_dir).expanduser().absolute()
         prepare_directory(self.root)
-        for name in ("components", "runs"):
+        for name in ("components", "runs", "investigations"):
             prepare_directory(self.root / name)
         self.adb = adb
         self.lock = threading.RLock()
+        from investigations import Store
+        self.investigations = Store(self.root / "investigations")
         self.preview_dropped = 0
         self.pending = {}  # bounded previews; never implicitly persisted
         self.profiles_path = self.root / "profiles.json"
@@ -257,6 +259,7 @@ class Workbench:
             self.phone_approved = False; self.approval_query_supported = None; self.health_supported = None
             self.connection_notice = "Disconnected. Choose your app and Connect."
             self.desktop.stop_preview()
+            self.investigations.clear()
             self.connection_id = secrets.token_hex(16)
 
     def apps(self, serial):

@@ -30,7 +30,7 @@ function fixture() {
     addEventListener: (name, callback) => { listeners[name] = callback; }};
   const context = vm.createContext({document, location: {hash: '#landing', origin: 'http://fixture'},
     history: {replaceState() {}}, window: {scrollTo() {}, addEventListener() {}},
-    QaLensScrcpy: require('./scrcpy-stream.js'), QaLensRecordingTransfer: RecordingTransfer,
+    QaLensScrcpy: require('./scrcpy-stream.js'), QaLensRecordingTransfer: RecordingTransfer, QaLensInvestigationInbox: require('./investigation-inbox.js'),
     setInterval: (callback, delay) => { timers.push({callback, delay}); },
     fetch: async (url, options) => {
       requests.push({url, body: options.body && JSON.parse(options.body)});

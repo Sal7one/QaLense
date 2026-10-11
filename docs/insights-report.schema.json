@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qalens:insights:report:1",
+  "title": "QaLens local-model interpretation",
+  "type": "object",
+  "required": ["schema", "summary", "observations", "hypotheses", "missingEvidence", "recommendedChecks"],
+  "properties": {
+    "schema": {"const": "qalens-insights-report/1"},
+    "summary": {"type": "string", "minLength": 1, "pattern": "\\S", "maxLength": 4000},
+    "observations": {
+      "type": "array", "maxItems": 30,
+      "items": {
+        "type": "object", "required": ["text", "evidenceIds"],
+        "properties": {
+          "text": {"type": "string", "minLength": 1, "pattern": "\\S", "maxLength": 2400},
+          "evidenceIds": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 64}}
+        }
+      }
+    },
+    "hypotheses": {
+      "type": "array", "maxItems": 10,
+      "items": {
+        "type": "object", "required": ["title", "confidence", "reasoning", "evidenceIds", "nextChecks"],
+        "properties": {
+          "title": {"type": "string", "minLength": 1, "pattern": "\\S", "maxLength": 400},
+          "confidence": {"enum": ["low", "medium", "high"]},
+          "reasoning": {"type": "string", "minLength": 1, "pattern": "\\S", "maxLength": 2400},
+          "evidenceIds": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 64}},
+          "nextChecks": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 1200}}
+        }
+      }
+    },
+    "missingEvidence": {"type": "array", "maxItems": 30, "items": {"type": "string", "maxLength": 1200}},
+    "recommendedChecks": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 1200}},
+    "qaReport": {
+      "type": "object", "additionalProperties": false,
+      "required": ["title", "steps", "expectedResult", "expectedSource", "actualResult", "actualSource"],
+      "properties": {
+        "title": {"type": "string", "maxLength": 400},
+        "steps": {
+          "type": "array", "maxItems": 12,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["action", "evidenceIds"],
+            "properties": {
+              "action": {"type": "string", "maxLength": 1200},
+              "evidenceIds": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 64}}
+            }
+          }
+        },
+        "expectedResult": {"type": "string", "maxLength": 1600},
+        "expectedSource": {"enum": ["tester", "not-provided"]},
+        "actualResult": {"type": "string", "maxLength": 2400},
+        "actualSource": {"enum": ["tester", "captured-evidence", "not-established"]}
+      },
+      "description": "Derived after grounding from tester context and selected captured actions/observations. Raw model qaReport fields are ignored. Cited model observations are interpretations, not verified outcomes; recorded host actions are never replay-control steps."
+    }
+  },
+  "$comment": "Runtime grounding validators remove unknown evidence references and unsupported observations, warn about altered claims, and downgrade uncited hypotheses to low/unverified. Valid IDs establish provenance only: they do not prove model wording or causation. Additional fields may describe grounding warnings/model identity. Results stay in memory unless the tester explicitly copies/exports them."
+}

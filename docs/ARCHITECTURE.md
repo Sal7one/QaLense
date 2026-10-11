@@ -1,6 +1,6 @@
 # QaLens architecture
 
-Describes the Android client and desktop/clip paths through 2026-10-05.
+Describes the Android client, desktop/clip paths and Lens 2.0 investigation through 2026-10-11.
 Start with [HANDOVER.md](../HANDOVER.md) for dated verification and [next.md](../next.md) for
 unresolved work.
 
@@ -12,18 +12,40 @@ unresolved work.
 | `qalens-android` | Device/build context, shake, notifications, FileProvider, persisted settings, `.appsal`, QA profiles |
 | `qalens-compose` | Active `QaLens` facade, `AnalysisEngine`, lifecycle installer, overlay/panels, screenshot/session capture, MediaProjection, OkHttp/Timber adapters, Chucker launcher, crash/connectivity/memory observers, macro driver, SQL and uploader |
 | `qalens-navigation-compose` | Navigation Compose wrappers and route reporting |
-| `qalens-replay` | Independent Android archive reader and Compose/Media3 player; does not depend on the active facade |
+| `qalens-replay` | Independent Android archive reader, Compose/Media3 player and reviewed local-model investigation; does not depend on the active facade |
 | `qalens-noop` | Release API mirrors; no capture or UI; coroutine helpers still preserve host failure delivery |
 | `sample-app` | Banking demo, debug Chucker coexistence, release no-op dependencies, instrumented regression runner |
 | `integration-tests/consumer` | Separate composite-build application using normal coordinates; checks both API visibility and release isolation |
-| `web` | v2 and classic viewers, shared `sal.js` reader, sample fixtures/generator and CLI |
-| `tools/local-bridge` | Python browser desktop, owned adb forwarding, component/recording libraries, fixed phone tasks and trusted component processors; serves the existing web sources |
+| `web` | v2 and classic viewers, shared `sal.js` reader, modern `insights.js`/UI/still helpers, fixtures and CLI |
+| `tools/local-bridge` | Python browser desktop, owned adb forwarding, libraries/tasks/processors and bounded `insights.py` model jobs; serves the existing web sources |
 | `backend` | Python stdlib mock upload/chunk server, persistence, dashboard and deterministic verdict |
 
 Main dependency direction is core → Android → active Compose → navigation wrappers. Replay is
 standalone. No-op shares core and UI/navigation types needed for its API; it is not dependency-free.
 Coroutines are exposed by active/no-op modules because Flow/StateFlow/exception handlers are public.
 OkHttp, Timber and Room are compile-only integration dependencies; Chucker stays optional.
+
+## Local-model investigation
+
+A completed `.sal` supplies captured tracks to bounded evidence builders in `qalens-replay` and
+shared `web/insights.js`. Both retain original track IDs, relative timestamps, capture/retention
+coverage and omission counts. The reviewer chooses a bug window and optional saved still before
+any analysis request. The model returns structured observations/hypotheses/checks; a report parser
+grounds links only against submitted evidence. It cannot certify causation or a model's image understanding.
+
+Android performs archive/image preparation and HttpURLConnection requests off main and honors host
+TLS/cleartext policy. Standalone web uses the configured local provider subject to browser policy.
+The desktop iframe reuses that web UI with an exact-origin/source request bridge to session-authenticated
+Python jobs. Model jobs run independently of device/mirror locks. API keys, context, optional stills
+and reports remain in memory; suggestions never trigger host actions or processors. No hosted service,
+new capture format, model download or active public facade/no-op expansion is introduced.
+The phone player's explicit Send to PC uses a nonexported same-package receiver in the active SDK,
+then the already-approved bridge's bounded investigation inbox. PC reception validates/re-grounds
+the case into memory; explicit Save writes a private hash-named JSON case. The shared web UI accepts
+imported evidence directly, preserving IDs/clocks and distinguishing it from a full replay archive.
+QA expected/actual provenance and captured steps are derived after grounding, not from model-authored
+reproduction instructions.
+[Lens 2.0](LENS_2.md) owns portable schemas, budgets, provider contracts and integration examples.
 
 ## Observation and analysis
 

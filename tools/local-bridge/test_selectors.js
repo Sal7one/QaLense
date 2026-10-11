@@ -27,7 +27,7 @@ function fixture() {
     createElement: element, createElementNS: element, addEventListener() {}};
   const context = vm.createContext({document, location: {hash: '#landing', origin: 'http://fixture'},
     history: {replaceState() {}}, window: {scrollTo() {}, addEventListener() {}},
-    navigator: {clipboard: {writeText: async () => {}}}, QaLensScrcpy: require('./scrcpy-stream.js'), QaLensRecordingTransfer: RecordingTransfer,
+    navigator: {clipboard: {writeText: async () => {}}}, QaLensScrcpy: require('./scrcpy-stream.js'), QaLensRecordingTransfer: RecordingTransfer, QaLensInvestigationInbox: require('./investigation-inbox.js'),
     setInterval: (callback, delay) => timers.push({callback, delay}),
     fetch: async (url, options) => {
       const body = options.body && JSON.parse(options.body); requests.push({url, body});

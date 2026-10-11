@@ -1,7 +1,30 @@
 # Current backlog
 
-Updated 2026-10-06. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
+Updated 2026-10-11. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
+
+## Lens 2.0 local-model investigation — 2026-10-11
+
+- [x] Add a shared bounded, redaction-aware evidence/report contract, original archive IDs,
+  chronological bug windows, preceding state context and explicit omissions/coverage.
+- [x] Connect OpenAI-compatible local URLs to the Android player and shared web/desktop player;
+  retain Ollama support, discovery, explicit review/analysis, deadlines and cancellation.
+- [x] Investigate both the recorded app and current QaLens replay state with separate clocks and
+  provenance; distinguish observations, possible causes, missing evidence and next checks.
+- [x] Complete and verify QA expected/actual reports and explicit phone-to-PC evidence/report handoff,
+  imported-case review/reanalysis and private case saving. Preserve separate consent and provenance.
+- [x] Add an optional reviewed saved still, bounded image preparation and truthful pixel coverage;
+  preserve capture consent, host network policy, production/no-op isolation and existing mirroring.
+- [x] Document model setup, privacy/context limits, cached host-player telemetry and AI-agent
+  integration. Add synthetic archive/provider and cross-surface HTTP regression fixtures to CI.
+- [x] Pass Kotlin/build/lint/release-isolation gates, Python/JS/HTTP regressions and the full API 36
+  SDK runner. Execute native Insights text/still/HD/runtime/consent/cancel/resume/seek checks and
+  inspect synthetic setup/report screenshots; record the evidence and remaining limits in HANDOVER.
+- [ ] Evaluate actual installed chat/vision models against known causes, ambiguous symptoms,
+  missing/contradictory evidence and smaller context budgets. Fixtures are not reasoning evaluations.
+- [ ] Complete live browser layout/media/keyboard/accessibility acceptance for standalone and
+  embedded players, then physical/company-host checks. Current-player snapshots do not constitute
+  a complete replay trace or establish the original host ANR/HD cause.
 
 ## Mirror startup — 2026-10-06
 

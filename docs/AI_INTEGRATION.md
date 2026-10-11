@@ -1,6 +1,6 @@
 # AI agent runbook: integrate QaLens into an existing Android app
 
-Updated 2026-10-05. This runbook is for an agent working in a **consumer's host repository**.
+Updated 2026-10-11. This runbook is for an agent working in a **consumer's host repository**.
 The goal is a useful QA integration that preserves the host's behavior and excludes active capture
 from every production variant. SDK maintainers start with [HANDOVER.md](../HANDOVER.md) instead.
 Read the host repository's own instructions before editing it.
@@ -13,11 +13,33 @@ Read the host repository's own instructions before editing it.
 4. [Desktop guide](../tools/local-bridge/README.md): phone approval, two-way selection, selectors and files.
 5. [Capture policy](CLIENT_SAFETY_FIXES.md), [recording clips](RECORDING_CLIPS.md) and
    [recording coverage](RECORDING_RETENTION.md) before changing privacy or recording configuration.
+6. [Lens 2.0](LENS_2.md): optional local-model investigation, context limits, phone/network setup
+   and a cached video-player state recipe. Keep model suggestions separate from observed causes.
 
 The evaluated SDK Git revision and installed artifact/APK are the baseline. Docs describe that
 source, not every older binary named `0.9.0`. Check signatures before adapting an example. Do not
 infer current behavior from an old changelog entry, an old host AAR or sample-only UI.
 Default `com.qalens` coordinates do not imply Maven Central publication.
+
+## Integrate useful local-model evidence
+
+The `lens-2.0` player/desktop can investigate existing recordings with a configured local chat
+server. No new host facade, sample-only service or model dependency is required. The optional replay
+module has normal INTERNET permission; it preserves the host's cleartext/TLS policy. Keep it out of
+production graphs with the other active QA modules. Do not relax host network security globally.
+
+Investigating a video bug needs the actual network/log hooks and useful app-owned state. Populate
+a cheap allowlisted cached data source from the existing player's public callbacks: state/loading,
+last error code, positions and retry settings. Preserve its owner thread, detach listeners on owner
+disposal and clear stale cached state. Never read a player/Room/DataStore synchronously from the
+snapshot provider or assume a binary file yields decoded state. The [player-state recipe](LENS_2.md#give-the-model-useful-player-state)
+uses existing public APIs and does not invent an unregister API. Review redacted `.sal` output with
+synthetic failures before presenting the integration as complete.
+
+For host acceptance, record a known bug, pause near it, review the exact text and optional still,
+connect an installed local model and follow citations/next checks on phone and desktop. Report
+transport/capture evidence separately from reasoning quality. A model may explain HTTP 503 plus
+buffering while lacking decoder state, retry callbacks or backend evidence; preserve those gaps.
 
 ## A task brief to give an integrating agent
 

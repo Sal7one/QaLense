@@ -1,0 +1,33 @@
+{
+  "manifest": {"formatVersion": 2, "app": {"name": "Synthetic Video App", "package": "com.qalens.synthetic"}, "startMillis": 1800000000000, "endMillis": 1800000120000, "frameIndex": {}},
+  "timeline": [
+    {"ts": 1800000001000, "kind": "SCREEN", "title": "Videos", "isError": false},
+    {"ts": 1800000050000, "kind": "ACTION", "title": "Play demo video", "detail": "video.play", "isError": false},
+    {"ts": 1800000051800, "kind": "ERROR", "title": "Playback remained buffering", "isError": true}
+  ],
+  "network": [
+    {"ts": 1800000050200, "method": "GET", "url": "https://video.example.test/demo.m3u8", "status": 503, "latencyMs": 1400, "requestBytes": 0, "responseBytes": 86, "responseBodyPreview": "Synthetic service unavailable", "error": null},
+    {"ts": 1800000100000, "method": "GET", "url": "https://video.example.test/health", "status": 200, "latencyMs": 90, "requestBytes": 0, "responseBytes": 2, "error": null}
+  ],
+  "logs": [
+    {"ts": 1800000002000, "type": "LOG", "tag": "fixture", "message": "Synthetic background observation"},
+    {"ts": 1800000050100, "type": "EVENT", "tag": "video", "message": "Player buffering: demo"},
+    {"ts": 1800000051700, "type": "LOG", "tag": "video", "message": "ERROR stream request failed after HTTP 503"},
+    {"ts": 1800000052000, "type": "EVENT", "tag": "QaLens.DataStore", "message": "Preference observation: playback.retry=false"}
+  ],
+  "state": [
+    {"ts": 1800000040000, "screen": "Videos", "featureFlags": {"newPlayer": true}, "dataSources": {"player": {"status": "idle", "retryEnabled": "false"}}},
+    {"ts": 1800000052000, "screen": "Videos", "featureFlags": {"newPlayer": true}, "dataSources": {"player": {"status": "buffering", "retryEnabled": "false"}}},
+    {"ts": 1800000054000, "screen": "Videos", "featureFlags": {"newPlayer": true}, "dataSources": {"player": {"status": "buffering", "retryEnabled": "false"}}}
+  ],
+  "crashes": [],
+  "performance": [{"ts": 1800000051600, "totalMs": 20, "layoutMs": 2, "drawMs": 5, "gpuMs": 1, "jank": true, "frozen": false}],
+  "connectivity": [{"ts": 1800000000000, "type": "WIFI", "strengthBars": 3, "hasVpn": false, "isMetered": false}],
+  "memory": [{"ts": 1800000050000, "totalKb": 180000, "freeKb": 70000, "nativeKb": 22000, "trimLevel": 0}],
+  "marks": [{"ts": 1800000052000, "label": "Playback stuck"}],
+  "analysis": {
+    "schema": "qalens-analysis/1",
+    "coverage": {"network": true, "networkInterceptorInstalled": true, "logs": true, "state": true, "video": false, "frames": false, "crashes": false, "performance": true, "connectivity": true, "notes": ["Synthetic text-only fixture. No video pixels or decoder state captured."], "recording": {"notes": []}},
+    "anomalies": [{"tMs": 50200, "kind": "failed_request", "title": "GET demo.m3u8 returned HTTP 503", "detail": "latency 1400ms"}]
+  }
+}

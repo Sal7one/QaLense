@@ -33,7 +33,7 @@ function fixture(live = false) {
     return new Uint8Array(Buffer.concat([Buffer.from('h264'),size,config,csd,header,frame]));
   }
   const context = vm.createContext({document, location: {hash: '#landing', origin: 'http://fixture'}, history: {replaceState() {}, pushState() {}}, window: {scrollTo() {}, addEventListener() {}},
-    navigator: {clipboard: {writeText: async () => {}}}, QaLensMirror: {...Mirror, installLayout() {}}, QaLensScrcpy: require('./scrcpy-stream.js'), QaLensRecordingTransfer: Transfer,
+    navigator: {clipboard: {writeText: async () => {}}}, QaLensMirror: {...Mirror, installLayout() {}}, QaLensScrcpy: require('./scrcpy-stream.js'), QaLensRecordingTransfer: Transfer, QaLensInvestigationInbox: require('./investigation-inbox.js'),
     QaLensDiagnostics: {...Diagnostics, install: () => ({sync() {}, buttons() {}, pageChanged() {}})},
     VideoDecoder: FakeDecoder, EncodedVideoChunk: class {constructor(data){Object.assign(this,data);}}, AbortController, clearInterval() {},
     Date, URL: {createObjectURL: () => { const url = `blob:${urls.length}`; urls.push(url); return url; }, revokeObjectURL() {}},

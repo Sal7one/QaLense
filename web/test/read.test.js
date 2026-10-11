@@ -140,6 +140,16 @@ function ok(cond, msg) {
   ok(s.report.startsWith("QaLens Full Report"), "report text");
   ok(s.forAi.startsWith("# How to analyze"), "forAi brief present");
   ok(s.marks.length === 2 && s.marks[0].label === "Home renders cleanly", "marks present");
+  const rawTrackFixture = SAL.parse(new Map([
+    ["manifest.json", Buffer.from('{"startMillis":100,"endMillis":200}')],
+    ["crashes.json", Buffer.from('[{"ts":120,"stackTrace":"synthetic stack"}]')],
+    ["performance.json", Buffer.from('[{"ts":121,"totalMs":900,"frozen":true}]')],
+    ["connectivity.json", Buffer.from('[{"ts":100,"type":"WIFI"}]')],
+    ["memory.json", Buffer.from('[{"ts":122,"freeKb":12,"trimLevel":15}]')],
+  ]));
+  ok(rawTrackFixture.crashes[0].stackTrace === "synthetic stack" && rawTrackFixture.performance[0].frozen &&
+    rawTrackFixture.connectivity[0].type === "WIFI" && rawTrackFixture.memory[0].trimLevel === 15,
+    "raw crashes/performance/connectivity/memory tracks retain original observations for investigation");
 
   // ── v2 coverage: gzip JSON tracks + per-entry CRC32 ─────────────────────────
   ok(s.formatVersion === 1, "v1 formatVersion exposed (default 1)");

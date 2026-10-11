@@ -44,6 +44,7 @@ internal object QaLensLocalBridge {
         mutableStatus.value = "Stopped"
         mutablePairing.value = null
         QaLensBridgeComponents.clear()
+        QaLensBridgeInvestigations.clear()
         QaLensBridgeDataTools.stop()
     }
 
@@ -90,6 +91,7 @@ internal object QaLensLocalBridge {
                     if (generation == epoch) {
                         mutableStatus.value = "Failed to listen on port $port; choose another port or retry"
                         mutablePairing.value = null
+                        QaLensBridgeInvestigations.clear()
                     }
                 }
             } finally {
@@ -102,6 +104,18 @@ internal object QaLensLocalBridge {
         val token = ByteArray(24).also { java.security.SecureRandom().nextBytes(it) }
             .joinToString("") { "%02x".format(it) }
         start(token, port)
+    }
+
+    /** Parse on IO outside the listener lock; Stop/disable never wait for archive/JSON work. */
+    fun queueInvestigation(document: String): Boolean {
+        fun ready() = QaLens.config.value.enabled && mutablePairing.value != null && listener?.isClosed == false &&
+            mutableStatus.value.startsWith("Listening")
+        val generation = synchronized(this) { if (!ready()) return false; epoch }
+        val validated = QaLensInvestigationDocuments.validate(document).toString()
+        return synchronized(this) {
+            if (generation != epoch || !ready()) false
+            else { QaLensBridgeInvestigations.enqueueValidated(validated); true }
+        }
     }
 
     private suspend fun serve(socket: Socket, token: String, generation: Long, transferring: () -> Unit) {
@@ -172,6 +186,23 @@ internal object QaLensLocalBridge {
                         requireSession(generation)
                         QaLensBridgeComponents.inbox()
                     }
+                }
+                request.method == "GET" && request.path == "/v1/investigations/inbox" -> {
+                    requireSession(generation)
+                    val inbox = QaLensBridgeInvestigations.inbox()
+                    requireSession(generation)
+                    inbox
+                }
+                request.method == "POST" && request.path == "/v1/investigations/ack" -> {
+                    val input = readJson(request.body)
+                    val ids = input.optJSONArray("ids") ?: throw QaLensBridgeFailure(400, "Supply transfer ids")
+                    if (ids.length() > 10 || (0 until ids.length()).any { ids.opt(it) !is String || ids.getString(it).length > 128 })
+                        throw QaLensBridgeFailure(400, "Supply at most ten string transfer ids <=128 characters")
+                    synchronized(this@QaLensLocalBridge) {
+                        requireSession(generation)
+                        QaLensBridgeInvestigations.acknowledge((0 until ids.length()).map { ids.getString(it) })
+                    }
+                    mapOf("ok" to true)
                 }
                 request.method == "POST" && request.path == "/v1/components/ack" -> {
                     val input = readJson(request.body)

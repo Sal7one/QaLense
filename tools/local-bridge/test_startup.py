@@ -86,7 +86,7 @@ class StartupTests(unittest.TestCase):
         Workbench(self.root)
         saved = self.root / "profiles.json"
         saved.write_text("[]\n")
-        for name in ("components", "runs", "recordings", "transfers"):
+        for name in ("components", "runs", "recordings", "transfers", "investigations"):
             with self.subTest(folder=name):
                 path = self.root / name
                 path.chmod(0o500)

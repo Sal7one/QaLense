@@ -369,6 +369,8 @@ private fun ControlRoom(
                 "${RecordingInfo.humanSize(state.recordingsBytes)} on device · up to 30 kept within 1 GiB",
                 color = TxtMuted, fontSize = 11.sp
             )
+            Text("Play a recording, pause at the bug and open Insights to review evidence with your local model.",
+                color = TxtMuted, fontSize = 11.sp)
             Spacer(Modifier.height(8.dp))
             if (state.recordings.isEmpty()) {
                 Text("No saved .sal recordings yet.", color = TxtMuted, fontSize = 12.sp)

@@ -9,6 +9,17 @@ screenshots from Landing. Search live network/logs, compare decoded app values a
 from Data tools. Python standard library only; no Appium server or extra Android
 library is required. Release builds still use `qalens-noop`.
 
+Lens 2.0 adds **Replay → Insights** through the existing modern web player. Open a saved `.sal`,
+pause at the bug, connect a local chat model and review the evidence before Analyze. The Python
+service handles OpenAI-compatible/Ollama requests with bounded async jobs and cancellation without
+holding the phone/mirror mutex. Findings cite captured events and separate observations from possible
+causes; an optional reviewed still needs explicit consent and a vision model. No phone pairing is
+needed for local-file investigation. [Full workflow, model setup and limits](../../docs/LENS_2.md).
+Phone **Send to PC** delivers reviewed evidence and optional completed QA reports to Landing's
+**Phone investigations**. Receive keeps them in bounded memory; opening, model analysis and saving
+are explicit. Selected evidence alone cannot replay a missing original video. Tester expected/actual
+fields and copied QA Markdown retain their provenance.
+
 Start with [ONBOARDING.md](../../ONBOARDING.md) for the SDK/web/Python overview. This guide owns
 the desktop pairing, component, transfer and processor contracts.
 For integrating the SDK into another app, follow [integration.md](../../integration.md) and the

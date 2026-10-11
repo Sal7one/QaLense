@@ -64,6 +64,10 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var selectorsOnly = false
     private var desktopSelectors = false
     private var dialogsOnly = false
+    private var insightsOnly = false
+    private var insightsBaseUrl: String? = null
+    private var insightsTransferHoldSeconds = 0
+    private var insightsTransferToken: String? = null
     override fun onCreate(arguments: Bundle?) {
         videoDenyOnly = arguments?.getString("videoDenyOnly") == "true"
         clipsOnly = arguments?.getString("clipsOnly") == "true"
@@ -92,6 +96,10 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         selectorsOnly = arguments?.getString("selectorsOnly") == "true"
         desktopSelectors = arguments?.getString("desktopSelectors") == "true"
         dialogsOnly = arguments?.getString("dialogsOnly") == "true"
+        insightsOnly = arguments?.getString("insightsOnly") == "true"
+        insightsBaseUrl = arguments?.getString("insightsBaseUrl")
+        insightsTransferHoldSeconds = arguments?.getString("insightsTransferHoldSeconds")?.toIntOrNull() ?: 0
+        insightsTransferToken = arguments?.getString("insightsTransferToken")
         super.onCreate(arguments)
         start()
     }
@@ -100,6 +108,12 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         val result = Bundle()
         var consent: java.util.concurrent.FutureTask<Unit>? = null
         try {
+            if (insightsOnly || insightsBaseUrl != null) {
+                val base = requireNotNull(insightsBaseUrl?.takeIf { it.isNotBlank() }) { "insightsOnly requires an explicit local insightsBaseUrl fixture URL." }
+                LocalInsightsChecks(this).run(base, insightsTransferHoldSeconds, insightsTransferToken)
+                result.putString("stream", "\nOK: Phone local-model discovery/embedding filtering, explicit text/still consent, full-file IDs/coverage, saved-frame/HD still requests, current-player provenance, question/expected/actual/focus invalidation, captured QA steps/Markdown/JSON, private approved PC send with/without report/still, HTTP auth/ack/queue bounds/stop cleanup, background resume, real slow-request cancellation/recovery and grounded timestamp seek pass against a synthetic provider (not model reasoning or vision quality).\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             if (dialogsOnly) {
                 DialogInspectionChecks(this).run()
                 result.putString("stream", "\nOK: Automatic Compose Dialog/AlertDialog/Popup discovery, foreground phone/PC selection, actions/attributes/privacy, two-finger dialog scrolling, focus/geometry, deduplication/dismissal and disable cleanup.\n")

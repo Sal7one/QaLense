@@ -5,6 +5,11 @@ QA/debug build, inspect screen/network/log context, then export a bug report or 
 recording. Engineers can replay it on Android, in the browser, or inspect it with a Node CLI.
 Release builds use a separate no-op artifact.
 
+**Lens 2.0:** the `lens-2.0` branch adds reviewed local-model investigation on phone, modern web
+and the embedded Python desktop. Pause at a recorded bug, connect a local model, review the evidence
+and get a QA expected/actual report, cited observations, possible causes and next checks. Send the
+selected investigation from phone to PC for review/reanalysis. See [the workflow and limits](docs/LENS_2.md).
+
 **New to QaLens? Start with [ONBOARDING.md](ONBOARDING.md).** It covers the Android SDK, web app,
 Python desktop, local backend, recording/inspection workflows and practical team advice.
 
@@ -26,6 +31,8 @@ acceptance and a completion template.
 - Text bug reports, screenshots, frame/video session recording, macros and background SQL tools.
 - Android replay, v2/classic web viewers, CLI comparisons and optional webhook upload. The included
   Python backend is a local deterministic mock, not a hosted AI service.
+- Local-model Insights in Android/modern web/desktop replay, with bounded captured context, stable
+  evidence links and an optional reviewed still. Causes remain hypotheses until verified.
 
 ## Integrate
 

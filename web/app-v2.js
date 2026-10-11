@@ -92,7 +92,10 @@
     toast: $("toast"), compatNote: $("compatNote"), deviceFrame: $("deviceFrame"),
     markOverlay: $("markOverlay"), markLabel: $("markLabel"), markTime: $("markTime"),
     markSave: $("markSave"), markCancel: $("markCancel"),
+    insightsView: $("insightsView"), investigateBtn: $("investigateBtn"),
+    investigationStage: $("investigationStage"), closeInvestigationBtn: $("closeInvestigationBtn"), loadInvestigationRecordingBtn: $("loadInvestigationRecordingBtn"),
   };
+  let investigation = null, loadingGeneration = 0, importedInvestigation = false, insightsHome = null;
 
   // ── store ─────────────────────────────────────────────────────────────────
   const store = {
@@ -195,7 +198,7 @@
       const worst = heavy.reduce((a, b) => ((a.responseBytes || 0) > (b.responseBytes || 0) ? a : b));
       out.push({ sev: "warn", ts: worst.ts, title: heavy.length + " heavy response" + (heavy.length > 1 ? "s" : "") + " (>1MB)", detail: "largest: " + shortPath(worst.url) + " · " + fmtBytes(worst.responseBytes || 0) });
     }
-    if (!out.length) out.push({ sev: "ok", ts: store.S.start, title: "No anomalies detected", detail: "No failures, slow calls, error bursts, flag flips, or screen churn in this session." });
+    if (!out.length) out.push({ sev: "ok", ts: store.S.start, title: "No matching retained signals", detail: "Missing evidence cannot establish correct app behavior." });
     out.sort((a, b) => a.ts - b.ts);
     store.cache.insights = out;
     return out;
@@ -523,7 +526,7 @@
   function renderTrack() {
     if (store.track === "report" || store.track === "aibrief") return;
     if (store.track === "screens") return renderScreens();
-    if (store.track === "insights") return renderInsights();
+    if (store.track === "insights") return;
     const visible = rowsFor(store.track);
     if (!visible.length) { els.trackList.innerHTML = '<div class="empty">No entries.</div>'; store.renderSig = ""; return; }
     const sig = store.track + "|" + els.search.value.trim().toLowerCase() + "|" + store.logLevel + "|" + visible.length + "|" + prefs.follow;
@@ -580,24 +583,19 @@
       '</div>';
     }).join("");
   }
-  function renderInsights() {
-    els.trackList.innerHTML = insights().map((i) =>
-      '<div class="insight ' + i.sev + '">' +
-        '<h5>' + esc(i.title) + '</h5>' +
-        '<p>' + esc(i.detail) + '</p>' +
-        (i.sev === "ok" ? "" : '<button class="row-jump" data-ts="' + i.ts + '">↧ jump to ' + fmt(i.ts - store.S.start) + '</button>') +
-      '</div>').join("");
-  }
   function setTrack(track) {
+    if (store.track === "insights" && track !== "insights") investigation?.cancel();
     // Switching tracks while the diff is open closes the compare first (the user asked for a track).
     if (store.diffOpen) { revokeS2(); store.S2 = null; store.diffOpen = false; }
     store.track = track; prefs.track = track; LS.set("track", track);
     store.renderSig = "";
     [...els.trackTabs.children].forEach((b) => b.classList.toggle("active", b.dataset.track === track));
     els.logChips.hidden = track !== "logs";
-    const isReport = track === "report", isAi = track === "aibrief";
+    const isReport = track === "report", isAi = track === "aibrief", isInsights = track === "insights";
     els.reportView.hidden = !(isReport || isAi);
-    els.trackList.hidden = isReport || isAi;
+    els.trackList.hidden = isReport || isAi || isInsights;
+    els.insightsView.hidden = !isInsights;
+    els.tracksTools.hidden = isInsights;
     els.aiBar.hidden = !isAi;
     els.search.hidden = isReport || isAi || track === "screens" || track === "insights";
     els.substats.hidden = track !== "network";
@@ -623,18 +621,51 @@
     });
   }
   // Same-origin desktop shell: load transferred archives through the existing reader.
-  window.addEventListener("message", (event) => {
+  function receiveDesktopMessage(event) {
     if (!new URLSearchParams(location.search).has("desktop") || event.origin !== location.origin || event.source !== window.parent || window.parent === window) return;
     if (event.data?.type === "qalens-recording" && event.data.bytes instanceof ArrayBuffer && event.data.bytes.byteLength <= 400 * 1024 * 1024) {
       loadFile(new File([event.data.bytes], String(event.data.name || "recording.sal"), {type: "application/octet-stream"}));
     }
-    if (event.data?.type === "qalens-visibility" && !event.data.visible) document.querySelectorAll("video").forEach(video => video.pause());
-  });
+    if (event.data?.type === "qalens-investigation" && /^[A-Za-z0-9_-]{8,80}$/.test(event.data.requestId || '')) {
+      const reply = {type: 'qalens-investigation-ack', requestId: event.data.requestId};
+      try { showImportedInvestigation(event.data.document); reply.ok = true; }
+      catch (error) { reply.ok = false; reply.error = String(error.message || 'The supplied investigation could not be opened.').slice(0, 400); }
+      window.parent.postMessage(reply, location.origin);
+    }
+    if (event.data?.type === "qalens-visibility" && !event.data.visible) { pause(); investigation?.cancel(); }
+  }
+  window.addEventListener("message", receiveDesktopMessage);
+  function showImportedInvestigation(transfer) {
+    if (!investigation) throw Error('The shared investigation player is still loading. Try Review again.');
+    // Validation precedes navigation/cancellation. This is the real shared panel,
+    // moved to a case-only view; no fake session or hidden video is constructed.
+    QaLensInsights.validateInvestigation(transfer);
+    pause(); investigation.importInvestigation(transfer); ++loadingGeneration;
+    importedInvestigation = true; els.investigationStage.append(els.insightsView); els.insightsView.hidden = false;
+    els.investigationStage.hidden = false; els.landing.hidden = true; els.stage.hidden = true;
+    els.exportBtn.hidden = true; els.sendBackendBtn.hidden = true; els.compareBtn.hidden = true;
+    els.exportSalBtn.hidden = true; els.closeSessionBtn.hidden = true; els.sessionChip.hidden = true;
+    document.title = 'QaLens · phone investigation';
+  }
+  function leaveImportedInvestigation(restore = true) {
+    if (!importedInvestigation) return;
+    investigation?.clear(); importedInvestigation = false;
+    insightsHome.append(els.insightsView); els.investigationStage.hidden = true;
+    if (!restore) return;
+    els.stage.hidden = !store.S; els.landing.hidden = !!store.S;
+    els.exportBtn.hidden = !store.S; els.sendBackendBtn.hidden = !store.S; els.compareBtn.hidden = !store.S;
+    els.exportSalBtn.hidden = !store.S; els.closeSessionBtn.hidden = !store.S;
+    if (store.S) { renderChip(); setTrack(store.track); document.title = 'QaLens · ' + store.name; }
+    else document.title = 'QaLens Lens 2.0 — replay and investigate';
+  }
   async function loadFile(file) {
+    const mine = ++loadingGeneration;
+    investigation?.cancel();
     try {
       toast("Reading " + file.name + "…", 1500);
       const buf = await file.arrayBuffer();
       const session = await SAL.read(buf);
+      if (mine !== loadingGeneration) { session.frames.forEach(frame => URL.revokeObjectURL(frame.url)); if (session.videoUrl) URL.revokeObjectURL(session.videoUrl); return; }
       onLoaded(session, file.name, buf);
     } catch (e) {
       console.error(e);
@@ -642,6 +673,9 @@
     }
   }
   function onLoaded(session, name, rawBuf) {
+    pause();
+    investigation?.cancel();
+    leaveImportedInvestigation(false);
     revokeUrls();
     store.S = session;
     store.S2 = null;
@@ -663,6 +697,7 @@
     els.closeSessionBtn.hidden = false;
 
     setupMedia();
+    investigation?.clear();
     renderChip();
     renderStats();
     renderSummary();
@@ -682,15 +717,18 @@
     } else if (prefs.autoplay) play();
   }
   function closeSession() {
+    ++loadingGeneration;
     pause();
+    leaveImportedInvestigation(false);
     revokeUrls(); revokeS2();
     store.S = null; store.S2 = null; store.rawBuf = null;
+    investigation?.clear();
     els.stage.hidden = true;
     els.landing.hidden = false;
     els.exportBtn.hidden = true; els.sendBackendBtn.hidden = true; els.compareBtn.hidden = true;
     els.exportSalBtn.hidden = true; els.closeSessionBtn.hidden = true;
     els.sessionChip.hidden = true;
-    document.title = "QaLens Mission Control v2 — .sal session viewer";
+    document.title = "QaLens Lens 2.0 — replay and investigate";
   }
 
   // ── compare ───────────────────────────────────────────────────────────────
@@ -752,6 +790,8 @@
         table + lists.join("") +
       '</div>';
     els.trackList.hidden = false;
+    els.insightsView.hidden = true;
+    els.tracksTools.hidden = false;
     els.reportView.hidden = true;
     els.substats.hidden = true; els.aiBar.hidden = true; els.search.hidden = true;
     store.diffOpen = true;
@@ -915,6 +955,33 @@
 
   // ── wiring ────────────────────────────────────────────────────────────────
   function init() {
+    insightsHome = els.insightsView.parentElement;
+    const embedded = new URLSearchParams(location.search).has("desktop") && window.parent !== window;
+    investigation = QaLensInsightsUI.install({container: els.insightsView, session: () => store.S, name: () => store.name,
+      playhead: () => store.S ? store.playhead - store.S.start : 0, seek: tMs => { if (store.S) seek(store.S.start + tMs, true); }, pause,
+      captureStill: (tMs, signal) => QaLensRecordingStill.capture({document, session: () => store.S, video: els.video, frameAt, videoBase,
+        seek: t => { if (store.S) seek(store.S.start + t, true); }, pause}, tMs, signal),
+      runtime: () => {
+        if (!store.S) return null;
+        const isVideo = !!store.S.videoUrl, buffered = [];
+        if (isVideo) for (let i = 0; i < Math.min(8, els.video.buffered.length); i++) buffered.push({startSeconds: els.video.buffered.start(i), endSeconds: els.video.buffered.end(i)});
+        const position = Math.max(0, Math.min(store.S.duration, store.playhead - store.S.start));
+        const details = {mediaKind: isVideo ? 'video' : store.S.frames.length ? 'frames' : 'none', playing: store.playing,
+          playheadMs: position, durationMs: store.S.duration, playbackRate: store.speed, track: store.track, followPlayhead: prefs.follow,
+          visible: !document.hidden, videoReadyState: isVideo ? els.video.readyState : null, videoNetworkState: isVideo ? els.video.networkState : null,
+          videoCurrentTimeSeconds: isVideo ? els.video.currentTime : null, videoDurationSeconds: isVideo && Number.isFinite(els.video.duration) ? els.video.duration : null,
+          paused: isVideo ? els.video.paused : !store.playing, seeking: isVideo ? els.video.seeking : false, ended: isVideo ? els.video.ended : null,
+          videoBaseOffsetMs: isVideo ? videoBase() - store.S.start : null, videoPlayheadDifferenceMs: isVideo ? videoBase() - store.S.start + els.video.currentTime * 1000 - position : null,
+          videoDimensions: isVideo ? {width: els.video.videoWidth, height: els.video.videoHeight} : null, bufferedVideoRanges: buffered,
+          mediaError: isVideo && els.video.error ? {code: els.video.error.code, message: String(els.video.error.message || '').slice(0, 500)} : null,
+          frameCount: store.S.frames.length, selectedFrameRecordingPositionMs: !isVideo && store.S.frames.length ? frameAt(store.playhead).ts - store.S.start : null};
+        return {id: 'player:runtime', source: 'current-player', client: 'web', observedAtMillis: Date.now(), recordingPositionMs: position, details};
+      },
+      recordingCoverage: SAL.recordingCoverage, transport: embedded ? QaLensInsights.frameTransport(window) : null});
+    els.closeInvestigationBtn.onclick = () => leaveImportedInvestigation();
+    els.loadInvestigationRecordingBtn.onclick = () => els.fileInput.click();
+    els.investigateBtn.onclick = () => { if (!store.S) return; pause(); setTrack("insights"); investigation.focus(store.playhead - store.S.start); };
+    document.addEventListener("visibilitychange", () => { if (document.hidden) { pause(); investigation.cancel(); } });
     setTheme(prefs.theme);
     setCompact(prefs.compact);
     els.followToggle.checked = prefs.follow;
@@ -932,13 +999,17 @@
     $("openBtn").onclick = pick;
     els.fileInput.onchange = (e) => { if (e.target.files[0]) loadFile(e.target.files[0]); };
     $("sampleBtn").onclick = async () => {
+      const mine = ++loadingGeneration;
+      investigation?.cancel();
       try {
         const res = await fetch("sample.sal");
         if (!res.ok) throw new Error("not found");
         // BUGFIX: read the Response body ONCE — a second arrayBuffer() on a consumed body
         // throws and the session never loaded (parse succeeded, onLoaded never ran).
         const buf = await res.arrayBuffer();
-        onLoaded(await SAL.read(buf), "sample.sal", buf);
+        const session = await SAL.read(buf);
+        if (mine !== loadingGeneration) { session.frames.forEach(frame => URL.revokeObjectURL(frame.url)); if (session.videoUrl) URL.revokeObjectURL(session.videoUrl); return; }
+        onLoaded(session, "sample.sal", buf);
       } catch (e) {
         console.error(e);
         toast("Demo failed to load" + (e && e.message ? ": " + e.message : "") + " — serve the folder (./demo.sh) or drag web/sample.sal in.", 5000);

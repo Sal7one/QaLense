@@ -1,7 +1,7 @@
 name: Verify SDK
 on:
   push:
-    branches: [master, main, dev]
+    branches: [master, main, dev, lens-2.0]
   pull_request:
 permissions:
   contents: read
@@ -30,14 +30,18 @@ jobs:
         run: >-
           gradle :qalens-core:test :qalens-compose:testDebugUnitTest :qalens-replay:testDebugUnitTest :qalens-noop:testDebugUnitTest
           :qalens-compose:lintDebug :qalens-android:lintDebug :qalens-navigation-compose:lintDebug
-          :qalens-replay:lintDebug :sample-app:assembleDebug :sample-app:assembleRelease
+          :qalens-replay:lintDebug :sample-app:lintDebug :sample-app:assembleDebug :sample-app:assembleRelease
           :sample-app:assembleDebugAndroidTest :sample-app:verifyReleaseIsolation
       - name: External consumer integration
         run: gradle -p integration-tests/consumer assembleDebug assembleRelease verifyReleaseIsolation
       - name: Compile newer-runtime consumer device fixture
         run: gradle -p integration-tests/consumer -PqaComposeRuntime=1.8.2 assembleDebug assembleDebugAndroidTest
       - name: Web reader and CLI regression tests
-        run: node web/test/read.test.js
+        run: |
+          node web/test/read.test.js
+          node web/test/insights.test.js
+          node web/test/insights-ui.test.js
+          node web/test/recording-still.test.js
       - name: Local PC bridge regression tests
         run: |
           python3 tools/local-bridge/test_server.py
@@ -47,15 +51,21 @@ jobs:
           python3 tools/local-bridge/test_desktop.py
           python3 tools/local-bridge/test_controls.py
           python3 tools/local-bridge/test_scrcpy.py
+          python3 tools/local-bridge/test_insights.py
+          python3 tools/local-bridge/test_investigations.py
           node --check tools/local-bridge/app.js
           node --check tools/local-bridge/mirror-controls.js
           node --check tools/local-bridge/diagnostics.js
           node --check tools/local-bridge/scrcpy-stream.js
+          node --check tools/local-bridge/investigation-inbox.js
           node tools/local-bridge/test_recording_transfer.js
           node tools/local-bridge/test_polling.js
           node tools/local-bridge/test_selectors.js
           node tools/local-bridge/test_mirror.js
           node tools/local-bridge/test_diagnostics.js
           node tools/local-bridge/test_scrcpy_stream.js
+          node tools/local-bridge/test_investigation_inbox.js
+      - name: Cross-surface local-model HTTP contracts
+        run: python3 tools/insights-tests/test_e2e.py
       - name: Backend regression tests
         run: python3 backend/tests/test_backend.py

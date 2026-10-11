@@ -22,6 +22,9 @@ checks are separate.
 ./gradlew :sample-app:assembleDebug :sample-app:assembleRelease :sample-app:verifyReleaseIsolation
 ./gradlew -p integration-tests/consumer assembleDebug assembleRelease verifyReleaseIsolation
 node web/test/read.test.js
+node web/test/insights.test.js
+node web/test/insights-ui.test.js
+node web/test/recording-still.test.js
 python3 backend/tests/test_backend.py
 python3 tools/local-bridge/test_server.py
 python3 tools/local-bridge/test_startup.py
@@ -30,16 +33,21 @@ python3 tools/local-bridge/test_connection.py
 python3 tools/local-bridge/test_desktop.py
 python3 tools/local-bridge/test_controls.py
 python3 tools/local-bridge/test_scrcpy.py
+python3 tools/local-bridge/test_insights.py
+python3 tools/local-bridge/test_investigations.py
+python3 tools/insights-tests/test_e2e.py
 node --check tools/local-bridge/app.js
 node --check tools/local-bridge/mirror-controls.js
 node --check tools/local-bridge/diagnostics.js
 node --check tools/local-bridge/scrcpy-stream.js
+node --check tools/local-bridge/investigation-inbox.js
 node tools/local-bridge/test_recording_transfer.js
 node tools/local-bridge/test_polling.js
 node tools/local-bridge/test_selectors.js
 node tools/local-bridge/test_mirror.js
 node tools/local-bridge/test_diagnostics.js
 node tools/local-bridge/test_scrcpy_stream.js
+node tools/local-bridge/test_investigation_inbox.js
 ```
 
 The consumer fixture resolves normal `com.qalens:*` coordinates through `includeBuild`; it catches
@@ -149,6 +157,74 @@ against current system/IME insets; run with gesture and three-button navigation.
 [PC bridge guide](tools/local-bridge/README.md) describes pairing and adb-forward ownership.
 
 ## Focused device checks
+
+### Local-model insights checks
+
+Lens 2.0 uses no Python/npm model dependency. Python 3.9+ and Node 18+ run the synthetic HTTP
+workflow checks below. They execute the real `.sal` reader/evidence builder, both provider request
+formats, authenticated desktop jobs, grounding and bounded image/flood behavior; they do not evaluate
+an LLM's reasoning or a vision model's understanding.
+
+```sh
+node web/test/insights.test.js
+node web/test/insights-ui.test.js
+node web/test/recording-still.test.js
+python3 tools/local-bridge/test_insights.py
+python3 tools/local-bridge/test_investigations.py
+python3 tools/insights-tests/test_e2e.py
+./gradlew :qalens-core:test :qalens-replay:testDebugUnitTest
+```
+
+The phone-to-PC check below additionally starts its own synthetic provider and temporary PC
+workspace, runs native Insights, and exercises the actual authenticated SDK inbox through an owned
+adb forward. It requires the current sample/test APKs installed on the selected disposable emulator
+and `adb` on PATH. It tests evidence/report/still transfer, explicit save/dedup and PC reanalysis;
+it removes only its forward/workspace and performs no model download:
+
+```sh
+python3 tools/insights-tests/test_device_handoff.py YOUR_DISPOSABLE_SERIAL
+```
+
+For manual UI checks, prepare a disposable synthetic recording and controlled provider:
+
+```sh
+python3 tools/insights-tests/fixture_archive.py /tmp/qalens-synthetic-investigation.sal
+python3 tools/insights-tests/model_fixture.py --port 0 --slow-model
+# The fixture prints an unused loopback port. Model: qalens-synthetic-triage (NOT an LLM).
+# --slow-model also exposes z-fixture-slow for actual UI cancellation checks.
+python3 tools/local-bridge/server.py --gui --port 0 --data-dir /tmp/qalens-insights-desktop
+```
+
+Open the synthetic `.sal` in modern Replay → Insights, choose 52 seconds, connect the printed model
+URL, review the context and Analyze. Check the HTTP 503/buffering citations, playback seeking,
+question/window/model changes, Cancel and navigation while a slow request is pending. Compare with
+standalone `/web/index-v2.html`. Fill Expected/Actual and check tester labels, captured action IDs,
+empty-step disclosure and QA Markdown. Pair a disposable phone, use Send to PC with and without a
+report, review Phone investigations, explicitly analyze/save and verify duplicate handling. Incoming
+images must require fresh model opt-in; selected evidence must not pretend to contain playable video.
+The fixture additionally accepts `fixture-invalid-json`,
+`fixture-unknown-reference` and `fixture-slow` model identifiers through explicit test clients; they
+must produce a malformed-response error, grounded omissions and cancellation respectively. These
+are test behaviors, not diagnoses. Ctrl-C each process you started and remove only its temporary files.
+
+The focused Android fixture requires the built debug/test APKs installed on a **disposable** emulator
+and the synthetic provider running on the PC. Supply its actual port:
+
+```sh
+./gradlew :sample-app:assembleDebug :sample-app:assembleDebugAndroidTest
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -e insightsOnly true \
+  -e insightsBaseUrl http://10.0.2.2:YOUR_FIXTURE_PORT \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+Require the runner's `OK:` message and no `FAIL:`. It checks discovery without automatic upload,
+explicit text/still consent, saved frame/HD extraction, original IDs, both investigation targets,
+current-runtime provenance, citation seeking, cancellation and background/resume recovery. These
+are the explicitly named synthetic cases, not arbitrary host/media behavior. Physical phones need
+an authorized private endpoint or owned
+adb reverse, and their own debug HTTP/TLS policy. Use an installed local chat/vision model to evaluate
+report quality against known app failures; the canned provider cannot certify those results.
+[Setup, contracts and host player-state recipe](docs/LENS_2.md).
 
 Desktop recording and screenshots have a focused real-protocol runner:
 

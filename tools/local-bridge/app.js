@@ -12,6 +12,7 @@ let mirrorModeGeneration = 0;
 let lastPreviewRequest = 0, treeRefreshTimer = null;
 let captureChecked = false, captureIssue = '';
 let diagnostics = null;
+let investigationInbox = null;
 let mirrorStream = null, mirrorStartingAt = null;
 const legacyMirror = () => workbench?.mirrorBackend === 'legacy';
 const status = text => { $('status').textContent = text; };
@@ -24,11 +25,15 @@ async function api(path, command, connectionId = workbench?.connectionId) {
   if (!response.ok || result.ok === false) { const error = Error(result.error || `HTTP ${response.status}`); error.status = response.status; throw error; }
   return result;
 }
+// The model service uses this shell's session authorization. The embedded player
+// never receives a PC session or phone pairing token, and cannot read another job.
+if (typeof QaLensInsights !== 'undefined') QaLensInsights.installHostBridge({window, iframe: $('viewer'), api: (path, body) => api(path, body, null)});
 async function perform(work) {
   if (busy) return;
   busy = true; document.querySelectorAll('button:not([data-tab]):not(#back)').forEach(b => { b.disabled = true; });
   try { await work(); } catch (error) { status(error.message); }
   finally { busy = false; document.querySelectorAll('button').forEach(b => { b.disabled = false; }); componentButtons(); $('back').disabled = location.hash === '#landing'; void recordingTransfer.poll();
+    if (investigationInbox) renderInvestigations();
     if (['awaiting-approval', 'connecting'].includes(workbench?.phase)) void pollConnection(); }
 }
 const pageNames = {landing: 'Landing', 'data-tools': 'Data tools', devices: 'Device tools', library: 'Saved elements', automation: 'Automation', recordings: 'Recordings', replay: 'Replay'};
@@ -199,6 +204,7 @@ async function loadWorkbench() {
   const connection = workbench.connection;
   if (captureConnection !== workbench.connectionId || !workbench.connected) resetCapture();
   recordingTransfer.checkConnection(workbench.connectionId, workbench.connected);
+  investigationInbox?.checkConnection(workbench.connectionId, workbench.connected);
   diagnostics?.sync();
   document.querySelector('[data-adb="mirror"]').title = workbench.scrcpyAvailable ? 'Start installed scrcpy' : 'Install scrcpy to enable this tool';
   $('auto-connect').checked = workbench.preferences.autoConnect;
@@ -400,7 +406,7 @@ async function syncPhoneSelection() {
 }
 setInterval(() => { void syncPhoneSelection(); }, 1500);
 $('link-selections').onchange = () => { lastPhoneSelection = null; if ($('link-selections').checked) void syncPhoneSelection(); };
-perform(async () => { session = (await api('bootstrap')).session; await loadWorkbench(); await loadPreviews(); await saved(); await discover(); await localRecordings(); await maybeAutoConnect(); if (workbench.connected && location.hash === '#landing') await refresh(); });
+perform(async () => { session = (await api('bootstrap')).session; await loadWorkbench(); await loadPreviews(); await saved(); await investigationInbox?.refreshSaved(); await discover(); await localRecordings(); await maybeAutoConnect(); if (workbench.connected && location.hash === '#landing') await refresh(); });
 
 const recordingTransfer = new QaLensRecordingTransfer({
   // The inbox's 2.5s timer also precedes every 5s transfer tick. Transfer owns its own
@@ -418,6 +424,50 @@ async function localRecordings() {
 }
 let viewerLoaded = false;
 $('viewer').addEventListener('load', () => { viewerLoaded = true; });
+async function readyInvestigationViewer() {
+  const iframe = $('viewer');
+  if (new URL(iframe.src, location.href).pathname !== '/web/index-v2.html') { viewerLoaded = false; iframe.src = '/web/index-v2.html?desktop'; }
+  if (viewerLoaded) return;
+  await new Promise((resolve, reject) => {
+    const loaded = () => { clearTimeout(timer); iframe.removeEventListener('load', loaded); resolve(); };
+    const timer = setTimeout(() => { iframe.removeEventListener('load', loaded); reject(Error('The shared player is still loading; choose Review again.')); }, 10000);
+    iframe.addEventListener('load', loaded);
+  });
+}
+async function openInvestigation(transfer, current) {
+  const opened = await QaLensInvestigationInbox.sendToViewer({window, iframe: $('viewer'), document: transfer, ready: readyInvestigationViewer, current});
+  if (!opened || !current()) { status('The phone connection changed while opening this case. Refresh before reviewing pending investigations.'); return false; }
+  tab('replay'); status('Phone investigation opened. Review selected evidence and Expected / Actual, then choose Analyze to use a local model.'); return true;
+}
+function renderInvestigations() {
+  if (!investigationInbox) return;
+  $('investigations-state').textContent = investigationInbox.notice;
+  $('investigations-receive').disabled = busy || investigationInbox.inflight || !workbench?.connected;
+  $('investigations-saved-refresh').disabled = busy;
+  for (const [saved, id, rows] of [[false, 'investigations-pending', investigationInbox.previews], [true, 'investigations-saved', investigationInbox.saved]]) {
+    const list = $(id); list.replaceChildren();
+    if (!rows.length) { list.textContent = saved ? 'Nothing saved yet. Save a reviewed case to keep it after disconnect.' : 'No pending phone investigations. Send a reviewed case from phone Insights.'; continue; }
+    for (const entry of rows) {
+      const card = documentElement('article', 'investigation-case'), heading = documentElement('h3', ''); heading.textContent = entry.qaTitle || entry.question || entry.recordingName; card.append(heading);
+      const description = documentElement('p', 'helper'); description.textContent = `${entry.recordingName} · ${entry.target === 'qalens-player' ? 'Phone QaLens replay snapshot' : 'Recorded app'} · ${entry.hasReport ? 'QA report supplied' : 'Evidence to analyze'}${entry.hasImage ? ' · optional still' : ''} · ${entry.hash.slice(0, 12)}`; card.append(description);
+      const actions = documentElement('div', 'toolbar'); card.append(actions);
+      const review = button('Review / Analyze', () => perform(() => investigationInbox.open(entry.hash, saved)), actions, 'primary'); review.disabled = busy || !saved && !workbench?.connected;
+      if (!saved) { const save = button('Save on PC', () => perform(() => investigationInbox.save(entry.hash)), actions); save.disabled = busy || !workbench?.connected; }
+      list.append(card);
+    }
+  }
+}
+investigationInbox = new QaLensInvestigationInbox({
+  connection: () => ({id: workbench?.connectionId, connected: !!workbench?.connected}), enabled: () => $('receive').checked,
+  visible: () => !document.hidden && !$('landing').hidden, busy: () => busy || recordingTransfer.inflight,
+  inbox: id => api('investigations/inbox', null, id), saved: () => api('investigations/saved', null, null),
+  document: hash => api(`investigations/document?hash=${encodeURIComponent(hash)}`, null, null), save: hash => api('investigations/save', {hash}, null),
+  changed: renderInvestigations, pauseReceive: () => { $('receive').checked = false; }, open: openInvestigation
+});
+renderInvestigations();
+$('investigations-receive').onclick = () => perform(() => investigationInbox.poll(true));
+$('investigations-saved-refresh').onclick = () => perform(() => investigationInbox.refreshSaved());
+setInterval(() => { if (session) void investigationInbox.poll(); }, 3500);
 async function openRecording(id) {
   const response = await fetch(`/api/recordings/file?id=${encodeURIComponent(id)}`, {headers: {'X-Qalens-Session': session}, cache: 'no-store'});
   if (!response.ok) throw Error('Saved recording unavailable');
@@ -541,6 +591,7 @@ async function pollConnection() {
     const state = await api('connection/check', {reconnect: $('auto-reconnect').checked});
     if (id !== workbench.connectionId) return;
     Object.assign(workbench, state); connectionStatus(state); connectionButtons(); recordingTransfer.checkConnection(state.connectionId, state.connected);
+    investigationInbox?.checkConnection(state.connectionId, state.connected);
     diagnostics?.sync();
     if (state.connectionId !== id) { ++selectionGeneration; snapshot = null; selected = null; render(); details(); $('receive').checked = false; await stopPreview(); }
     if (previous !== 'connected' && state.phase === 'connected') {

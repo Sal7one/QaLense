@@ -2,6 +2,27 @@
 
 ## Unreleased — post-0.9.0
 
+### Lens 2.0 local-model investigation — 2026-10-11
+
+- Add local-model Insights to Android and modern web replay, reused by the Python desktop through
+  its authenticated parent bridge. Discover installed chat models on Ollama/OpenAI-compatible servers.
+- Build bounded captured evidence around a reviewed bug moment, including raw crashes/frame metrics/
+  connectivity/memory, state, network/logs and analysis. Retain source IDs, timestamps and honest omissions.
+- Distinguish recorded-app investigations from QaLens player investigations, with a separately
+  labeled current replay media/clock/error snapshot rather than fabricated host events.
+- Separate cited observations, uncertain causes, missing evidence and next checks; reject malformed
+  reports and unsupported observations, and link valid citations back to playback.
+- Add tester expected/actual fields and a QA-format Markdown report derived from captured action
+  context. Transfer reviewed evidence and optional completed reports from phone to PC for explicit
+  review/reanalysis, with bounded queues and deliberate hash-deduplicated case saves.
+- Add one optional reviewed saved still for image-capable models, explicit consent, size/time metadata
+  and disclosure of unmasked HD pixels. No full video/audio or automatic live capture is sent.
+- Keep model calls off main, bound/cancel jobs and refuse public URLs/redirects/proxy forwarding.
+  Model credentials and analysis jobs remain in memory; case saves/exports are explicit and no
+  model suggestions execute host actions or code.
+- Add shared evidence/report schemas, synthetic protocol/workflow regressions and host-agent/player
+  setup documentation. Real model reasoning and physical/company-host acceptance remain separate.
+
 ### Mirror startup — 2026-10-06
 
 - Flush the first video key once per decoder configuration so idle screens need no phone

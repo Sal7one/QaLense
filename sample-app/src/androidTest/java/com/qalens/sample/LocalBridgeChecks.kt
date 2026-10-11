@@ -78,7 +78,14 @@ internal class LocalBridgeChecks(private val runner: Instrumentation) {
         }
         try {
             waitFor("Bridge did not listen") { QaLens.localBridgeStatus.value.startsWith("Listening") }
-            waitFor("Fixture not composed") { call("snapshot").second.getJSONArray("nodes").toString().contains("bridge.field") }
+            var lastSnapshot = "not requested"
+            try {
+                waitFor("Fixture not composed") {
+                    val (code, snapshot) = call("snapshot")
+                    lastSnapshot = "HTTP $code: ${snapshot.optString("error", "snapshot has no fixture yet") }"
+                    code == 200 && snapshot.optJSONArray("nodes")?.toString()?.contains("bridge.field") == true
+                }
+            } catch (failure: Exception) { error("Fixture snapshot never became ready: $lastSnapshot (${failure.javaClass.simpleName})") }
             check(call("snapshot", auth = "invalid").first == 401)
             runner.runOnMainSync { QaLens.configure { enableSemanticsReflection = false } }
             check(call("snapshot").first == 403 && command("tap", "bridge.tap").first == 403)
