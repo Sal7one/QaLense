@@ -1,6 +1,6 @@
 # QaLens architecture
 
-Describes the Android client and desktop/clip paths through 2026-10-02.
+Describes the Android client, desktop/clip paths and Lens 2.0 investigation through 2026-10-11.
 Start with [HANDOVER.md](../HANDOVER.md) for dated verification and [next.md](../next.md) for
 unresolved work.
 
@@ -12,18 +12,40 @@ unresolved work.
 | `qalens-android` | Device/build context, shake, notifications, FileProvider, persisted settings, `.appsal`, QA profiles |
 | `qalens-compose` | Active `QaLens` facade, `AnalysisEngine`, lifecycle installer, overlay/panels, screenshot/session capture, MediaProjection, OkHttp/Timber adapters, Chucker launcher, crash/connectivity/memory observers, macro driver, SQL and uploader |
 | `qalens-navigation-compose` | Navigation Compose wrappers and route reporting |
-| `qalens-replay` | Independent Android archive reader and Compose/Media3 player; does not depend on the active facade |
+| `qalens-replay` | Independent Android archive reader, Compose/Media3 player and reviewed local-model investigation; does not depend on the active facade |
 | `qalens-noop` | Release API mirrors; no capture or UI; coroutine helpers still preserve host failure delivery |
 | `sample-app` | Banking demo, debug Chucker coexistence, release no-op dependencies, instrumented regression runner |
 | `integration-tests/consumer` | Separate composite-build application using normal coordinates; checks both API visibility and release isolation |
-| `web` | v2 and classic viewers, shared `sal.js` reader, sample fixtures/generator and CLI |
-| `tools/local-bridge` | Python browser desktop, owned adb forwarding, component/recording libraries, fixed phone tasks and trusted component processors; serves the existing web sources |
+| `web` | v2 and classic viewers, shared `sal.js` reader, modern `insights.js`/UI/still helpers, fixtures and CLI |
+| `tools/local-bridge` | Python browser desktop, owned adb forwarding, libraries/tasks/processors and bounded `insights.py` model jobs; serves the existing web sources |
 | `backend` | Python stdlib mock upload/chunk server, persistence, dashboard and deterministic verdict |
 
 Main dependency direction is core → Android → active Compose → navigation wrappers. Replay is
 standalone. No-op shares core and UI/navigation types needed for its API; it is not dependency-free.
 Coroutines are exposed by active/no-op modules because Flow/StateFlow/exception handlers are public.
 OkHttp, Timber and Room are compile-only integration dependencies; Chucker stays optional.
+
+## Local-model investigation
+
+A completed `.sal` supplies captured tracks to bounded evidence builders in `qalens-replay` and
+shared `web/insights.js`. Both retain original track IDs, relative timestamps, capture/retention
+coverage and omission counts. The reviewer chooses a bug window and optional saved still before
+any analysis request. The model returns structured observations/hypotheses/checks; a report parser
+grounds links only against submitted evidence. It cannot certify causation or a model's image understanding.
+
+Android performs archive/image preparation and HttpURLConnection requests off main and honors host
+TLS/cleartext policy. Standalone web uses the configured local provider subject to browser policy.
+The desktop iframe reuses that web UI with an exact-origin/source request bridge to session-authenticated
+Python jobs. Model jobs run independently of device/mirror locks. API keys, context, optional stills
+and reports remain in memory; suggestions never trigger host actions or processors. No hosted service,
+new capture format, model download or active public facade/no-op expansion is introduced.
+The phone player's explicit Send to PC uses a nonexported same-package receiver in the active SDK,
+then the already-approved bridge's bounded investigation inbox. PC reception validates/re-grounds
+the case into memory; explicit Save writes a private hash-named JSON case. The shared web UI accepts
+imported evidence directly, preserving IDs/clocks and distinguishing it from a full replay archive.
+QA expected/actual provenance and captured steps are derived after grounding, not from model-authored
+reproduction instructions.
+[Lens 2.0](LENS_2.md) owns portable schemas, budgets, provider contracts and integration examples.
 
 ## Observation and analysis
 
@@ -34,8 +56,11 @@ analysis; avoid claiming a service-oriented rewrite is complete.
 - Startup installs lifecycle observation once. Host activity resume tracks the activity, attaches
   the overlay and frame observers; internal Control Room/player/projection screens are excluded.
 - `ComposeSemanticsReader` inside `QaLensActivityInstaller.kt` uses public Compose semantics APIs
-  across attached Activity roots and optionally registered Dialog/Popup roots, not the removed
-  private-method reflection path. Root-scoped IDs and mapped window coordinates keep nodes distinct.
+  across attached Activity roots and extra Compose windows. `QaLensInspectionWindows` uses public
+  `WindowInspector` on API 29+; explicit Dialog/Popup hooks cover API 23–28 and deduplicate on newer
+  devices. An owned nonfocusable application window puts active inspection above a dialog, restores the
+  Activity overlay on dismissal and routes two-finger drags into the actual extra-window content.
+  Root-scoped IDs, window membership and mapped coordinates distinguish overlapping windows.
   Legacy config naming (`enableSemanticsReflection`) remains. Route changes clear old nodes;
   coalesced invalidation and polling while Inspect/Tag is open cover semantics-only changes.
   Other Compose versions and physical-device windows still need validation.
@@ -55,7 +80,7 @@ analysis; avoid claiming a service-oriented rewrite is complete.
   Snapshot macros in core validate state; the Android named macro driver performs real semantics
   actions and waits for asynchronous outcomes. These are different APIs.
 
-Repro/Bug Bundle evidence, log grouping/filtering and global search run on background workers over
+Activity evidence, report formatting, crash previews, log grouping/filtering and global search run on background workers over
 immutable inputs. Updates are conflated and processed serially, so continuous traffic cannot keep
 restarting a computation before it finishes. The panels render visible rows lazily. Report copies
 format off main and return to main for the clipboard operation; synchronous public report APIs
@@ -127,14 +152,46 @@ cancels pending dispatch. Already running synchronous host handlers cannot be sa
 
 `tools/local-bridge/server.py` binds PC loopback, creates/removes only its own adb forward and proxies
 fixed authenticated endpoints to the desktop tree/bounds, component and recording UI. JSON/redaction remain off main;
-cached observations never query host databases/providers on demand. This is live debug automation,
+cached observations never query host databases/providers on demand. Explicit desktop SQL is a
+separate IO job using a read-only app-owned SQLite connection: bounded rows/cells, cancellation,
+ten-second cancellation watchdog, one retained result and five-minute expiry. Its start/status/cancel
+requests release the socket; Stop/disable clears the result and signals the worker. Database/prefs
+targets use opaque catalog IDs and resolved own-directory boundaries. Explicit preference snapshots
+mask full values; DataStore files remain metadata. Cached decoded values/status come from the host's
+existing Flow/provider and have global budgets. `diagnostics.js` owns memory-only Follow/Pause,
+search, pinned comparisons and SQL UI; no copied viewer, provider invocation or arbitrary file reader.
+This is live debug automation,
 not an archive-format change or a company service. The release no-op exposes identical facade APIs
 without transport work. Pairing tokens are memory-only and host-owned.
 
 `workbench.py` owns profiles, explicit component persistence and trusted pipeline jobs. `desktop.py`
-owns shared viewer assets, bounded recording/Downloads transfers and installed scrcpy lifecycle.
+owns shared viewer assets, bounded recording/Downloads transfers and native scrcpy lifecycle.
+Landing has resizable mirror/selection/tree panes. `mirror-controls.js` shares aspect-ratio geometry
+for inspection, touch/wheel and pane layout. The default `scrcpy_mirror.Session` starts a checksum-pinned
+5.0 server through adb, owns a random phone jar/forward and relays bounded H.264 records on authenticated
+chunked loopback HTTP. `scrcpy-stream.js` decodes with WebCodecs directly into canvas, closes frames
+and limits decode/input queues. Audio and automatic clipboard synchronization are disabled; no
+mirrored media persists. SDK masks do not cover these whole-phone pixels.
+
+Continuous native touch/wheel/text messages require current stream, connection, dimensions/revision
+and mode epoch. Only Control dispatches input; mode changes, rotation and Stop cancel held touches.
+Preview is read-only; Inspect maps scaled video to the SDK display/window coordinates and highlights
+without a host action. A single viewer and authenticated heartbeats own the stream; seven-second
+page expiry, phone-auth revocation and transport/decoder failures stop it. SDK pairing auto-reconnect
+does not replay input or restart a stopped stream. Explicit Start retries video. The original PNG/
+adb implementation remains behind `mirror_flags.ENABLE_LEGACY_MIRROR`, false by default, with its
+older frame leases. This is a PC adapter change; SDK public/no-op APIs and host dependencies are unchanged.
+The SDK's internal recording/inspection/screenshot endpoints retain phone approval, main dispatch
+deadlines, recorder privacy/OS consent and existing masked PixelCopy with overlay restoration. PNG
+encoding stays on IO. The GUI detects these capabilities, polls capture state, marks deferred clips
+and can explicitly copy the exact saved master into replay. No public facade or archive schema changes.
 The browser shell embeds both existing viewers through same-origin parent messages into their
-existing reader paths. Finished archive polling is opt-in and resets with connection changes/errors.
+existing reader paths. Capture status polls metadata while Landing/Recordings is visible. Automatic
+archive copying is opt-in and resets with connection changes/auth revocation; transient copy errors
+keep it enabled with bounded retry. Long archive reads/validation use a captured source and a separate
+publication lock, so they do not hold the workbench lock needed by mirror/input/heartbeats.
+Replay after Stop is a separate,
+explicit choice for that exact session.
 Desktop files persist privately; pairing tokens and unsaved component previews do not.
 
 The decor overlay is a `QaLensOverlayHost` containing its Compose surface. It routes two-finger

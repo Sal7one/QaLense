@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.view.ContextThemeWrapper
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -44,6 +45,8 @@ internal object QaLensSystemChip {
     private val chipWindow: View? get() = chipWindowRef?.get()
     private var windowManager: WindowManager? = null
     private var inAppActivity: WeakReference<Activity>? = null
+    private var popupRef: WeakReference<PopupMenu>? = null
+    private var dialogRef: WeakReference<AlertDialog>? = null
     private val handler = Handler(Looper.getMainLooper())
     private var startMs = 0L
 
@@ -62,27 +65,32 @@ internal object QaLensSystemChip {
     fun canShow(context: Context): Boolean = Settings.canDrawOverlays(context)
 
     /** Overlay mode — requires draw-over-apps; visible across the whole device. */
-    fun show(context: Context) {
+    fun show(activity: Activity) {
         if (chip != null) return
-        if (!canShow(context)) return
-        val app = context.applicationContext
-        val wm = app.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        if (!canShow(activity)) return
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
-        attach(app, wm, type, null)
+        runCatching {
+            // Application contexts are not visual contexts. StrictMode can terminate a host for
+            // using one in WindowManager/ViewConfiguration, including later popup layout callbacks.
+            val visual = if (Build.VERSION.SDK_INT >= 30) activity.createWindowContext(type, null)
+                else activity.applicationContext
+            val wm = visual.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            attach(visual, wm, type, null)
+        }.onFailure { QaLens.pushError(ErrorKind.RECORDING, "Recording controls unavailable: ${it.message}") }
     }
 
     /** In-app mode — no permission; its window belongs to [activity] (re-attach on resume). */
     fun showInApp(activity: Activity) {
         if (chip != null && inAppActivity?.get() === activity) return
         hide()
-        attach(
+        runCatching { attach(
             activity,
             activity.windowManager,
             WindowManager.LayoutParams.TYPE_APPLICATION,
             activity
-        )
+        ) }.onFailure { QaLens.pushError(ErrorKind.RECORDING, "Recording controls unavailable: ${it.message}") }
     }
 
     /** Keep the in-app chip alive across activity changes while recording. */
@@ -96,7 +104,9 @@ internal object QaLensSystemChip {
     }
 
     @SuppressLint("RtlHardcoded") // Window x/drag deltas are physical screen coordinates in both locales.
-    private fun attach(context: Context, wm: WindowManager, type: Int, activity: Activity?) {
+    private fun attach(baseContext: Context, wm: WindowManager, type: Int, activity: Activity?) {
+        // Native recording controls must not depend on the consuming app's widget styles.
+        val context = ContextThemeWrapper(baseContext, android.R.style.Theme_Material)
         val density = context.resources.displayMetrics.density
 
         val view = object : TextView(context) {
@@ -137,16 +147,21 @@ internal object QaLensSystemChip {
                 }
                 background = GradientDrawable().apply { cornerRadius = 24 * density; setColor(Color.rgb(45, 65, 90)) }
                 setOnClickListener { anchor ->
+                    popupRef?.get()?.dismiss()
                     runCatching { PopupMenu(context, anchor).apply {
+                        popupRef = WeakReference(this)
                         val presets = QaLens.config.value.recordingClipPresetsSeconds.filter { it in 1..300 }.distinct().take(6).ifEmpty { listOf(10, 20, 60) }
                         presets.forEach { seconds -> menu.add(context.getString(R.string.qalens_clip_last_seconds, seconds)).setOnMenuItemClickListener { QaLens.saveRecentClip(seconds); true } }
                         menu.add(context.getString(R.string.qalens_clip_custom)).setOnMenuItemClickListener {
                             val host = QaLens.currentActivity?.takeIf { QaLensActivityInstaller.isResumed(it) && !it.isFinishing }
                             if (host != null) {
-                                val input = EditText(host).apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER; setText(30.toString()); hint = host.getString(R.string.qalens_clip_hint) }
-                                runCatching { AlertDialog.Builder(host).setTitle(R.string.qalens_clip_title).setView(input)
+                                runCatching {
+                                    val dialogContext = ContextThemeWrapper(host, android.R.style.Theme_Material)
+                                    val input = EditText(dialogContext).apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER; setText(30.toString()); hint = host.getString(R.string.qalens_clip_hint) }
+                                    dialogRef?.get()?.dismiss()
+                                    dialogRef = WeakReference(AlertDialog.Builder(dialogContext).setTitle(R.string.qalens_clip_title).setView(input)
                                     .setPositiveButton(R.string.qalens_clip_mark) { _, _ -> QaLens.saveRecentClip(input.text.toString().toIntOrNull() ?: 0) }
-                                    .setNegativeButton(R.string.qalens_cancel, null).show() }
+                                    .setNegativeButton(R.string.qalens_cancel, null).show()) }
                                     .onFailure { QaLens.pushError(ErrorKind.RECORDING, "Open the host app to choose a custom clip duration.") }
                             } else android.widget.Toast.makeText(context, context.getString(R.string.qalens_clip_open_app), android.widget.Toast.LENGTH_SHORT).show()
                             true
@@ -218,10 +233,14 @@ internal object QaLensSystemChip {
 
     fun hide() {
         handler.removeCallbacks(timeTick)
-        val view = chipWindow ?: return
+        runCatching { popupRef?.get()?.dismiss() }
+        runCatching { dialogRef?.get()?.dismiss() }
+        popupRef = null
+        dialogRef = null
+        val view = chipWindow
         chipRef = null
         chipWindowRef = null
-        runCatching { windowManager?.removeViewImmediate(view) }
+        if (view != null) runCatching { windowManager?.removeViewImmediate(view) }
         windowManager = null
         inAppActivity = null
     }

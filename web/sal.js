@@ -266,6 +266,12 @@
       network: jsonOf(files, "network.json", []),
       logs: jsonOf(files, "logs.json", []),
       state: jsonOf(files, "state.json", []),
+      // Keep the original track positions for grounded investigation citations. The
+      // older UI can ignore these; no archive or capture format changes are needed.
+      crashes: jsonOf(files, "crashes.json", []),
+      performance: jsonOf(files, "performance.json", []),
+      connectivity: jsonOf(files, "connectivity.json", []),
+      memory: jsonOf(files, "memory.json", []),
       marks: jsonOf(files, "marks.json", []),
       report: textOf(files, "report.txt"),
       // C12: the self-describing AI brief (for_ai.md) embedded by the recorder.

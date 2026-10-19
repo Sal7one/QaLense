@@ -36,6 +36,9 @@ class DesktopTests(unittest.TestCase):
         self.assertIn("text/css", headers["Content-Type"])
         self.assertIn(b":root{", css)
         self.assertNotIn(b"<html", css)
+        code, script, _ = self.request("/recording-transfer.js")
+        self.assertEqual(code, 200)
+        self.assertEqual(script, Path(__file__).with_name("recording-transfer.js").read_bytes())
         for name in ["index-v2.html", "sal.js", "app-v2.js", "app.js"]:
             code, data, headers = self.request("/web/" + name + "?desktop")
             self.assertEqual(code, 200)
@@ -59,7 +62,7 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(spawn.call_args.args[0], ["/synthetic/scrcpy", "-s", "synthetic", "--window-title", "QaLens mirror"])
             self.assertEqual(spawn.call_args.kwargs["env"]["ADB"], "fake-adb")
             self.bench.desktop.stop_mirror(); process.terminate.assert_called_once(); process.wait.assert_called_once()
-        with patch("desktop.shutil.which", return_value=None):
+        with patch("desktop.native_scrcpy", return_value=None):
             self.assertRaises(ValueError, self.bench.desktop.task, {"action": "mirror", "connectionId": self.bench.connection_id})
 
     def test_push_requires_auth_connection_and_bounded_safe_filename(self):

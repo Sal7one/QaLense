@@ -78,7 +78,14 @@ internal class LocalBridgeChecks(private val runner: Instrumentation) {
         }
         try {
             waitFor("Bridge did not listen") { QaLens.localBridgeStatus.value.startsWith("Listening") }
-            waitFor("Fixture not composed") { call("snapshot").second.getJSONArray("nodes").toString().contains("bridge.field") }
+            var lastSnapshot = "not requested"
+            try {
+                waitFor("Fixture not composed") {
+                    val (code, snapshot) = call("snapshot")
+                    lastSnapshot = "HTTP $code: ${snapshot.optString("error", "snapshot has no fixture yet") }"
+                    code == 200 && snapshot.optJSONArray("nodes")?.toString()?.contains("bridge.field") == true
+                }
+            } catch (failure: Exception) { error("Fixture snapshot never became ready: $lastSnapshot (${failure.javaClass.simpleName})") }
             check(call("snapshot", auth = "invalid").first == 401)
             runner.runOnMainSync { QaLens.configure { enableSemanticsReflection = false } }
             check(call("snapshot").first == 403 && command("tap", "bridge.tap").first == 403)
@@ -87,6 +94,21 @@ internal class LocalBridgeChecks(private val runner: Instrumentation) {
             val json = snapshot.toString()
             check(!json.contains("never-export-password") && !json.contains("hidden-secret") && !json.contains("bridge.hidden")) { "Bridge leaked private semantics" }
             check(snapshot.getJSONArray("nodes").getJSONObject(0).has("parentId"))
+            val targetId = (0 until snapshot.getJSONArray("nodes").length()).map { snapshot.getJSONArray("nodes").getJSONObject(it) }
+                .single { it.optString("tag") == "bridge.tap" }.getString("id")
+            val selectors = call("selectors", JSONObject().put("id", targetId)).second
+            check(selectors.getString("schema") == "qalens.selectors")
+            val xml = selectors.getString("xml")
+            check(xml.contains("tag=\"bridge.tap\"") && xml.contains("tap=\"true\""))
+            check(!xml.contains("never-export-password") && !xml.contains("hidden-secret") && !xml.contains("custom-value-must-not-export")) { "Selector XML leaked private values" }
+            val xpath = selectors.getJSONArray("suggestions").getJSONObject(0).getString("xpath")
+            check(call("query", JSONObject().put("xpath", xpath)).second.getInt("count") == 1)
+            check(call("query", JSONObject().put("xpath", "//node[@tag='bridge.duplicate']")).second.getInt("count") == 2)
+            check(call("command", JSONObject().put("action", "select").put("xpath", "//node[@tag='bridge.duplicate']")).first == 409)
+            check(call("query", JSONObject().put("xpath", "//*[contains(@text,'secret')]")).first == 400)
+            check(call("command", JSONObject().put("action", "select").put("xpath", xpath)).first == 200)
+            check(call("selection").second.getString("selectedId") == targetId)
+            check(taps.get() == 0) { "Selecting through XPath executed a host click" }
             check(command("tap", "bridge.duplicate").first == 409) { "Ambiguous tag silently chose a node" }
             check(command("tap", "bridge.hidden").first == 404)
             check(command("tap", "bridge.tap").first == 200 && taps.get() == 1)
@@ -103,6 +125,7 @@ internal class LocalBridgeChecks(private val runner: Instrumentation) {
             waitFor("Send to PC button missing next to Copy test tag; selected=${QaLens.state.value.selectedNode?.testTag}") { find("Send to PC") != null }
             val send = find("Send to PC") ?: error("Send to PC button vanished")
             check(find("Copy test tag") != null)
+            check(find("Actions & XPath selectors") != null)
             var sendButton = send
             while (!sendButton.isClickable && sendButton.parent != null) sendButton = sendButton.parent
             check(sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK))
@@ -149,7 +172,12 @@ internal class LocalBridgeChecks(private val runner: Instrumentation) {
                 check(right.left > left.left) { "Physical right drag failed direction=$direction left=$left right=$right panel=${QaLens.state.value.isPanelOpen}" }
                 check(right.left >= 0 && right.right <= width && right.bottom <= height) { "Bubble escaped viewport" }
                 val handle = bounds("Move inspector")
-                val travel = if (handle.top > height * .3f) -height * .25f else height * .25f
+                val topInset = if (android.os.Build.VERSION.SDK_INT >= 30)
+                    activity.window.decorView.rootWindowInsets?.getInsets(android.view.WindowInsets.Type.systemBars())?.top ?: 0
+                    else activity.window.decorView.rootWindowInsets?.systemWindowInsetTop ?: 0
+                // A taller dock can reach its bottom clamp above 30% of a short screen. Pick
+                // upward travel whenever there is room above it rather than dragging into that clamp.
+                val travel = if (handle.top > topInset + height * .05f) -height * .25f else height * .25f
                 drag(handle.exactCenterX(), handle.exactCenterY(), 0f, travel)
                 val moved = bounds("Move inspector")
                 check(if (travel < 0) moved.top < handle.top else moved.top > handle.top) {

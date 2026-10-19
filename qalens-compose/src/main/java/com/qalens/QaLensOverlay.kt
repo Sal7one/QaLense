@@ -1,5 +1,7 @@
 package com.qalens
 
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -78,11 +80,15 @@ internal fun QaLensOverlay() {
     val view = LocalView.current
     val colors = qaLensColorsFor(LocalContext.current)
 
+    LaunchedEffect(state.isInspectMode, state.isTagMode, state.isPanelOpen, state.isWatchMode, state.isRecording, state.overlayEnabled) {
+        QaLens.currentActivity?.let(QaLensInspectionWindows::sync)
+    }
+
     // Only refresh on inspect/tag mode toggle — not on panel open/close, which would capture the
     // panel's own nodes and create a "double UI" effect in the canvas.
     LaunchedEffect(state.isInspectMode, state.isTagMode) {
         if (state.isInspectMode || state.isTagMode) {
-            QaLens.refreshInspection(view.rootView)
+            QaLens.refreshInspection()
         }
     }
 
@@ -91,7 +97,7 @@ internal fun QaLensOverlay() {
     LaunchedEffect(state.isInspectMode, state.isTagMode, state.isWatchMode, view) {
         while ((state.isInspectMode || state.isTagMode) && !state.isWatchMode) {
             delay(500)
-            QaLens.refreshInspection(view.rootView)
+            if (view.isShown) QaLens.refreshInspection()
         }
     }
 
@@ -101,6 +107,16 @@ internal fun QaLensOverlay() {
     // window (QaLensSystemChip — overlay or in-app mode). Render nothing as a belt-and-braces
     // guard in case something un-hides the overlay mid-recording.
     if (state.isRecording) return
+
+    if (LocalOnBackPressedDispatcherOwner.current != null) {
+        BackHandler(enabled = state.isPanelOpen || state.isInspectMode || state.isTagMode) {
+            if (state.isPanelOpen) {
+                if (state.minimalPanel) QaLens.closePanel() else QaLens.setPanelMinimal(true)
+            } else {
+                QaLens.setInspectMode(false); QaLens.setTagMode(false)
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         // Hide canvases while a panel/HUD is open — avoids bounding boxes over panel content.
@@ -123,7 +139,7 @@ internal fun QaLensOverlay() {
                 warningCount = state.warnings.size,
                 colors = colors,
                 onTap = { QaLens.togglePanel() },
-                onLongPress = { QaLens.toggleInspectMode(); QaLens.refreshInspection(view.rootView) }
+                onLongPress = { QaLens.toggleInspectMode(); QaLens.refreshInspection() }
             )
         }
 
@@ -147,7 +163,7 @@ internal fun QaLensOverlay() {
             // (Control Room / .appsal); the tester sheet links back to the full panel.
             if (state.minimalPanel) {
                 QaLensMinimalPanel(
-                    modifier = Modifier.align(dockAlign).statusBarsPadding().padding(10.dp),
+                    modifier = Modifier.align(dockAlign).windowInsetsPadding(WindowInsets.safeDrawing).padding(10.dp),
                     state = state,
                     onClose = QaLens::closePanel
                 )
@@ -156,9 +172,7 @@ internal fun QaLensOverlay() {
                     modifier = Modifier.align(dockAlign),
                     state = state,
                     onClose = QaLens::closePanel,
-                    onRefresh = { QaLens.refreshInspection(view.rootView) },
-                    onToggleInspect = { QaLens.toggleInspectMode() },
-                    onSelectNode = QaLens::selectNode
+                    onRefresh = { QaLens.refreshInspection() }
                 )
             }
         }
@@ -175,12 +189,14 @@ private fun InspectCanvas(
     colors: QaLensOverlayColors
 ) {
     var filter by remember { mutableStateOf(InspectFilter.ACTIONS) }
-    val visibleNodes = when (filter) {
+    val filteredNodes = when (filter) {
         InspectFilter.ALL -> nodes
         InspectFilter.ACTIONS -> nodes.filter { it.isClickable || it.isFocusable }
         InspectFilter.TAGGED -> nodes.filter { it.testTag != null }
         InspectFilter.ISSUES -> nodes.filter { it.warnings.isNotEmpty() }
     }
+    val visibleNodes = if (selectedNode != null && filteredNodes.none { it.id == selectedNode.id }) filteredNodes + selectedNode else filteredNodes
+    var showSelectors by remember(selectedNode?.id) { mutableStateOf(false) }
     val context = LocalContext.current
     val config by QaLens.config.collectAsState()
     val bridgeTransfer by QaLensBridgeComponents.status.collectAsState()
@@ -198,9 +214,7 @@ private fun InspectCanvas(
                     val moved = (up.position - down.position).getDistance()
                     if (moved < viewConfiguration.touchSlop) {
                         up.consume()
-                        val selected = visibleNodes
-                            .filter { it.bounds.contains(down.position.x, down.position.y) }
-                            .minByOrNull { it.bounds.width * it.bounds.height }
+                        val selected = QaLensInspectionWindows.hit(visibleNodes, down.position.x, down.position.y)
                         onSelect(selected)
                     }
                 }
@@ -237,11 +251,18 @@ private fun InspectCanvas(
         MovableOverlay("inspector", Offset(0.5f, 0.8f), Modifier.widthIn(max = 320.dp).fillMaxWidth()) { drag ->
             Column(Modifier.background(colors.panel, RoundedCornerShape(QaLensDimens.rMd)),
                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("━━  Move inspector · two fingers scroll app", color = colors.fg2, fontSize = 11.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = QaLensDimens.touchMin)
-                        .semantics { contentDescription = "Move inspector" }.then(drag).padding(vertical = 12.dp))
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Drag to move · two fingers scroll app", color = colors.fg2, fontSize = 11.sp,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).heightIn(min = QaLensDimens.touchMin)
+                            .semantics { contentDescription = "Move inspector" }.then(drag).padding(horizontal = 10.dp, vertical = 12.dp))
+                    Text("Done", color = colors.accent, fontSize = 12.sp,
+                        modifier = Modifier.heightIn(min = QaLensDimens.touchMin)
+                            .semantics { contentDescription = "Done inspecting" }
+                            .clickable(role = Role.Button) { QaLens.setInspectMode(false) }.padding(12.dp))
+                }
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    QaLensSelectorLauncher(colors)
                     selectedNode?.let { node ->
                         Surface(
                             color = colors.panel,
@@ -297,6 +318,9 @@ private fun InspectCanvas(
                                     )
                                 }
                                 if (bridgeTransfer.isNotBlank()) Text(bridgeTransfer, color = colors.fg2, fontSize = 11.sp)
+                                Text(if (showSelectors) "Hide selectors" else "Actions & XPath selectors", color = colors.accent, fontSize = 12.sp,
+                                    modifier = Modifier.heightIn(min = 44.dp).clickable(role = Role.Button) { showSelectors = !showSelectors }.padding(vertical = 10.dp))
+                                if (showSelectors) QaLensSelectorDetails(node.id, colors)
                             }
                         }
                     }
@@ -358,9 +382,7 @@ private fun TagCanvas(nodes: List<InspectNode>, colors: QaLensOverlayColors) {
                     val moved = (up.position - down.position).getDistance()
                     if (moved < viewConfiguration.touchSlop) {
                         up.consume()
-                        tagged
-                            .filter { it.bounds.contains(down.position.x, down.position.y) }
-                            .minByOrNull { it.bounds.width * it.bounds.height }
+                        QaLensInspectionWindows.hit(tagged, down.position.x, down.position.y)
                             ?.testTag?.let(::copyTag)
                     }
                 }
@@ -404,29 +426,29 @@ private fun TagCanvas(nodes: List<InspectNode>, colors: QaLensOverlayColors) {
             )
         }
 
-        // Legend + summary pill at the bottom — tapping it EXITS tag mode (QA must never be
-        // stuck in an overlay mode with no visible way out).
+        // Keep a named exit reachable even with large text and three-button navigation.
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp)
-                .background(colors.panel, CircleShape)
-                .pointerInput(Unit) { detectTapGestures(onTap = { QaLens.setTagMode(false) }) }
-                .padding(horizontal = 14.dp, vertical = 7.dp),
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(12.dp)
+                .background(colors.panel, RoundedCornerShape(QaLensDimens.rMd))
+                .padding(start = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "TAG MODE · ${tagged.size} tagged · ${untaggedInteractive.size} untagged · tap a tag to copy",
+                text = "Tags · ${tagged.size} tagged · ${untaggedInteractive.size} untagged\nTap a component to copy its tag",
                 color = colors.fg,
-                fontSize = 11.sp
+                fontSize = 11.sp,
+                modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.width(10.dp))
-            Text(
-                text = "✕ EXIT",
-                color = colors.err,
-                fontSize = 11.sp,
-                style = MaterialTheme.typography.labelMedium
-            )
+            Box(Modifier.width(72.dp).heightIn(min = QaLensDimens.touchMin)
+                .semantics { contentDescription = "Done inspecting tags" }
+                .clickable(role = Role.Button) { QaLens.setTagMode(false) }.padding(6.dp),
+                contentAlignment = Alignment.Center) {
+                Text("Done", color = colors.accent, fontSize = 12.sp)
+            }
         }
     }
 }

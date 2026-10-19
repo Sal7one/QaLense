@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>QaLens Mission Control v2 — .sal session viewer</title>
+<title>QaLens Lens 2.0 — replay and investigate</title>
 <link rel="stylesheet" href="styles-v2.css" />
+<link rel="stylesheet" href="insights.css" />
 </head>
 <body>
 
@@ -29,7 +30,7 @@
 
 <header class="topbar">
   <div class="topbar-in">
-    <span class="brand"><span class="brand-mark">◉</span>QaLens <span class="brand-sub">Mission Control v2</span></span>
+    <span class="brand"><span class="brand-mark">◉</span>QaLens <span class="brand-sub">Lens 2.0</span></span>
     <span class="session-chip" id="sessionChip" hidden>
       <span class="dot"></span><span id="chipApp"></span><span class="sep">·</span><span id="chipEnv"></span><span class="sep">·</span><span class="score" id="chipScore"></span>
     </span>
@@ -59,6 +60,11 @@
     <p class="muted small version-note">You are on the new v2 design · <a href="index.html">switch to the classic viewer</a> · <a href="index.html?appsal">.appsal editor</a></p>
     <p class="muted small" id="compatNote"></p>
   </div>
+</section>
+
+<section class="lens-import-stage" id="investigationStage" hidden>
+  <div class="lens-actions"><button class="btn" id="closeInvestigationBtn">← Back to recording</button><button class="btn" id="loadInvestigationRecordingBtn">Load original .sal</button></div>
+  <p class="muted">This phone investigation contains selected evidence and an optional still. The full recording and video were not transferred.</p>
 </section>
 
 <main class="stage" id="stage" hidden>
@@ -95,6 +101,7 @@
           </div>
         </div>
       </div>
+      <button class="btn btn-primary" id="investigateBtn" style="margin-top:12px;width:100%;justify-content:center">Investigate this moment</button>
     </div>
 
     <!-- tracks column -->
@@ -124,6 +131,7 @@
         <div class="substats" id="substats" hidden></div>
         <div class="ai-bar" id="aiBar" hidden><span class="muted small">for_ai.md — the recording self-describes for AI analysis</span><button class="btn small" id="aiCopy">⧉ Copy AI brief</button></div>
         <div class="track-list" id="trackList"></div>
+        <div class="lens-insights" id="insightsView" hidden></div>
         <pre class="report" id="reportView" hidden></pre>
       </div>
     </div>
@@ -196,6 +204,9 @@
 </div>
 
 <script src="sal.js"></script>
+<script src="insights.js"></script>
+<script src="insights-ui.js"></script>
+<script src="recording-still.js"></script>
 <script src="app-v2.js"></script>
 </body>
 </html>

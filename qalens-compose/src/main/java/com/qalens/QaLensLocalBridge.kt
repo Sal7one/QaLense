@@ -21,18 +21,31 @@ internal object QaLensLocalBridge {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableStatus = MutableStateFlow("Stopped")
     val status = mutableStatus.asStateFlow()
+    data class Pairing(val token: String, val port: Int)
+    private val mutablePairing = MutableStateFlow<Pairing?>(null)
+    val pairing = mutablePairing.asStateFlow()
     @Volatile private var epoch = 0L
     private var listener: ServerSocket? = null
     private var client: Socket? = null
     private var job: Job? = null
 
-    @Synchronized fun stop() {
+    @Synchronized fun cancelPairing(token: String) {
+        if (mutablePairing.value?.token == token) stopLocked(clearRequest = false)
+    }
+
+    @Synchronized fun stop() = stopLocked(clearRequest = true)
+
+    private fun stopLocked(clearRequest: Boolean) {
+        if (clearRequest) QaLensPcPairing.clear()
         epoch++
         job?.cancel(); job = null
         runCatching { client?.close() }; client = null
         runCatching { listener?.close() }; listener = null
         mutableStatus.value = "Stopped"
+        mutablePairing.value = null
         QaLensBridgeComponents.clear()
+        QaLensBridgeInvestigations.clear()
+        QaLensBridgeDataTools.stop()
     }
 
     @Synchronized fun start(token: String, port: Int) {
@@ -40,11 +53,13 @@ internal object QaLensLocalBridge {
         require(port in 1024..65535) { "Bridge port must be 1024–65535" }
         stop()
         if (!QaLens.config.value.enabled) return
+        mutablePairing.value = Pairing(token, port)
         val generation = epoch
         mutableStatus.value = "Starting"
         job = scope.launch {
             try {
                 ServerSocket().use { server ->
+                    server.reuseAddress = true
                     server.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 1)
                     synchronized(this@QaLensLocalBridge) {
                         if (generation != epoch) return@launch
@@ -73,7 +88,11 @@ internal object QaLensLocalBridge {
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
                 synchronized(this@QaLensLocalBridge) {
-                    if (generation == epoch) mutableStatus.value = "Failed to listen on port $port; stop and retry"
+                    if (generation == epoch) {
+                        mutableStatus.value = "Failed to listen on port $port; choose another port or retry"
+                        mutablePairing.value = null
+                        QaLensBridgeInvestigations.clear()
+                    }
                 }
             } finally {
                 synchronized(this@QaLensLocalBridge) { if (generation == epoch) listener = null }
@@ -81,10 +100,37 @@ internal object QaLensLocalBridge {
         }
     }
 
+    fun startPairing(port: Int) {
+        val token = ByteArray(24).also { java.security.SecureRandom().nextBytes(it) }
+            .joinToString("") { "%02x".format(it) }
+        start(token, port)
+    }
+
+    /** Parse on IO outside the listener lock; Stop/disable never wait for archive/JSON work. */
+    fun queueInvestigation(document: String): Boolean {
+        fun ready() = QaLens.config.value.enabled && mutablePairing.value != null && listener?.isClosed == false &&
+            mutableStatus.value.startsWith("Listening")
+        val generation = synchronized(this) { if (!ready()) return false; epoch }
+        val validated = QaLensInvestigationDocuments.validate(document).toString()
+        return synchronized(this) {
+            if (generation != epoch || !ready()) false
+            else { QaLensBridgeInvestigations.enqueueValidated(validated); true }
+        }
+    }
+
     private suspend fun serve(socket: Socket, token: String, generation: Long, transferring: () -> Unit) {
         var status = 200
         val body = try {
             val request = QaLensBridgeProtocol.read(socket.getInputStream(), token)
+            if (request.method == "POST" && request.path == "/v1/screenshot") {
+                val bytes = screenshot(readJson(request.body), generation)
+                requireSession(generation)
+                socket.getOutputStream().apply {
+                    write(("HTTP/1.1 200 Bridge\r\nContent-Type: image/png\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n").toByteArray())
+                    write(bytes); flush()
+                }
+                return
+            }
             if (request.method == "GET" && request.path.startsWith("/v1/recordings/")) {
                 if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
                 val name = request.path.removePrefix("/v1/recordings/")
@@ -101,10 +147,17 @@ internal object QaLensLocalBridge {
                 return
             }
             when {
+                request.method == "GET" && request.path == "/v1/health" -> {
+                    // Approval/transport must not depend on host resume, main-thread work or disk.
+                    requireSession(generation)
+                    mapOf("ok" to true, "schema" to "qalens.bridge.health", "version" to 1,
+                        "package" to QaLens.appContext?.packageName, "port" to pairing.value?.port)
+                }
                 request.method == "GET" && request.path == "/v1/recordings" -> {
                     if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
                     val context = QaLens.appContext ?: throw QaLensBridgeFailure(503, "No app context")
-                    mapOf("ok" to true, "recording" to QaLens.state.value.isRecording,
+                    val controls = onSession(generation) { QaLensSessionRecorder.desktopStatus() }
+                    mapOf("ok" to true, "controls" to controls, "recording" to QaLens.state.value.isRecording,
                         "saving" to QaLens.state.value.isSavingRecording,
                         "items" to (QaLensSessionRecorder.recordingsDir(context).listFiles()
                             ?.filter { it.isFile && it.name.matches(Regex("(?:session|clip)_[A-Za-z0-9_]+\\.sal")) }
@@ -113,21 +166,58 @@ internal object QaLensLocalBridge {
                             } ?: emptyList<Map<String, Any>>()))
                 }
                 request.method == "GET" && request.path == "/v1/snapshot" -> snapshot(generation)
+                request.method == "GET" && request.path == "/v1/selection" -> {
+                    requireSession(generation)
+                    if (!QaLens.config.value.enableSemanticsReflection) throw QaLensBridgeFailure(403, "Host disabled semantics inspection")
+                    mapOf("ok" to true, "selectedId" to QaLens.state.value.selectedNode?.id)
+                }
+                request.method == "POST" && request.path == "/v1/selectors" -> selectors(readJson(request.body), generation)
+                request.method == "POST" && request.path == "/v1/query" -> query(readJson(request.body), generation)
                 request.method == "GET" && request.path == "/v1/events" -> observations(generation)
+                request.method == "GET" && request.path == "/v1/data" -> { requireSession(generation); QaLensBridgeDataTools.values() }
+                request.method == "POST" && request.path == "/v1/data" -> { requireSession(generation); QaLensBridgeDataTools.data(readJson(request.body)) }
+                request.method == "GET" && request.path == "/v1/sql" -> { requireSession(generation); QaLensBridgeDataTools.catalog() }
+                request.method == "POST" && request.path == "/v1/sql" -> {
+                    requireSession(generation)
+                    QaLensBridgeDataTools.sql(readJson(request.body)) { generation == epoch && QaLens.config.value.enabled }
+                }
                 request.method == "GET" && request.path == "/v1/components/inbox" -> {
-                    onHost(generation) { true }
-                    QaLensBridgeComponents.inbox()
+                    synchronized(this@QaLensLocalBridge) {
+                        requireSession(generation)
+                        QaLensBridgeComponents.inbox()
+                    }
+                }
+                request.method == "GET" && request.path == "/v1/investigations/inbox" -> {
+                    requireSession(generation)
+                    val inbox = QaLensBridgeInvestigations.inbox()
+                    requireSession(generation)
+                    inbox
+                }
+                request.method == "POST" && request.path == "/v1/investigations/ack" -> {
+                    val input = readJson(request.body)
+                    val ids = input.optJSONArray("ids") ?: throw QaLensBridgeFailure(400, "Supply transfer ids")
+                    if (ids.length() > 10 || (0 until ids.length()).any { ids.opt(it) !is String || ids.getString(it).length > 128 })
+                        throw QaLensBridgeFailure(400, "Supply at most ten string transfer ids <=128 characters")
+                    synchronized(this@QaLensLocalBridge) {
+                        requireSession(generation)
+                        QaLensBridgeInvestigations.acknowledge((0 until ids.length()).map { ids.getString(it) })
+                    }
+                    mapOf("ok" to true)
                 }
                 request.method == "POST" && request.path == "/v1/components/ack" -> {
                     val input = readJson(request.body)
                     val ids = input.optJSONArray("ids") ?: throw QaLensBridgeFailure(400, "Supply transfer ids")
                     if (ids.length() > 10 || (0 until ids.length()).any { ids.opt(it) !is String || ids.getString(it).length > 128 })
                         throw QaLensBridgeFailure(400, "Supply at most ten string transfer ids <=128 characters")
-                    onHost(generation) { true }
-                    QaLensBridgeComponents.acknowledge((0 until ids.length()).map { ids.getString(it) })
+                    synchronized(this@QaLensLocalBridge) {
+                        requireSession(generation)
+                        QaLensBridgeComponents.acknowledge((0 until ids.length()).map { ids.getString(it) })
+                    }
                     mapOf("ok" to true)
                 }
                 request.method == "POST" && request.path == "/v1/component" -> component(readJson(request.body), generation)
+                request.method == "POST" && request.path == "/v1/recording" -> recording(readJson(request.body), generation)
+                request.method == "POST" && request.path == "/v1/inspection" -> inspection(readJson(request.body), generation)
                 request.method == "POST" && request.path == "/v1/command" -> {
                     val command = try { JSONObject(request.body) } catch (_: Exception) { throw QaLensBridgeFailure(400, "Invalid JSON") }
                     command(command, generation)
@@ -157,15 +247,105 @@ internal object QaLensLocalBridge {
     private fun readJson(body: String): JSONObject = try { JSONObject(body) }
         catch (_: Exception) { throw QaLensBridgeFailure(400, "Invalid JSON") }
 
-    private suspend fun <T> onHost(generation: Long, block: (android.app.Activity) -> T): T =
+    private fun requireSession(generation: Long) {
+        if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
+    }
+
+    private suspend fun <T> onSession(generation: Long, block: suspend () -> T): T =
+        withTimeoutOrNull(1_500) {
+            withContext(Dispatchers.Main.immediate) { requireSession(generation); block() }
+        } ?: throw QaLensBridgeFailure(504, "Host is busy; command cancelled before dispatch if still queued")
+
+    private suspend fun <T> onHost(generation: Long, block: suspend (android.app.Activity) -> T): T =
         withTimeoutOrNull(1_500) {
             withContext(Dispatchers.Main.immediate) {
                 if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
                 val activity = QaLens.currentActivity?.takeIf { QaLensActivityInstaller.isResumed(it) && !it.isFinishing }
-                    ?: throw QaLensBridgeFailure(503, "No foreground host Activity")
+                    ?: throw QaLensBridgeFailure(503, "Return to the app before reading or controlling its live Compose tree")
                 block(activity)
             }
         } ?: throw QaLensBridgeFailure(504, "Host is busy; command cancelled before dispatch if still queued")
+
+    private suspend fun recording(input: JSONObject, generation: Long): Map<String, Any?> {
+        val action = input.opt("action") as? String ?: throw QaLensBridgeFailure(400, "Supply a recording action")
+        if (action !in listOf("start", "stop", "clip")) throw QaLensBridgeFailure(400, "Use start, stop or clip")
+        val video = input.opt("video") ?: false
+        if (video !is Boolean) throw QaLensBridgeFailure(400, "video must be a boolean")
+        val seconds = input.opt("seconds")
+        val label = input.opt("label") ?: "Bug clip"
+        if (action == "clip" && (seconds !is Int || seconds !in 1..300 || label !is String || label.length > 256))
+            throw QaLensBridgeFailure(400, "Clip requires 1–300 integer seconds and a label up to 256 characters")
+        return onSession(generation) {
+            val before = QaLensSessionRecorder.desktopStatus()
+            when (action) {
+                "start" -> {
+                    if (before["phase"] != "idle") throw QaLensBridgeFailure(409, "A recording is active or still saving")
+                    if (video && !QaLens.config.value.allowUnmaskedVideo) throw QaLensBridgeFailure(403, "Host has not enabled unmasked HD video; choose Frames")
+                    val activity = QaLens.currentActivity?.takeIf { QaLensActivityInstaller.isResumed(it) && !it.isFinishing }
+                        ?: throw QaLensBridgeFailure(503, "Return to the app before starting recording")
+                    QaLens.setInspectMode(false); QaLens.setTagMode(false); QaLens.setWatchMode(false); QaLens.closePanel()
+                    QaLensSessionRecorder.start(activity, video)
+                }
+                "stop" -> {
+                    if (before["phase"] !in listOf("capturing", "awaiting_consent")) throw QaLensBridgeFailure(409, "No active recording to stop")
+                    QaLensSessionRecorder.stop(share = false)
+                }
+                "clip" -> {
+                    if (before["canClip"] != true) throw QaLensBridgeFailure(409, "Start recording first; at most 20 clips per session")
+                    QaLensSessionRecorder.markClip(seconds as Int, label as String)
+                }
+            }
+            mapOf("ok" to true, "accepted" to true, "controls" to QaLensSessionRecorder.desktopStatus(),
+                "notice" to if (action == "clip") "Clip marked; exported after recording stops" else "Recording $action requested")
+        }
+    }
+
+    private suspend fun inspection(input: JSONObject, generation: Long): Map<String, Any?> {
+        val enabled = input.opt("enabled") as? Boolean ?: throw QaLensBridgeFailure(400, "enabled must be a boolean")
+        return onHost(generation) {
+            if (enabled && QaLens.state.value.isRecording) throw QaLensBridgeFailure(409, "Stop recording before inspecting")
+            if (enabled && !QaLens.config.value.enableSemanticsReflection) throw QaLensBridgeFailure(403, "Host disabled inspection")
+            QaLens.closePanel(); QaLens.setTagMode(false); QaLens.setWatchMode(false); QaLens.setInspectMode(enabled)
+            mapOf("ok" to true, "enabled" to enabled)
+        }
+    }
+
+    private suspend fun screenshot(input: JSONObject, generation: Long): ByteArray {
+        val include = input.opt("includeOverlay") as? Boolean ?: throw QaLensBridgeFailure(400, "includeOverlay must be a boolean")
+        val epoch = QaLens.captureEpoch
+        val owner = java.util.concurrent.atomic.AtomicReference<android.graphics.Bitmap?>()
+        return try {
+            val bitmap = onHost(generation) { activity ->
+                suspendCancellableCoroutine<android.graphics.Bitmap> { continuation ->
+                    // The existing capture masks private semantics and restores the exact view visibility,
+                    // including failed/cancelled captures. Never persistently toggle host preferences.
+                    QaLensScreenCapture.captureFrame(activity, manageOverlay = !include) { frame ->
+                        if (frame == null) {
+                            if (continuation.isActive) continuation.resumeWith(Result.failure(QaLensBridgeFailure(409, "Screenshot unavailable; window may be secure or not ready")))
+                        } else if (continuation.isActive) {
+                            owner.set(frame)
+                            continuation.resume(frame) { _, lost, _ -> if (owner.compareAndSet(lost, null)) lost.recycle() }
+                        } else frame.recycle()
+                    }
+                }
+            }
+            currentCoroutineContext().ensureActive()
+            val output = object : java.io.ByteArrayOutputStream() {
+                override fun write(buffer: ByteArray, offset: Int, length: Int) {
+                    if (count + length > 16 * 1024 * 1024) throw QaLensBridgeFailure(413, "Screenshot exceeds 16 MiB")
+                    super.write(buffer, offset, length)
+                }
+                override fun write(value: Int) {
+                    if (count >= 16 * 1024 * 1024) throw QaLensBridgeFailure(413, "Screenshot exceeds 16 MiB")
+                    super.write(value)
+                }
+            }
+            if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)) throw QaLensBridgeFailure(500, "Screenshot encoding failed")
+            requireSession(generation)
+            if (epoch != QaLens.captureEpoch) throw QaLensBridgeFailure(409, "Capture policy changed; screenshot discarded")
+            output.toByteArray()
+        } finally { owner.getAndSet(null)?.recycle() }
+    }
 
     private fun live(activity: android.app.Activity): Pair<List<InspectNode>, Map<String, SemanticsNode>> {
         if (!QaLens.config.value.enableSemanticsReflection)
@@ -179,16 +359,24 @@ internal object QaLensLocalBridge {
         val result = onHost<Map<String, Any?>>(generation) { activity ->
             val (nodes, raw) = live(activity)
             val included = nodes.take(1_000).map { it.id }.toSet()
+            val origin = IntArray(2).also { activity.window.decorView.getLocationOnScreen(it) }
+            val displaySize = android.graphics.Point()
+            @Suppress("DEPRECATION")
+            activity.windowManager.defaultDisplay.getRealSize(displaySize)
             mapOf<String, Any?>("ok" to true, "protocol" to 1, "screen" to QaLens.state.value.screen.displayName,
                 "route" to QaLens.state.value.screen.route, "capturedAtMillis" to System.currentTimeMillis(),
-                "viewport" to mapOf<String, Any?>("width" to activity.window.decorView.width, "height" to activity.window.decorView.height),
+                "selectedId" to QaLens.state.value.selectedNode?.id,
+                "viewport" to mapOf<String, Any?>("width" to activity.window.decorView.width, "height" to activity.window.decorView.height,
+                    "originX" to origin[0], "originY" to origin[1]),
+                "screenViewport" to mapOf("width" to displaySize.x, "height" to displaySize.y),
+                "windows" to QaLensInspectionWindows.snapshot(activity),
                 "omittedNodes" to (nodes.size - included.size),
                 "nodes" to nodes.take(1_000).map { node ->
                     val semantic = raw[node.id]
                     val password = QaLensBridgeComponents.password(semantic)
                     var parent = semantic?.parent
                     while (parent != null && QaLensActivityInstaller.semanticsId(parent) !in included) parent = parent.parent
-                    mapOf<String, Any?>("id" to node.id, "parentId" to parent?.let(QaLensActivityInstaller::semanticsId),
+                    mapOf<String, Any?>("id" to node.id, "windowId" to QaLensInspectionWindows.windowId(node.id), "parentId" to parent?.let(QaLensActivityInstaller::semanticsId),
                         "tag" to node.testTag, "label" to if (password) "[protected]" else node.label,
                         "text" to if (password) emptyList() else node.text.take(8),
                         "description" to if (password) emptyList() else node.contentDescription.take(4), "role" to node.role,
@@ -207,9 +395,46 @@ internal object QaLensLocalBridge {
         if (node.config.contains(SemanticsActions.ScrollBy)) add("scroll")
     }
 
+    private suspend fun selectorTree(generation: Long): Pair<QaLensAutomationInspection.Capture, List<QaLensSelectorNode>> {
+        val capture = onHost(generation) { QaLensAutomationInspection.capture(it) }
+        val nodes = capture.redacted()
+        requireCapture(capture, generation)
+        return capture to nodes
+    }
+
+    private fun requireCapture(capture: QaLensAutomationInspection.Capture, generation: Long) {
+        requireSession(generation)
+        if (capture.config != QaLens.config.value) throw QaLensBridgeFailure(409, "Inspection settings changed; refresh and retry")
+    }
+
+    private suspend fun selectors(input: JSONObject, generation: Long): Map<String, Any?> {
+        val id = input.opt("id") as? String ?: throw QaLensBridgeFailure(400, "Supply a current node id")
+        if (id.isBlank() || id.length > 128) throw QaLensBridgeFailure(400, "Supply a current node id")
+        val (capture, nodes) = selectorTree(generation)
+        if (nodes.none { it.id == id }) throw QaLensBridgeFailure(404, "Element changed; refresh and select it again")
+        val result = mapOf("ok" to true, "schema" to "qalens.selectors", "version" to 1, "liveNodeId" to id,
+            "suggestions" to QaLensAutomationInspection.suggestions(nodes, id), "xml" to QaLensSelectors.xml(nodes),
+            "omittedNodes" to capture.omitted, "coverage" to "QaLens visible Compose XML. XPath is not an Appium/UIAutomator locator. Match counts apply to this snapshot; positions and content can change.")
+        requireCapture(capture, generation)
+        return result
+    }
+
+    private suspend fun query(input: JSONObject, generation: Long): Map<String, Any?> {
+        val xpath = input.opt("xpath") as? String ?: throw QaLensBridgeFailure(400, "Supply XPath text")
+        try { QaLensSelectors.resolve(emptyList(), xpath) }
+            catch (failure: IllegalArgumentException) { throw QaLensBridgeFailure(400, failure.message ?: "Invalid XPath") }
+        val (capture, nodes) = selectorTree(generation)
+        val matches = try { QaLensSelectors.resolve(nodes, xpath) }
+            catch (failure: IllegalArgumentException) { throw QaLensBridgeFailure(400, failure.message ?: "Invalid XPath") }
+        requireCapture(capture, generation)
+        return mapOf("ok" to true, "count" to matches.size, "omittedNodes" to capture.omitted,
+            "nodes" to matches.take(100).map { mapOf("id" to it.id, "attributes" to it.attributes) },
+            "omittedMatches" to (matches.size - minOf(matches.size, 100)))
+    }
+
     fun sendComponent(id: String) {
         val generation = epoch
-        if (!status.value.startsWith("Listening")) { QaLensBridgeComponents.report("Start the bridge in your QA app first"); return }
+        if (!status.value.startsWith("Listening")) { QaLensBridgeComponents.report("Connect through Quick actions → Connect to PC, or Control Room → Desktop connection first"); return }
         QaLensBridgeComponents.report("Reading component…")
         scope.launch {
             try {
@@ -239,7 +464,7 @@ internal object QaLensLocalBridge {
     }
 
     private suspend fun command(command: JSONObject, generation: Long): Map<String, Any?> {
-        for (field in listOf("action", "id", "tag", "text")) {
+        for (field in listOf("action", "id", "tag", "text", "xpath")) {
             if (command.has(field) && command.opt(field) !is String)
                 throw QaLensBridgeFailure(400, "$field must be a string")
         }
@@ -251,7 +476,21 @@ internal object QaLensLocalBridge {
         if (action !in listOf("tap", "type", "scroll", "select")) throw QaLensBridgeFailure(400, "Use tap, type, scroll or select")
         val id = command.optString("id")
         val tag = command.optString("tag")
-        if ((id.isBlank()) == (tag.isBlank())) throw QaLensBridgeFailure(400, "Supply exactly one exact id or tag")
+        val xpath = command.optString("xpath")
+        if (listOf(id, tag, xpath).count { it.isNotBlank() } != 1) throw QaLensBridgeFailure(400, "Supply exactly one id, tag or QaLens XPath")
+        var xpathCapture: QaLensAutomationInspection.Capture? = null
+        val resolvedId = if (xpath.isNotBlank()) {
+            try { QaLensSelectors.resolve(emptyList(), xpath) }
+                catch (failure: IllegalArgumentException) { throw QaLensBridgeFailure(400, failure.message ?: "Invalid XPath") }
+            val (capture, nodes) = selectorTree(generation)
+            if (capture.omitted > 0) throw QaLensBridgeFailure(409, "Tree is truncated; XPath uniqueness cannot be established")
+            xpathCapture = capture
+            val matches = try { QaLensSelectors.resolve(nodes, xpath) }
+                catch (failure: IllegalArgumentException) { throw QaLensBridgeFailure(400, failure.message ?: "Invalid XPath") }
+            if (matches.isEmpty()) throw QaLensBridgeFailure(404, "XPath matched no visible element")
+            if (matches.size != 1) throw QaLensBridgeFailure(409, "XPath is ambiguous (${matches.size} matches); scope it to a parent")
+            matches.single().id
+        } else id
         val text = command.optString("text")
         if (action == "type" && (!command.has("text") || text.length > 4_096)) throw QaLensBridgeFailure(400, "Type requires text of at most 4096 characters")
         val dx = command.optDouble("dx", 0.0).toFloat()
@@ -260,7 +499,12 @@ internal object QaLensLocalBridge {
             throw QaLensBridgeFailure(400, "Scroll deltas must be finite window pixels within ±10000")
         return onHost(generation) { activity ->
             val (visible, raw) = live(activity)
-            val matches = visible.filter { if (id.isNotBlank()) it.id == id else it.testTag == tag }
+            xpathCapture?.let { before ->
+                val current = QaLensAutomationInspection.capture(visible, raw)
+                if (current.nodes != before.nodes || current.config != before.config)
+                    throw QaLensBridgeFailure(409, "Tree changed while resolving XPath; refresh and verify the target")
+            }
+            val matches = visible.filter { if (resolvedId.isNotBlank()) it.id == resolvedId else it.testTag == tag }
             if (matches.isEmpty()) throw QaLensBridgeFailure(404, "Target is absent, hidden or off-screen; refresh the tree")
             if (matches.size != 1) throw QaLensBridgeFailure(409, "Tag is ambiguous; use a tree node id")
             val hit = matches.single()
@@ -285,22 +529,32 @@ internal object QaLensLocalBridge {
     }
 
     private suspend fun observations(generation: Long): Map<String, Any?> {
-        onHost(generation) { true } // Require a live session, without recomputing reports/providers.
+        requireSession(generation) // Cached evidence can be read while Control Room is in front.
         val state = QaLens.state.value
+        val logs = state.events.filter { it.type == QaEventType.LOG }
+        val config = QaLens.config.value
         return sanitize(mapOf<String, Any?>("ok" to true, "coverage" to "Bounded dashboard observations, not a complete recording",
             "events" to state.events.takeLast(100).map { mapOf<String, Any?>("time" to it.timestampMillis, "type" to it.type.name, "tag" to it.tag, "message" to it.message) },
-            "network" to state.networkEvents.takeLast(100).map { mapOf<String, Any?>("method" to it.method, "url" to it.url, "status" to it.status, "durationMs" to it.latencyMs) },
+            "logs" to logs.takeLast(100).map { mapOf<String, Any?>("time" to it.timestampMillis, "type" to it.type.name, "tag" to it.tag, "message" to it.message) },
+            "omittedLogs" to (logs.size - minOf(logs.size, 100)),
+            "policyId" to QaLensBridgeDataTools.policyId(),
+            "network" to state.networkEvents.takeLast(100).map { mapOf<String, Any?>(
+                "time" to it.timestampMillis, "method" to it.method, "url" to it.url, "status" to it.status,
+                "error" to it.error, "durationMs" to it.latencyMs, "requestBytes" to it.requestBodyBytes,
+                "responseBytes" to it.responseBodyBytes, "connectivity" to it.connectivity?.type?.name,
+                "requestPreview" to if (config.captureNetworkBodies) it.requestBodyPreview else null,
+                "responsePreview" to if (config.captureNetworkBodies) it.responseBodyPreview else null) },
             "omittedEvents" to (state.events.size - minOf(state.events.size, 100)),
             "omittedNetwork" to (state.networkEvents.size - minOf(state.networkEvents.size, 100)),
-            "omittedDataSources" to (state.dataSources.size - minOf(state.dataSources.size, 20)),
-            "dataSources" to state.dataSources.entries.take(20).associate { (name, values) -> name to values.entries.take(100).associate { it.key to it.value } }))
+            "omittedDataSources" to (state.dataSources.size - minOf(state.dataSources.size, 30)),
+            // Kept for older desktop clients, now with a global response budget and key masking.
+            "dataSources" to QaLensBridgeDataTools.values()["dataSources"]), config).also { QaLensBridgeDataTools.policyId(config) }
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun sanitize(value: Map<String, Any?>): Map<String, Any?> {
-        val config = QaLens.config.value
+    private fun sanitize(value: Map<String, Any?>, config: QaLensConfig = QaLens.config.value): Map<String, Any?> {
         fun clean(item: Any?, field: String = "", dynamicKeys: Boolean = false): Any? = when (item) {
-            is String -> if (!dynamicKeys && field in listOf("id", "parentId", "actions", "action")) item
+            is String -> if (!dynamicKeys && field in listOf("id", "parentId", "selectedId", "actions", "action")) item
                 else config.redact(item).take(2_048)
             is Map<*, *> -> item.entries.associate {
                 val key = it.key.toString()

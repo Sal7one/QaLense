@@ -3,6 +3,7 @@
 Python standard library only. Component files require explicit Save; tokens stay in memory.
 """
 import argparse
+import errno
 import getpass
 import hmac
 import json
@@ -10,17 +11,24 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import signal
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.client import IncompleteRead
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
-from workbench import Workbench, MAX_DOCUMENT
-from desktop import WEB_ROOT, WEB_ASSETS, MAX_TRANSFER
+from workbench import Workbench, MAX_DOCUMENT, StorageUnavailable
+from desktop import WEB_ROOT, WEB_ASSETS, MAX_TRANSFER, png_size, native_scrcpy
+import scrcpy_mirror
+import insights
+import investigations
+from mirror_flags import ENABLE_LEGACY_MIRROR
 from urllib.parse import urlsplit, parse_qs
 import mimetypes
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
+from device_http import urlopen
 
 MAX_BODY = 16_384
 MAX_RESPONSE = 4 * 1024 * 1024
@@ -29,10 +37,20 @@ MAX_RESPONSE = 4 * 1024 * 1024
 class BridgeServer(ThreadingHTTPServer):
     daemon_threads = True
     def __init__(self, address, device_port, token, workbench=None):
+        # TCPServer calls server_close itself if bind fails, before construction completes.
+        self.insights = None
         super().__init__(address, Handler)
         self.device_port = device_port
         self.token = token
         self.workbench = workbench
+        self.insights = insights.Service() if workbench else None
+        if workbench and token:
+            workbench.phase = "connected"; workbench.approved = True
+
+    def server_close(self):
+        if self.insights:
+            self.insights.close()
+        super().server_close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -45,7 +63,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass  # Never log payloads or credentials.
 
-    def reply(self, status, payload, content_type="application/json; charset=utf-8"):
+    def reply(self, status, payload, content_type="application/json; charset=utf-8", headers=None):
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -53,6 +71,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "close")
         self.send_header("X-Content-Type-Options", "nosniff")
+        for key, value in (headers or {}).items(): self.send_header(key, value)
         # Existing replay permits explicit user-configured backend sends; shell APIs remain same-origin.
         connect = "'self' http: https:" if self.path.startswith("/web/") else "'self'"
         self.send_header("Content-Security-Policy", f"default-src 'self'; script-src 'self'; style-src 'self'; connect-src {connect}; frame-src 'self'; media-src 'self' blob:; img-src 'self' blob: data:; font-src 'self' data:; style-src-attr 'unsafe-inline'; frame-ancestors 'self'")
@@ -79,22 +98,69 @@ class Handler(BaseHTTPRequestHandler):
             name = parsed.path.removeprefix("/web/")
             if name not in WEB_ASSETS: return self.reply(404, {"ok": False, "error": "Unknown viewer asset"})
             return self.reply(200, (WEB_ROOT / name).read_bytes(), mimetypes.guess_type(name)[0] or "application/octet-stream")
-        assets = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8")}
+        assets = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/recording-transfer.js": ("recording-transfer.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8")}
+        assets["/mirror-controls.js"] = ("mirror-controls.js", "text/javascript; charset=utf-8")
+        assets["/diagnostics.js"] = ("diagnostics.js", "text/javascript; charset=utf-8")
+        assets["/scrcpy-stream.js"] = ("scrcpy-stream.js", "text/javascript; charset=utf-8")
+        assets["/investigation-inbox.js"] = ("investigation-inbox.js", "text/javascript; charset=utf-8")
         if self.command == "GET" and self.path in assets:
             name, mime = assets[self.path]
             return self.reply(200, Path(__file__).with_name(name).read_bytes(), mime)
         bench = self.server.workbench
         if bench and self.command == "GET" and self.path == "/api/bootstrap":
             return self.reply(200, {"ok": True, "session": bench.session})
-        endpoints = {("GET", "/api/recordings/device"): "/v1/recordings", ("GET", "/api/snapshot"): "/v1/snapshot", ("GET", "/api/events"): "/v1/events", ("POST", "/api/command"): "/v1/command", ("POST", "/api/component"): "/v1/component", ("GET", "/api/inbox"): "/v1/components/inbox"}
+        endpoints = {("GET", "/api/recordings/device"): "/v1/recordings", ("GET", "/api/snapshot"): "/v1/snapshot", ("GET", "/api/selection"): "/v1/selection", ("POST", "/api/selectors"): "/v1/selectors", ("POST", "/api/query"): "/v1/query", ("GET", "/api/events"): "/v1/events", ("POST", "/api/command"): "/v1/command", ("POST", "/api/component"): "/v1/component", ("GET", "/api/inbox"): "/v1/components/inbox"}
+        endpoints.update({("POST", "/api/recording"): "/v1/recording", ("POST", "/api/inspection"): "/v1/inspection", ("POST", "/api/screenshot"): "/v1/screenshot"})
+        endpoints.update({(method, f"/api/{name}"): f"/v1/{name}" for method in ("GET", "POST") for name in ("data", "sql")})
         route = endpoints.get((self.command, self.path))
         binary = parsed.path == "/api/recordings/file"
-        if not route and not (bench and (self.path in WORKBENCH_ROUTES or binary)):
+        insight_route = bench and parsed.path in INSIGHT_ROUTES
+        investigation_route = bench and parsed.path in INVESTIGATION_ROUTES
+        if not route and not (bench and (self.path in WORKBENCH_ROUTES or binary or insight_route or investigation_route)):
             return self.reply(404, {"ok": False, "error": "Unknown endpoint"})
         desktop = bench and hmac.compare_digest(self.headers.get("X-Qalens-Session", "").encode(), bench.session.encode())
         device = self.server.token and hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode())
         if not (desktop or device):
-            return self.reply(401, {"ok": False, "error": "Enter the device pairing token"})
+            return self.reply(401, {"ok": False, "error": "Reload the desktop page to renew its session. Scripts require a valid pairing token."})
+        if insight_route and not desktop:
+            return self.reply(401, {"ok": False, "error": "Open the desktop page to analyze evidence with a local model"})
+        if insight_route and (self.command, parsed.path) not in INSIGHT_METHODS:
+            return self.reply(405, {"ok": False, "error": "Use the documented insight endpoint method"})
+        if investigation_route and not desktop:
+            return self.reply(401, {"ok": False, "error": "Open the desktop page to receive or save an investigation"})
+        if investigation_route and (self.command, parsed.path) not in INVESTIGATION_METHODS:
+            return self.reply(405, {"ok": False, "error": "Use the documented investigation endpoint method"})
+        if (self.path.startswith("/api/mirror/") or (not ENABLE_LEGACY_MIRROR and self.path == "/api/preview")) and not desktop:
+            return self.reply(401, {"ok": False, "error": "Open the desktop page to use the mirror"})
+        if self.path == "/api/mirror/video" and self.command == "GET" and bench:
+            try:
+                owned = bench.desktop.stream_session({"connectionId": self.headers.get("X-Qalens-Connection", ""), "streamId": self.headers.get("X-Qalens-Mirror", "")})
+                packets = owned.stream()
+                # Validate the one-viewer lease before committing HTTP streaming headers.
+                first = next(packets)
+            except (ValueError, StopIteration) as error:
+                return self.reply(409, {"ok": False, "error": str(error) or "Mirror stopped"})
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Transfer-Encoding", "chunked")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                for data in self.stream_packets(first, packets):
+                    self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n"); self.wfile.flush()
+                self.wfile.write(b"0\r\n\r\n")
+            except (OSError, TimeoutError): pass
+            finally:
+                packets.close(); self.close_connection = True
+            return
+        if self.path == "/api/screen" and self.command == "GET" and bench:
+            try:
+                pixels, frame_id = bench.desktop.screen(self.headers.get("X-Qalens-Connection", ""), with_meta=True)
+                return self.reply(200, pixels, "image/png", {"X-Qalens-Frame": frame_id})
+            except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+                return self.reply(400, {"ok": False, "error": str(error)[:256]})
         if binary and self.command == "GET" and bench:
             try:
                 path = bench.desktop.recording(parse_qs(parsed.query).get("id", [""])[0])
@@ -114,7 +180,7 @@ class Handler(BaseHTTPRequestHandler):
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             return self.reply(400, {"ok": False, "error": "Invalid content length"})
-        limit = MAX_TRANSFER if self.path == "/api/file/push" else MAX_DOCUMENT + 4096 if self.path == "/api/import" else MAX_BODY
+        limit = MAX_TRANSFER if self.path == "/api/file/push" else MAX_DOCUMENT + 4096 if self.path == "/api/import" else insights.MAX_BODY if parsed.path == "/api/insights/analyze" else MAX_BODY
         if not 0 <= size <= limit:
             return self.reply(413, {"ok": False, "error": "Command too large"})
         if self.path == "/api/file/push" and self.command == "POST" and bench:
@@ -135,6 +201,20 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TimeoutError, RecursionError):
                 return self.reply(400, {"ok": False, "error": "Invalid command JSON"})
         try:
+            if investigation_route:
+                return self.investigations_request(parsed, json.loads(body) if body else {})
+            if insight_route:
+                value = json.loads(body) if body else {}
+                if parsed.path == "/api/insights/models":
+                    return self.reply(200, self.server.insights.models(value.get("config")))
+                if parsed.path == "/api/insights/analyze":
+                    return self.reply(200, self.server.insights.submit(value.get("config"), value.get("bundle"), value.get("includeImage") is True))
+                if parsed.path == "/api/insights/cancel":
+                    return self.reply(200, self.server.insights.cancel(value.get("id")))
+                ident = parse_qs(parsed.query).get("id", [""])
+                if len(ident) != 1:
+                    raise ValueError("Choose one insight job")
+                return self.reply(200, self.server.insights.get(ident[0]))
             if bench and self.path in WORKBENCH_ROUTES:
                 return self.reply(200, self.workbench_request(json.loads(body) if body else {}))
             if not self.server.token or not self.server.device_port:
@@ -142,12 +222,16 @@ class Handler(BaseHTTPRequestHandler):
             # Serialize session switching with a device read/action; never replay a command.
             from contextlib import nullcontext
             with bench.lock if bench else nullcontext():
-                if desktop and self.command == "POST" and self.headers.get("X-Qalens-Connection") != bench.connection_id:
+                if desktop and (self.command == "POST" or self.path in {"/api/events", "/api/data", "/api/sql"}) and self.headers.get("X-Qalens-Connection") != bench.connection_id:
                     return self.reply(409, {"ok": False, "error": "Device connection changed; refresh the tree before selecting a target"})
                 if not desktop and not hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode()):
                     return self.reply(401, {"ok": False, "error": "Device pairing changed; connect again"})
+                if self.path == "/api/screenshot":
+                    code, pixels, mime = self.proxy_screenshot(body)
+                    return self.reply(code, pixels, mime)
                 code, payload = self.proxy(route, body, self.command)
-                if code == 200 and bench and self.path in {"/api/snapshot", "/api/recordings/device"}: payload["connectionId"] = bench.connection_id
+                if code == 200 and bench and self.path in {"/api/recording", "/api/inspection", "/api/events", "/api/data", "/api/sql"}: payload["connectionId"] = bench.connection_id
+                if code == 200 and bench and self.path in {"/api/snapshot", "/api/selection", "/api/selectors", "/api/query", "/api/recordings/device"}: payload["connectionId"] = bench.connection_id
                 if code == 200 and bench and self.path == "/api/component":
                     payload = {"ok": True, "document": bench.preview(payload)}
                 elif code == 200 and bench and self.path == "/api/inbox":
@@ -158,7 +242,8 @@ class Handler(BaseHTTPRequestHandler):
                     # PC memory owns the preview before acknowledgement; Save is still explicit.
                     if ids: self.proxy("/v1/components/ack", json.dumps({"ids": ids}).encode(), "POST")
                     payload = {"ok": True, "dropped": payload.get("dropped", 0), "received": len(ids),
-                               "documents": list(bench.pending.values()), "omittedPreviews": bench.preview_dropped}
+                               "documents": list(bench.pending.values()), "omittedPreviews": bench.preview_dropped,
+                               "connectionId": bench.connection_id}
                 return self.reply(code, payload)
         except ValueError as error:
             return self.reply(400, {"ok": False, "error": str(error)[:256]})
@@ -167,34 +252,156 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, TimeoutError):
             return self.reply(500, {"ok": False, "error": "Local storage unavailable; nothing was confirmed saved"})
 
-    def proxy(self, route, body, method):
-        headers = {"Authorization": f"Bearer {self.server.token}", "Content-Type": "application/json"}
-        request = Request(f"http://127.0.0.1:{self.server.device_port}{route}", data=body, headers=headers, method=method)
+    def proxy(self, route, body, method, phone=None, strict=False, response_limit=MAX_RESPONSE):
+        device_port, token = phone if phone else (self.server.device_port, self.server.token)
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        request = Request(f"http://127.0.0.1:{device_port}{route}", data=body, headers=headers, method=method)
         try:
             try: response = urlopen(request, timeout=5)
             except HTTPError as error: response = error
             with response:
-                data = response.read(MAX_RESPONSE + 1)
-                if len(data) > MAX_RESPONSE: raise ValueError("Device response exceeds limit")
-                return response.code, json.loads(data)
-        except (URLError, TimeoutError, ConnectionError, ValueError):
-            return 502, {"ok": False, "error": "Device unavailable. Start its bridge, check token/adb, then refresh. Commands are never retried automatically."}
+                data = response.read(response_limit + 1)
+                if len(data) > response_limit: raise ValueError("Device response exceeds limit")
+                declared = response.headers.get("Content-Length")
+                if declared is not None and int(declared) != len(data): raise ValueError("Device response interrupted")
+                payload = insights._parse_json(data) if strict else json.loads(data)
+                if not isinstance(payload, dict): raise ValueError("Invalid device response")
+                return response.code, payload
+        except (URLError, TimeoutError, ConnectionError, ValueError, IncompleteRead, RecursionError):
+            return 502, {"ok": False, "error": "Phone unavailable. Check USB and return to the app. UI actions are never retried automatically."}
+
+    def investigations_request(self, parsed, body):
+        bench = self.server.workbench
+        store = bench.investigations
+        # Every local lookup also discards obsolete unsaved phone cases; saved documents are independent.
+        with bench.lock:
+            store.bind(bench.connection_id)
+        if parsed.path == "/api/investigations/previews":
+            return self.reply(200, store.previews())
+        if parsed.path == "/api/investigations/saved":
+            return self.reply(200, store.saved())
+        if parsed.path == "/api/investigations/save":
+            return self.reply(200, store.save(body.get("hash")))
+        if parsed.path == "/api/investigations/document":
+            digests = parse_qs(parsed.query).get("hash", [""])
+            if len(digests) != 1:
+                raise ValueError("Choose one investigation hash.")
+            return self.reply(200, store.document(digests[0]))
+        if not store.receive_lock.acquire(blocking=False):
+            return self.reply(409, {"ok": False, "error": "Investigation reception is already running; wait for it to finish."})
+        try:
+            with bench.lock:
+                identity = bench.connection_id
+                if self.headers.get("X-Qalens-Connection") != identity:
+                    return self.reply(409, {"ok": False, "error": "Device connection changed; refresh before receiving cases."})
+                phone = (self.server.device_port, self.server.token)
+                if not phone[0] or not phone[1] or not (bench.approved or bench.connection is None):
+                    return self.reply(503, {"ok": False, "error": "Connect and approve your phone before receiving investigations."})
+            # A slow inbox read never blocks device switching or another independent model request.
+            code, payload = self.proxy("/v1/investigations/inbox", None, "GET", phone=phone, strict=True)
+            if code != 200 or payload.get("ok") is not True:
+                return self.reply(502, {"ok": False, "error": "Phone investigation inbox is unavailable. Check approval and update its QaLens SDK."})
+            transfers, dropped = investigations.validate_inbox(payload)
+            prepared, invalid = [], 0
+            for transfer in transfers:
+                ident = transfer.get("id") if isinstance(transfer, dict) else None
+                if not isinstance(ident, str) or not investigations.TRANSFER_ID.fullmatch(ident):
+                    invalid += 1
+                    continue
+                try:
+                    digest, document, size = investigations.validate_document(transfer.get("document"))
+                    prepared.append((ident, digest, document, size))
+                except (ValueError, TypeError, RecursionError):
+                    invalid += 1
+            with bench.lock:
+                if identity != bench.connection_id or phone != (self.server.device_port, self.server.token):
+                    return self.reply(409, {"ok": False, "error": "Phone changed during reception; no stale cases were accepted or acknowledged."})
+                ids, received, duplicates, blocked = [], 0, 0, 0
+                for ident, digest, document, size in prepared:
+                    try:
+                        outcome = store.accept(digest, document, size)
+                    except (ValueError, OSError):
+                        invalid += 1
+                        continue
+                    if outcome == "blocked":
+                        blocked += 1
+                        continue
+                    ids.append(ident)
+                    if outcome == "duplicate": duplicates += 1
+                    else: received += 1
+                # Serialize the small acknowledgement with identity switching: it cannot acknowledge a new phone.
+                acknowledged = True
+                if ids:
+                    ack_code, ack = self.proxy("/v1/investigations/ack", json.dumps({"ids": ids}).encode(), "POST",
+                                               phone=phone, strict=True, response_limit=MAX_BODY)
+                    acknowledged = ack_code == 200 and ack.get("ok") is True
+                result = {**store.previews(), "connectionId": identity, "received": received,
+                          "duplicates": duplicates, "invalid": invalid, "blocked": blocked, "dropped": dropped,
+                          "acknowledged": acknowledged, "acknowledgedCount": len(ids) if acknowledged else 0}
+            if blocked:
+                result["notice"] = "Save a received case to make room. Overflow cases remain on the phone."
+            elif invalid:
+                result["notice"] = "Some investigations were invalid and remain unacknowledged on the phone."
+            elif not acknowledged:
+                result["notice"] = "Received cases are held in PC memory; phone acknowledgement failed. A refresh is safe."
+            return self.reply(200, result)
+        finally:
+            store.receive_lock.release()
+
+    @staticmethod
+    def stream_packets(first, packets):
+        yield first
+        yield from packets
+
+    def proxy_screenshot(self, body):
+        request = Request(f"http://127.0.0.1:{self.server.device_port}/v1/screenshot", data=body,
+                          headers={"Authorization": f"Bearer {self.server.token}", "Content-Type": "application/json"}, method="POST")
+        try:
+            try: response = urlopen(request, timeout=5)
+            except HTTPError as error: response = error
+            with response:
+                if response.code != 200:
+                    payload = json.loads(response.read(MAX_RESPONSE + 1))
+                    return response.code, payload, "application/json; charset=utf-8"
+                pixels = response.read(16 * 1024 * 1024 + 1)
+                if len(pixels) > 16 * 1024 * 1024: raise ValueError("Screenshot exceeds 16 MiB")
+                declared = response.headers.get("Content-Length")
+                if declared is not None and int(declared) != len(pixels): raise ValueError("Screenshot transfer interrupted")
+                png_size(pixels)
+                return 200, pixels, "image/png"
+        except (URLError, OSError, IncompleteRead, ValueError):
+            return 502, {"ok": False, "error": "Screenshot unavailable. Update the app's QaLens SDK if needed, return to the app and try again."}, "application/json; charset=utf-8"
 
     def workbench_request(self, body):
         bench = self.server.workbench
         if self.command == "GET":
             if self.path == "/api/workbench":
                 with bench.lock:
-                    return {"ok": True, "connected": bool(self.server.token), "connection": bench.connection,
-                            "connectionId": bench.connection_id, "profiles": bench.profiles(), "dataDir": str(bench.root.resolve()),
+                    return {**bench.connection_state(self.server), "profiles": bench.profiles(), "dataDir": str(bench.root.resolve()),
+                            "preferences": bench.preferences(),
                             "pipelines": [{"id": p["id"], "name": p.get("name", p["id"])} for p in bench.pipelines.values()],
-                            "jobs": list(bench.jobs.values()), "scrcpyAvailable": bool(shutil.which("scrcpy"))}
+                            "jobs": list(bench.jobs.values()), "scrcpyAvailable": bool(native_scrcpy()),
+                            "mirrorBackend": "legacy" if ENABLE_LEGACY_MIRROR else "scrcpy",
+                            "mirrorReady": scrcpy_mirror.available(), "mirrorVersion": scrcpy_mirror.VERSION}
             if self.path == "/api/recordings/local": return bench.desktop.library()
             if self.path == "/api/saved": return bench.saved()
             if self.path == "/api/previews":
                 with bench.lock: return {"ok": True, "documents": list(bench.pending.values()), "omittedPreviews": bench.preview_dropped}
             raise ValueError("POST required")
         if self.path == "/api/adb": return bench.desktop.task(body)
+        if self.path == "/api/preview": return bench.desktop.preview(body)
+        if self.path == "/api/input": return bench.desktop.input(body)
+        if self.path == "/api/mirror/setup": return scrcpy_mirror.install()
+        if self.path in {"/api/mirror/heartbeat", "/api/mirror/input"}:
+            if self.path.endswith("heartbeat"):
+                # A local viewer must not keep capture alive after phone SDK access is revoked.
+                bench.check_connection(self.server, reconnect=False)
+            owned = bench.desktop.stream_session(body)
+            if self.path.endswith("heartbeat"): return owned.heartbeat()
+            return owned.input(body)
+        if self.path == "/api/connection/check": return bench.check_connection(self.server, body.get("reconnect", True) is True)
+        if self.path == "/api/apps": return {"ok": True, "apps": bench.apps(body.get("serial"))}
+        if self.path == "/api/preferences": return {"ok": True, "preferences": bench.save_preferences(body)}
         if self.path == "/api/recordings/receive": return bench.desktop.receive(self.server, body)
         if self.path == "/api/devices": return {"ok": True, "devices": bench.devices()}
         if self.path == "/api/packages":
@@ -211,6 +418,7 @@ class Handler(BaseHTTPRequestHandler):
                 write_json(bench.profiles_path, [p for p in bench.profiles() if p["id"] != body.get("id")])
             return {"ok": True}
         if self.path == "/api/connect": return {"ok": True, "connection": bench.connect(self.server, body["profile"], body.get("token"))}
+        if self.path == "/api/pair": return {"ok": True, "connection": bench.pair(self.server, body["profile"])}
         if self.path == "/api/disconnect": bench.disconnect(self.server); return {"ok": True}
         if self.path == "/api/launch":
             with bench.lock:
@@ -227,65 +435,119 @@ class Handler(BaseHTTPRequestHandler):
         raise ValueError("Unknown operation")
 
 
+INSIGHT_METHODS = {("POST", "/api/insights/models"), ("POST", "/api/insights/analyze"),
+                   ("GET", "/api/insights/jobs"), ("POST", "/api/insights/cancel")}
+INSIGHT_ROUTES = {path for _, path in INSIGHT_METHODS}
+
+INVESTIGATION_METHODS = {("GET", "/api/investigations/inbox"), ("GET", "/api/investigations/previews"),
+                         ("POST", "/api/investigations/save"), ("GET", "/api/investigations/saved"),
+                         ("GET", "/api/investigations/document")}
+INVESTIGATION_ROUTES = {path for _, path in INVESTIGATION_METHODS}
+
 WORKBENCH_ROUTES = {"/api/workbench", "/api/saved", "/api/previews", "/api/devices", "/api/packages",
+                    "/api/mirror/setup", "/api/mirror/video", "/api/mirror/heartbeat", "/api/mirror/input",
+                    "/api/apps", "/api/pair", "/api/connection/check", "/api/preview", "/api/screen", "/api/input", "/api/preferences",
                     "/api/profile", "/api/profile/delete", "/api/connect", "/api/disconnect", "/api/launch",
                     "/api/adb", "/api/file/push", "/api/recordings/local", "/api/recordings/receive", "/api/import", "/api/save", "/api/document", "/api/run", "/api/artifacts", "/api/artifact"}
 
 
 
-def main():
+def restart_command(argv, *overrides):
+    command = [sys.executable, str(Path(__file__).resolve()), *argv, *overrides]
+    if os.name == "nt":
+        return "& " + " ".join("'" + arg.replace("'", "''") + "'" for arg in command)
+    return shlex.join(command)
+
+
+def storage_error(error, argv):
+    path = Path(error.filename)
+    message = f"QaLens could not start: storage is unavailable at {path}\n"
+    if error.errno in (errno.EACCES, errno.EPERM):
+        message += "Your account cannot write to this folder. This can happen after a previous run with sudo.\n"
+    elif error.errno in (errno.EEXIST, errno.ENOTDIR):
+        message += "A directory is required; this path or a parent is a file.\n"
+    else:
+        message += f"Storage error: {error.strerror}\n"
+    alternative = Path.home() / "QaLens-data"
+    try:
+        if alternative.exists() or alternative == path or alternative in path.parents:
+            alternative = Path.home() / f"QaLens-data-{os.getpid()}"
+    except OSError:
+        alternative = Path.home() / f"QaLens-data-{os.getpid()}"
+    shell = " (PowerShell)" if os.name == "nt" else ""
+    message += f"Use a writable folder owned by your account{shell}:\n  " + restart_command(argv, "--data-dir", str(alternative)) + "\n"
+    message += "To keep using your existing saved data, restore access to the original folder and restart.\n"
+    return message
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", help="adb device serial (required if more than one device is connected)")
-    parser.add_argument("--port", type=int, default=8765, help="PC UI port")
+    parser.add_argument("--port", type=int, default=8765, help="PC UI port (default: 8765; 0 chooses an available port)")
     parser.add_argument("--device-port", type=int, default=8766, help="QaLens device port")
     parser.add_argument("--adb", default=shutil.which("adb"), help="adb executable")
     parser.add_argument("--no-adb", action="store_true", help="Use an existing forward at --device-port")
     parser.add_argument("--gui", action="store_true", help="Start unpaired; choose a device and profile in the browser")
     parser.add_argument("--data-dir", default="~/.qalens/bridge", help="Explicitly saved components, profiles and pipeline results")
     parser.add_argument("--pipeline-config", help="Trusted local JSON pipeline configuration (never editable through HTTP)")
-    args = parser.parse_args()
-    token = None if args.gui else os.environ.get("QALENS_BRIDGE_TOKEN") or getpass.getpass("Device pairing token: ")
-    if not args.gui and not re.fullmatch(r"[A-Za-z0-9_-]{24,128}", token):
-        parser.error("Use the device's random 24–128 character token")
-    if not (1024 <= args.port <= 65535 and 1024 <= args.device_port <= 65535):
-        parser.error("Ports must be 1024–65535")
+    args = parser.parse_args(argv)
+    if not ((args.port == 0 or 1024 <= args.port <= 65535) and 1024 <= args.device_port <= 65535):
+        parser.error("PC port must be 0 or 1024–65535; device port must be 1024–65535")
     def stop_on_signal(_signal, _frame):
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM, stop_on_signal)
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, stop_on_signal)
-    forward = None
-    adb = []
     try:
-        if args.gui:
-            device_port = None
-        elif not args.no_adb:
-            if not args.adb:
-                parser.error("Install adb or pass --adb /path/to/adb")
-            rows = subprocess.check_output([args.adb, "devices"], text=True).splitlines()[1:]
-            devices = [row.split()[0] for row in rows if len(row.split()) > 1 and row.split()[1] == "device"]
-            serial = args.serial or (devices[0] if len(devices) == 1 else None)
-            if serial not in devices:
-                parser.error("Choose a connected, authorized device with --serial")
-            adb = [args.adb, "-s", serial]
-            forward = subprocess.check_output(adb + ["forward", "tcp:0", f"tcp:{args.device_port}"], text=True).strip()
-            device_port = int(forward)
-        else:
-            device_port = args.device_port
-        bench = Workbench(args.data_dir, args.adb, args.pipeline_config)
-        with BridgeServer(("127.0.0.1", args.port), device_port, token, bench) as server:
-            if forward:
-                bench.owned_forward = (serial, device_port)
-                forward = None
-            print(f"QaLens workbench: http://127.0.0.1:{server.server_port} (Ctrl-C stops and removes this forward)", flush=True)
-            try: server.serve_forever()
-            finally: bench.close(server)
+        try:
+            bench = Workbench(args.data_dir, args.adb, args.pipeline_config)
+        except StorageUnavailable as error:
+            parser.exit(1, storage_error(error, argv))
+        except (OSError, ValueError) as error:
+            parser.exit(1, f"QaLens could not start: workspace setup failed: {error}\nCheck --pipeline-config if supplied.\n")
+        # Bind before prompting for credentials or creating any device forward.
+        try:
+            server = BridgeServer(("127.0.0.1", args.port), None, None, bench)
+        except OSError as error:
+            if error.errno == errno.EADDRINUSE:
+                shell = " (PowerShell)" if os.name == "nt" else ""
+                parser.exit(1, f"QaLens could not start: port {args.port} is already in use.\n"
+                    f"If QaLens is already running, open http://127.0.0.1:{args.port} in your browser.\n"
+                    f"Otherwise, choose an available port automatically{shell}:\n  " + restart_command(argv, "--port", "0") + "\n")
+            parser.exit(1, f"QaLens could not start: cannot listen on 127.0.0.1:{args.port}: {error.strerror}\n")
+        with server:
+            try:
+                token = None if args.gui else os.environ.get("QALENS_BRIDGE_TOKEN") or getpass.getpass("Device pairing token: ")
+                if not args.gui and not re.fullmatch(r"[A-Za-z0-9_-]{24,128}", token):
+                    parser.error("Use the device's random 24–128 character token")
+                if not args.gui and not args.no_adb:
+                    if not args.adb:
+                        parser.error("Install adb or pass --adb /path/to/adb")
+                    rows = subprocess.check_output([args.adb, "devices"], text=True, timeout=10).splitlines()[1:]
+                    devices = [row.split()[0] for row in rows if len(row.split()) > 1 and row.split()[1] == "device"]
+                    serial = args.serial or (devices[0] if len(devices) == 1 else None)
+                    if serial not in devices:
+                        parser.error("Choose a connected, authorized device with --serial")
+                    adb = [args.adb, "-s", serial]
+                    device_port = int(subprocess.check_output(adb + ["forward", "tcp:0", f"tcp:{args.device_port}"], text=True, timeout=10).strip())
+                    bench.owned_forward = (serial, device_port)
+                else:
+                    device_port = None if args.gui else args.device_port
+                server.device_port = device_port
+                server.token = token
+                if token:
+                    bench.phase = "connected"; bench.approved = True
+                print(f"QaLens workbench: http://127.0.0.1:{server.server_port} (Ctrl-C stops this instance)", flush=True)
+                server.serve_forever()
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                parser.exit(1, f"QaLens could not start: device setup failed: {error}\nCheck adb and the connected device.\n")
+            finally:
+                bench.close(server)
     except KeyboardInterrupt:
         pass
-    finally:
-        if forward:
-            subprocess.run(adb + ["forward", "--remove", f"tcp:{forward}"], check=False, stdout=subprocess.DEVNULL)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -42,28 +42,173 @@ class RecordingRetentionInstrumentation : Instrumentation() {
     private var videoOnly = false
     private var longSession = false
     private var bridgeOnly = false
+    private var desktopCaptureOnly = false
+    private var desktopDataOnly = false
+    private var desktopDataGuiSeconds = 0
+    private var desktopGuiHoldSeconds = 0
+    private var scrcpyGuiSeconds = 0
     private var overlayLoadOnly = false
+    private var controlOnly = false
+    private var controlVideoOnly = false
+    private var manualRootOnly = false
+    private var pcPairingOnly = false
+    private var pcUiOnly = false
+    private var workflowOnly = false
+    private var quickVideoOnly = false
+    private var dataUiOnly = false
+    private var replayOnly = false
+    private var videoRecoveryOnly = false
+    private var projectionConsent: String? = null
+    private var desktopTransferToken: String? = null
+    private var desktopPhoneApproval = false
+    private var selectorsOnly = false
+    private var desktopSelectors = false
+    private var dialogsOnly = false
+    private var insightsOnly = false
+    private var insightsBaseUrl: String? = null
+    private var insightsTransferHoldSeconds = 0
+    private var insightsTransferToken: String? = null
     override fun onCreate(arguments: Bundle?) {
         videoDenyOnly = arguments?.getString("videoDenyOnly") == "true"
         clipsOnly = arguments?.getString("clipsOnly") == "true"
         videoOnly = arguments?.getString("videoOnly") == "true"
         longSession = arguments?.getString("longSession") == "true"
         bridgeOnly = arguments?.getString("bridgeOnly") == "true"
+        desktopCaptureOnly = arguments?.getString("desktopCaptureOnly") == "true"
+        desktopDataOnly = arguments?.getString("desktopDataOnly") == "true"
+        desktopDataGuiSeconds = arguments?.getString("desktopDataGuiSeconds")?.toIntOrNull() ?: 0
+        desktopGuiHoldSeconds = arguments?.getString("desktopGuiHoldSeconds")?.toIntOrNull() ?: 0
+        scrcpyGuiSeconds = arguments?.getString("scrcpyGuiSeconds")?.toIntOrNull() ?: 0
         overlayLoadOnly = arguments?.getString("overlayLoadOnly") == "true"
+        controlOnly = arguments?.getString("controlOnly") == "true"
+        controlVideoOnly = arguments?.getString("controlVideoOnly") == "true"
+        manualRootOnly = arguments?.getString("manualRootOnly") == "true"
+        pcPairingOnly = arguments?.getString("pcPairingOnly") == "true"
+        pcUiOnly = arguments?.getString("pcUiOnly") == "true"
+        workflowOnly = arguments?.getString("workflowOnly") == "true"
+        quickVideoOnly = arguments?.getString("quickVideoOnly") == "true"
+        dataUiOnly = arguments?.getString("dataUiOnly") == "true"
+        replayOnly = arguments?.getString("replayOnly") == "true"
+        videoRecoveryOnly = arguments?.getString("videoRecoveryOnly") == "true"
+        projectionConsent = arguments?.getString("projectionConsent")
+        desktopTransferToken = arguments?.getString("desktopTransferToken")
+        desktopPhoneApproval = arguments?.getString("desktopPhoneApproval") == "true"
+        selectorsOnly = arguments?.getString("selectorsOnly") == "true"
+        desktopSelectors = arguments?.getString("desktopSelectors") == "true"
+        dialogsOnly = arguments?.getString("dialogsOnly") == "true"
+        insightsOnly = arguments?.getString("insightsOnly") == "true"
+        insightsBaseUrl = arguments?.getString("insightsBaseUrl")
+        insightsTransferHoldSeconds = arguments?.getString("insightsTransferHoldSeconds")?.toIntOrNull() ?: 0
+        insightsTransferToken = arguments?.getString("insightsTransferToken")
         super.onCreate(arguments)
         start()
     }
 
     override fun onStart() {
         val result = Bundle()
+        var consent: java.util.concurrent.FutureTask<Unit>? = null
         try {
+            if (insightsOnly || insightsBaseUrl != null) {
+                val base = requireNotNull(insightsBaseUrl?.takeIf { it.isNotBlank() }) { "insightsOnly requires an explicit local insightsBaseUrl fixture URL." }
+                LocalInsightsChecks(this).run(base, insightsTransferHoldSeconds, insightsTransferToken)
+                result.putString("stream", "\nOK: Phone local-model discovery/embedding filtering, explicit text/still consent, full-file IDs/coverage, saved-frame/HD still requests, current-player provenance, question/expected/actual/focus invalidation, captured QA steps/Markdown/JSON, private approved PC send with/without report/still, HTTP auth/ack/queue bounds/stop cleanup, background resume, real slow-request cancellation/recovery and grounded timestamp seek pass against a synthetic provider (not model reasoning or vision quality).\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (dialogsOnly) {
+                DialogInspectionChecks(this).run()
+                result.putString("stream", "\nOK: Automatic Compose Dialog/AlertDialog/Popup discovery, foreground phone/PC selection, actions/attributes/privacy, two-finger dialog scrolling, focus/geometry, deduplication/dismissal and disable cleanup.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (scrcpyGuiSeconds > 0) {
+                ScrcpyDesktopChecks(this).hold(scrcpyGuiSeconds)
+                result.putString("stream", "\nOK: Disposable scrcpy fixture restored input UI, HD policy and bridge.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (desktopDataGuiSeconds > 0) {
+                DesktopDiagnosticsChecks(this).holdGui(desktopDataGuiSeconds)
+                result.putString("stream", "\nOK: Disposable desktop data GUI fixture restored hooks, databases, queries and privacy.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (desktopDataOnly) {
+                DesktopDiagnosticsChecks(this).run()
+                result.putString("stream", "\nOK: Desktop live evidence/decoded DataStore/foreground updates, preference privacy, WAL read-only SQL/bounds/saved queries/cancel/timeout/disable and main responsiveness.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (desktopGuiHoldSeconds > 0) {
+                DesktopCaptureChecks(this).holdGui(desktopGuiHoldSeconds)
+                result.putString("stream", "\nOK: Disposable desktop GUI fixture finished and restored HD policy.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (desktopCaptureOnly) {
+                DesktopCaptureChecks(this).run()
+                result.putString("stream", "\nOK: Desktop recording/clip commands, HD opt-in/pending consent/cancel, masked PNG capture and exact overlay restoration/security pass.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (dataUiOnly) {
+                AppDataUiChecks(this).run()
+                result.putString("stream", "\nOK: Control Room SQL picker/actions/results/cancellation and decoded DataStore values/redaction/foreground updates/pause/resume/stop pass.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (replayOnly) {
+                ReplayPlaybackChecks(this).run()
+                result.putString("stream", "\nOK: Android frame/video replay clock, decoded seek colors, chronological event following/manual browse, track/state sync, fullscreen, background pause, trailing evidence, legacy alignment, restart and decoder errors pass.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (selectorsOnly || desktopSelectors) {
+                SelectorUiChecks(this).run(desktopSelectors)
+                result.putString("stream", "\nOK: Overlay tag search selects the host component and copies validated QaLens XPath; linked browser checkpoints pass when enabled.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (controlVideoOnly || videoOnly || videoDenyOnly || videoRecoveryOnly || quickVideoOnly) {
+                consent = ProjectionConsentChecks.start(this, projectionConsent)
+            } else require(projectionConsent == null) { "projectionConsent requires a focused video mode" }
+            if (quickVideoOnly) {
+                TesterWorkflowChecks(this).quickVideo()
+                consent?.get(1, java.util.concurrent.TimeUnit.SECONDS)
+                result.putString("stream", "\nOK: Quick actions HD button starts consent-approved video; REC Stop saves a decodable HD archive.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (videoRecoveryOnly) {
+                RecordingClipChecks(this).backgroundVideoStop()
+                consent?.get(1, java.util.concurrent.TimeUnit.SECONDS)
+                result.putString("stream", "\nOK: HD stays active in background; its real notification Stop finalizes a decodable video and removes the foreground notification.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (workflowOnly) {
+                TesterWorkflowChecks(this).run()
+                result.putString("stream", "\nOK: Quick screenshot/bug mark, successful macro interactions/capture, private config round trip, profile-attributed upload, Android replay controls and panic discard pass.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            desktopTransferToken?.let { token ->
+                DesktopTransferChecks(this).run(token, desktopPhoneApproval)
+                result.putString("stream", "\nOK: Real desktop transfer copied the completed master/clip while Control Room was foreground and revoked pairing after rotation.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (pcPairingOnly) {
+                PcPairingChecks(this).run()
+                result.putString("stream", "\nOK: Shell pairing requires phone approval; normal-app sender, deny, cancellation, expiry and disable gates pass with a manual-root host.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (pcUiOnly) {
+                PcInspectorUiChecks(this).run(manualRootOnly)
+                result.putString("stream", "\nOK: SDK PC inspector pairs from the overlay, shares/rotates tokens in Control Room, stops from full overlay and stays stopped after disable/re-enable.\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
+            if (controlOnly || controlVideoOnly) {
+                RecordingControlChecks(this).run(controlVideoOnly, manualRootOnly)
+                consent?.get(1, java.util.concurrent.TimeUnit.SECONDS)
+                result.putString("stream", "\nOK: Control Room recording buttons start app capture, clips keep capture running, and master/clip archives contain media (video=$controlVideoOnly, manualRoot=$manualRootOnly).\n")
+                finish(android.app.Activity.RESULT_OK, result); return
+            }
             if (videoDenyOnly) {
                 RecordingClipChecks(this).denyVideo()
+                consent?.get(1, java.util.concurrent.TimeUnit.SECONDS)
                 result.putString("stream", "\nOK: Real video consent denial leaves no archive, clears recording/saving and allows subsequent frame capture.\n")
                 finish(android.app.Activity.RESULT_OK, result); return
             }
             if (clipsOnly || videoOnly) {
                 RecordingClipChecks(this).run(videoOnly, longSession)
+                consent?.get(1, java.util.concurrent.TimeUnit.SECONDS)
                 result.putString("stream", "\nOK: Retrospective clip preserved recent evidence, excluded post-mark logs, kept master capture running and exported compatible media (video=$videoOnly, long=$longSession).\n")
                 finish(android.app.Activity.RESULT_OK, result); return
             }
@@ -75,7 +220,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             }
             if (overlayLoadOnly) {
                 verifyContinuousOverlayLoad()
-                result.putString("stream", "\nOK: Overlay/Repro/Logs/Network remain responsive under continuous log and network load.\n")
+                result.putString("stream", "\nOK: Overlay/Activity/Logs/Network remain responsive under continuous log and network load.\n")
                 finish(android.app.Activity.RESULT_OK, result)
                 return
             }
@@ -96,6 +241,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             verifyRealDataStoreIntegration()
             verifyClientSafety()
             verifyComposeInspection()
+            if (android.os.Build.VERSION.SDK_INT >= 29) DialogInspectionChecks(this).run()
             LocalBridgeChecks(this).run()
             verifyContinuousOverlayLoad()
             val limited = record("budget", 100, "x".repeat(100_000), clearUi = false)
@@ -115,6 +261,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         } catch (failure: Throwable) {
             result.putString("stream", "\nFAIL: ${failure.stackTraceToString()}\n")
             finish(android.app.Activity.RESULT_CANCELED, result)
+        } finally {
+            consent?.cancel(true)
         }
     }
 
@@ -382,6 +530,8 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         }
         // Compose virtual nodes support traversal; framework find-by-text is not reliable here.
         fun visibleText(text: String, exact: Boolean = true): android.view.accessibility.AccessibilityNodeInfo? {
+            // Continuous updates can leave UiAutomation's cached child visibility behind scroll.
+            if (android.os.Build.VERSION.SDK_INT >= 33) uiAutomation.clearCache()
             fun find(node: android.view.accessibility.AccessibilityNodeInfo): android.view.accessibility.AccessibilityNodeInfo? {
                 val label = node.text?.toString()?.trim().orEmpty()
                 if (node.isVisibleToUser && (if (exact) label == text else label.contains(text))) return node
@@ -392,18 +542,30 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         }
         fun openTab(label: String, heading: String) {
             val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
-            var target = visibleText(label)
-            while (target == null && android.os.SystemClock.elapsedRealtime() < deadline) {
-                // The tab strip is horizontal and some tabs begin outside the viewport.
-                fun scroll(node: android.view.accessibility.AccessibilityNodeInfo): Boolean {
-                    if (node.isScrollable && node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true
-                    repeat(node.childCount) { index -> node.getChild(index)?.let { if (scroll(it)) return true } }
-                    return false
+            fun tabStrip(): android.view.accessibility.AccessibilityNodeInfo? {
+                if (android.os.Build.VERSION.SDK_INT >= 33) uiAutomation.clearCache()
+                fun find(node: android.view.accessibility.AccessibilityNodeInfo): android.view.accessibility.AccessibilityNodeInfo? {
+                    if (node.contentDescription?.toString() == "Diagnostic tabs") return node
+                    repeat(node.childCount) { index -> node.getChild(index)?.let { find(it)?.let { found -> return found } } }
+                    return null
                 }
-                uiAutomation.rootInActiveWindow?.let(::scroll)
+                return uiAutomation.rootInActiveWindow?.let(::find)
+            }
+            fun tab(node: android.view.accessibility.AccessibilityNodeInfo?): android.view.accessibility.AccessibilityNodeInfo? {
+                node ?: return null
+                if (node.isVisibleToUser && node.text?.toString() == label) return node
+                repeat(node.childCount) { index -> tab(node.getChild(index))?.let { return it } }
+                return null
+            }
+            var strip = tabStrip()
+            var target = tab(strip)
+            while (target == null && android.os.SystemClock.elapsedRealtime() < deadline) {
+                // Avoid repeatedly scanning the changing network list for off-screen tab labels.
+                strip?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                 heartbeat()
-                Thread.sleep(100)
-                target = visibleText(label)
+                Thread.sleep(400) // Let the accessibility scroll complete before issuing another.
+                strip = tabStrip()
+                target = tab(strip)
             }
             var clickable = checkNotNull(target) {
                 val labels = mutableListOf<String>()
@@ -416,10 +578,23 @@ class RecordingRetentionInstrumentation : Instrumentation() {
                     "minimal=${QaLens.state.value.minimalPanel}, overlay=${QaLens.state.value.overlayEnabled}): ${labels.take(30)}"
             }
             while (!clickable.isClickable && clickable.parent != null) clickable = clickable.parent
-            check(clickable.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
+            if (!clickable.isSelected && !clickable.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) {
+                // Continuous evidence publication can invalidate an accessibility node between
+                // lookup and dispatch. Exercise the same visible tab with a real tester tap.
+                val bounds = android.graphics.Rect()
+                clickable.getBoundsInScreen(bounds)
+                val down = android.os.SystemClock.uptimeMillis()
+                for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                    val event = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action,
+                        bounds.exactCenterX(), bounds.exactCenterY(), 0).apply {
+                        source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    }
+                    try { check(uiAutomation.injectInputEvent(event, true)) } finally { event.recycle() }
+                }
+            }
             waitUntil("$label did not produce content while logs kept arriving") {
                 heartbeat()
-                visibleText(heading, exact = false) != null
+                tab(tabStrip())?.isSelected == true && visibleText(heading, exact = false) != null
             }
             repeat(10) { heartbeat(); Thread.sleep(100) }
         }
@@ -448,7 +623,7 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             heartbeat()
             runOnMainSync { QaLens.openPanel() }
             Thread.sleep(300)
-            openTab("Repro", "Timeline (")
+            openTab("Activity", "Timeline (")
             openTab("Network", "requests")
             openTab("Logs", "events kept")
             check(produced.get() > 100) { "Load stopped before the tabs were exercised" }
@@ -527,7 +702,11 @@ class RecordingRetentionInstrumentation : Instrumentation() {
         runOnMainSync {
             QaLens.setScreen("Route two", "route-two")
             check(QaLens.state.value.nodes.none { it.testTag == "route-one" }) { "Previous route nodes survived screen change" }
-            activity.setContent { Box(Modifier.fillMaxSize().background(Color.Red).testTag("route-two").qaHiddenFromReports()) }
+            activity.setContent {
+                Box(Modifier.fillMaxSize().background(Color.Red).testTag("route-two")) {
+                    Box(Modifier.align(androidx.compose.ui.Alignment.BottomEnd).fillMaxSize(0.5f).qaHiddenFromReports())
+                }
+            }
         }
         waitForIdleSync()
 
@@ -575,8 +754,11 @@ class RecordingRetentionInstrumentation : Instrumentation() {
             }
             val frame = zip.entries().asSequence().first { it.name.endsWith(".jpg") }
             val image = zip.getInputStream(frame).use { android.graphics.BitmapFactory.decodeStream(it) }
-            val pixel = image.getPixel(image.width / 2, image.height / 2)
+            check(image.width <= 720 && image.height <= 2880 && image.byteCount <= 8_000_000)
+            val pixel = image.getPixel(image.width * 3 / 4, image.height * 3 / 4)
             check(android.graphics.Color.red(pixel) < 8 && android.graphics.Color.green(pixel) < 8 && android.graphics.Color.blue(pixel) < 8) { "Hidden pixels leaked into recorded frames" }
+            val visible = image.getPixel(image.width / 4, image.height / 4)
+            check(android.graphics.Color.red(visible) > 200 && android.graphics.Color.green(visible) < 16) { "Scaled mask erased visible content or capture was empty" }
             image.recycle()
         }
         val session = archive.inputStream().use { com.qalens.replay.QaLensSalReader.read(targetContext, it) }

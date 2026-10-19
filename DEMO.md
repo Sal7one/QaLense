@@ -45,8 +45,8 @@ With default demo ports:
    synthetic failed network call. No real banking or customer data is used.
 2. Tap the QA bubble, choose **Record a session**, reproduce the failure, and use **★ Clip → Last 10s**
    while capture continues. Stop normally and wait for the master and clip to save.
-3. Open **More tools → Developer diagnostics** to inspect Network, Logs and Repro. A likely owner is
-   an investigative lead. Missing/partial evidence cannot certify app health.
+3. Open **Review evidence** to inspect Activity, Network and Logs; inspect elements through
+   **Elements**. Copy the observed steps/bug report. Missing evidence cannot certify app health.
 4. In **QaLens Control → Webhook**, set `http://127.0.0.1:8000/webhook` and test the endpoint.
    Choose **Send latest session** or a saved recording's **Webhook** action and check the dashboard.
 5. Replay the master/clip on Android or copy it into the desktop/web viewer.

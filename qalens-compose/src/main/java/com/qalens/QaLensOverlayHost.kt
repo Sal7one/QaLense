@@ -4,12 +4,13 @@ import android.app.Activity
 import android.content.Context
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.FrameLayout
 
 /** A second finger switches an inspect gesture to a one-finger host drag.
  * Unconsumed Compose events cannot cross the decor's sibling View boundary.
  */
-internal class QaLensOverlayHost(context: Context) : FrameLayout(context) {
+internal class QaLensOverlayHost(context: Context, private val touchTarget: (() -> View?)? = null) : FrameLayout(context) {
     private val activity = context as? Activity
     private var target: View? = null
     private var forwarding = false
@@ -17,6 +18,10 @@ internal class QaLensOverlayHost(context: Context) : FrameLayout(context) {
     private var hostDownTime = 0L
     private var lastX = 0f
     private var lastY = 0f
+    private var startX = 0f
+    private var startY = 0f
+    private var dragged = false
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
@@ -38,22 +43,27 @@ internal class QaLensOverlayHost(context: Context) : FrameLayout(context) {
                 super.dispatchTouchEvent(cancel)
                 cancel.recycle()
             }
-            target = activity?.findViewById<View>(android.R.id.content)?.takeIf { it.isAttachedToWindow }
+            // A dismissed dialog must never redirect its in-flight gesture to the Activity below.
+            target = (if (touchTarget != null) touchTarget.invoke() else activity?.findViewById<View>(android.R.id.content))
+                ?.takeIf { it.isAttachedToWindow }
             forwarding = target != null
             suppressUntilUp = true
             hostDownTime = event.eventTime
             updateCentroid(event)
+            startX = lastX; startY = lastY; dragged = false
             if (forwarding) sendHost(MotionEvent.ACTION_DOWN, event.eventTime)
         } else if (forwarding) {
             // End when either finger lifts; the remaining finger must never click the host.
             if (event.actionMasked == MotionEvent.ACTION_POINTER_UP || event.actionMasked == MotionEvent.ACTION_UP) {
-                sendHost(MotionEvent.ACTION_UP, event.eventTime)
+                // A stationary two-finger touch is not permission to click the host.
+                sendHost(if (dragged) MotionEvent.ACTION_UP else MotionEvent.ACTION_CANCEL, event.eventTime)
                 forwarding = false
                 target = null
             } else if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
                 cancelHost(event.eventTime)
             } else if (event.actionMasked == MotionEvent.ACTION_MOVE) {
                 updateCentroid(event)
+                if (kotlin.math.hypot(lastX - startX, lastY - startY) > touchSlop) dragged = true
                 sendHost(MotionEvent.ACTION_MOVE, event.eventTime)
             }
         }

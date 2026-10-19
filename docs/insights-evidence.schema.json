@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qalens:insights:evidence:1",
+  "title": "QaLens local-model evidence bundle",
+  "type": "object",
+  "required": ["schema", "recording", "question", "coverage", "items", "omissions"],
+  "properties": {
+    "schema": {"const": "qalens-insights-evidence/1"},
+    "recording": {
+      "type": "object",
+      "required": ["name", "t0", "durationMs", "focusMs", "windowStartMs", "windowEndMs"],
+      "properties": {
+        "name": {"type": "string", "maxLength": 256},
+        "t0": {"type": "number", "minimum": 0},
+        "durationMs": {"type": "number", "minimum": 1},
+        "focusMs": {"type": "number", "minimum": 0},
+        "windowStartMs": {"type": "number", "minimum": 0},
+        "windowEndMs": {"type": "number", "minimum": 0}
+      }
+    },
+    "question": {"type": "string", "maxLength": 2000},
+    "qaContext": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "expectedResult": {"type": "string", "maxLength": 1600},
+        "actualResult": {"type": "string", "maxLength": 1600}
+      },
+      "description": "Optional tester-reported expected/actual behavior, reviewed inside the text budget. These statements are not automatically captured proof."
+    },
+    "coverage": {"type": "object"},
+    "omissions": {"type": "object"},
+    "investigation": {
+      "type": "object", "required": ["target"], "additionalProperties": false,
+      "properties": {
+        "target": {"enum": ["recorded-app", "qalens-player"]},
+        "runtime": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "source", "client", "observedAtMillis", "recordingPositionMs", "details"],
+          "properties": {
+            "id": {"const": "player:runtime"},
+            "source": {"const": "current-player"},
+            "client": {"enum": ["android", "web"]},
+            "observedAtMillis": {"type": "number", "minimum": 0},
+            "recordingPositionMs": {"type": "number", "minimum": 0},
+            "details": {"type": "object"}
+          }
+        }
+      }
+    },
+    "images": {
+      "type": "array", "maxItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "tMs", "mediaType", "data", "source", "approximate"],
+        "properties": {
+          "id": {"const": "images:0"},
+          "tMs": {"type": "number", "minimum": 0},
+          "mediaType": {"enum": ["image/jpeg", "image/png"]},
+          "data": {"type": "string", "maxLength": 174764, "contentEncoding": "base64"},
+          "source": {"enum": ["recording-frame", "recording-video"]},
+          "approximate": {"type": "boolean"},
+          "bytes": {"type": "integer", "minimum": 1, "maximum": 131072},
+          "width": {"type": "integer", "minimum": 1, "maximum": 1600},
+          "height": {"type": "integer", "minimum": 1, "maximum": 1600}
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 300,
+      "items": {
+        "type": "object",
+        "required": ["id", "tMs", "kind", "summary", "details"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^(timeline|network|logs|state|crashes|performance|connectivity|memory|marks|anomalies):[0-9]{1,12}$"},
+          "tMs": {"type": "number", "minimum": 0},
+          "kind": {"enum": ["timeline", "network", "logs", "state", "crashes", "performance", "connectivity", "memory", "marks", "anomalies"]},
+          "summary": {"type": "string", "maxLength": 1200},
+          "details": {"type": "object"}
+        }
+      }
+    }
+  },
+  "$comment": "Runtime validators additionally enforce a 48,000-character textual context budget, finite timestamps within the recording, an ordered window containing focusMs, unique IDs with matching kind prefixes, bounded nested details, and explicit omission reporting. IDs use original full-track array indexes, not filtered/sorted positions. Optional investigation.runtime is the current replay client's reviewed state, at most4000JSONcharacters of details, and must not be confused with a captured app event; its recordingPositionMs is bounded by duration. player:runtime is citable only when that runtime snapshot exists. Optional images:0 is an explicitly reviewed saved-recording still, at most128KiB decoded and1600px per dimension. The desktop request must also set includeImage:true; text budget excludes base64, transmitted image metadata remains in the prompt. No pixels are implicitly sent and no complete video is sent."
+}

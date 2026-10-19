@@ -2,7 +2,25 @@
 
 QaLens adds session context and portable evidence to tools people already use. Optional libraries
 stay host-owned: the SDK does not force Chucker, OkHttp, Timber, Room or a crash vendor transitively.
-`sample-app/SampleOssTools.kt` is a compiled example, including its release no-op configuration.
+[SampleOssTools.kt](../sample-app/src/main/java/com/qalens/sample/SampleOssTools.kt) is a compiled
+example, including its release no-op configuration. For a host integration, start with
+[the AI work order](AI_INTEGRATION.md) and [variant/lifecycle recipes](../integration.md).
+
+## Ownership and attachment rules
+
+| Host owner | QaLens attachment | Keep intact |
+|---|---|---|
+| Executing HTTP client/DI builder | One application interceptor, or one completed-request sink | Existing interceptor ordering, TLS/pinning, cookies, cache, timeout, retries and cancellation |
+| Application logging initializer | One Timber tree beside existing trees | Existing formatting/sinks and host exception delivery |
+| Room owner | Invalidation observer on the actual database/table names | Database lifecycle, schema, transactions and query ownership |
+| Preferences/state owner | Change Flow plus a cached allowlisted snapshot if useful | Flow lifetime, asynchronous reads and existing state updates |
+| Crash vendor owner | Optional public report/bridge callbacks | Vendor capture, uncaught delivery and no enrichment echo |
+
+Add each attachment once in its real owner, never during Compose recomposition. Do not create an
+unused parallel client just to satisfy a snippet. Optional hooks are compile-only in the SDK;
+the host retains its own dependencies and compatible versions. Apply active/no-op dependency
+mapping to shared modules that import them as well as the app. SDK configuration cannot redact a
+different library's independent store or prove that its traffic is observed.
 
 ## Chucker: supported coexistence
 
@@ -13,6 +31,10 @@ releaseImplementation("com.github.chuckerteam.chucker:library-no-op:4.1.0")
 ```
 
 ```kotlin
+import com.chuckerteam.chucker.api.ChuckerInterceptor
+import com.qalens.QaLensOkHttpInterceptor
+import okhttp3.OkHttpClient
+
 val client = OkHttpClient.Builder()
     .addInterceptor(ChuckerInterceptor.Builder(context)
         .redactHeaders("Authorization", "Cookie", "Set-Cookie")
@@ -31,7 +53,7 @@ The previous `networkFromChucker=true` integration was invalid: `TransactionList
 `ChuckerTransaction`, `getCollector` and `Chucker.launch` are not the public APIs it claimed.
 Keep the flag false. Setting it now emits a migration note and leaves QaLens capture enabled.
 The launcher calls public `Chucker.getLaunchIntent(context)` and checks `Chucker.isOp`, so the
-Chucker release no-op is not mistaken for an active inspector. Overview exposes **Open Chucker**
+Chucker release no-op is not mistaken for an active inspector. Review evidence → Device exposes **Open Chucker**
 when the active library is present.
 
 Sources: [Chucker 4.1 public launcher](https://github.com/ChuckerTeam/chucker/blob/4.1.0/library/src/main/kotlin/com/chuckerteam/chucker/api/Chucker.kt),
@@ -80,7 +102,15 @@ independent adapters without stable upstream request identity.
 ## Room and DataStore
 
 Pass an app-owned `RoomDatabase` and its actual table names to `QaLens.observeRoom(db, "orders")`.
-The callback records table invalidations only. `QaLens.observeDataStore("Prefs", dataStore.data)`
+The callback records table invalidations only. For live, read-only allowed settings, connect the
+existing decoded Flow with `QaLens.observeDataStoreValues("Settings", dataStore.data) { prefs ->
+mapOf("theme" to (prefs[themeKey] ?: "system")) }`. The mapper runs on a worker; cached redacted
+fields appear in Control Room → App data and recording state. Initial state is not a change;
+later events contain field counts, not values. Reuse the host's instance/serializer/decryption,
+and stop through `stopObservingDataStore("Settings")` when its owner ends. See
+[app data](APP_DATA.md) for a full recipe, privacy bounds and pause/completion/error behavior.
+
+The older `QaLens.observeDataStore("Prefs", dataStore.data)`
 observes a host-owned Flow; its optional descriptor should describe the change without serializing
 preference values. Pair those event hooks with an allowlisted `registerDataSource` provider backed
 by cached state if a recording needs current values. Providers execute on the analysis/main thread,
@@ -88,6 +118,37 @@ so do not query Room synchronously inside one. Dispose hooks with `stopObserving
 `stopObservingDataStore("Prefs")` when their owners go away. The sample's normal UI preferences are
 an in-memory Flow; the Android regression runner separately exercises real Room and Preferences
 DataStore fixtures.
+
+Repeated DataStore registration with the same name replaces its binding. It skips the initial
+emission on first subscription and when restarted after runtime re-enable. Room registration
+deduplicates the same database/table-list binding; `stopObservingRoom(db)` removes all bindings
+for that database, while passing table names removes the matching binding. Register again when
+a closed database is replaced. Room and the event-only DataStore hook do not read rows or dump
+preferences; the separate value hook retains only fields explicitly mapped by the app.
+
+A small app-owned cache can expose state without blocking the analysis thread:
+
+```kotlin
+import com.qalens.QaLens
+import kotlinx.coroutines.flow.MutableStateFlow
+
+// Owned by the host's application/state layer, not an Activity or composable.
+private val qaSettings = MutableStateFlow<Map<String, String>>(emptyMap())
+
+fun attachQaSettingsSnapshot() {
+    QaLens.registerDataSource("Settings") { qaSettings.value }
+}
+
+// Call from the existing state owner's asynchronous update path, after reading real preferences.
+fun updateQaSettingsSnapshot(theme: String, offlineMode: Boolean) {
+    qaSettings.value = mapOf("theme" to theme, "offlineMode" to offlineMode.toString())
+}
+```
+
+Use non-sensitive allowlisted fields. The snapshot is independent of `observeDataStore`, which
+records change labels. `registerDataSource` also accepts `redactKeys`, `redactPatterns` and
+`redactAll`; registrations are process-lived, so keep their captured cache/lifetime appropriate.
+Do not invent an unregister API or capture a short-lived screen/database in the provider.
 
 Data events join `logs.json` and `timeline.json`; redacted snapshots join `state.json`.
 `analysis.json` counts observed Room/DataStore changes and identifies changes shortly before a
@@ -98,6 +159,10 @@ failed request. Those are timing links, not causation or a claim that unobserved
 Plant `QaLensTimberTree()` beside existing Timber trees. `captureLogs=false` gates automatic
 Timber forwarding; explicit QaLens logs/events remain opt-in while the SDK is enabled. The master
 `enabled=false` switch now gates explicit logs and all network adapter input too.
+Plant once in Application/logging initialization and preserve the host's existing trees. Explicit
+event forwarding from another logger is host-owned; avoid recording the same line through both
+that path and Timber. Large lines/custom regex still cost work on the caller before dashboard
+batching; keep field sizes and redaction patterns modest.
 
 For crashes caught by another reporter, use `QaLens.reportCrash(QaLensCrash(...))`, or register a
 `QaLensCrashBridge` with an `onCrash` callback. Inbound crashes are bounded/redacted before display
@@ -109,7 +174,7 @@ method from enrichment: it should attach context, not create another crash repor
 
 ## Diagnose wiring
 
-Call `QaLens.integrationReport()` or use Overview → **Copy integration check**. The report lists
+Call `QaLens.integrationReport()` or use Review evidence → Device → **Copy integration check**. The report lists
 capture settings, declared sources, Room/DataStore dashboard changes, snapshot-source counts and
 network counts without copying request contents or preference values. A source
 is declared when its interceptor/sink is constructed; this alone cannot prove it is on the correct

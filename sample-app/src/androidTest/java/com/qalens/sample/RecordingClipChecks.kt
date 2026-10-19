@@ -4,6 +4,8 @@ import android.app.Instrumentation
 import android.content.Intent
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.os.Build
+import android.os.StrictMode
 import com.qalens.QaLens
 import org.json.JSONArray
 import org.json.JSONObject
@@ -13,6 +15,40 @@ import java.util.zip.ZipFile
 
 /** Synthetic evidence only. Video mode needs the real OS consent dialog to be approved externally. */
 internal class RecordingClipChecks(private val test: Instrumentation) {
+    fun backgroundVideoStop() {
+        test.startActivitySync(Intent(test.targetContext, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        val root = File(test.targetContext.filesDir, "qalens/recordings")
+        val before = root.listFiles()?.map { it.name }?.toSet().orEmpty()
+        test.runOnMainSync { QaLens.configure { enabled = true; allowUnmaskedVideo = true }; QaLens.startRecording(true) }
+        try {
+            await(90_000, "Approve OS consent for background HD check") { QaLens.state.value.isRecording }
+            Thread.sleep(2500)
+            check(test.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+            Thread.sleep(1200)
+            check(QaLens.state.value.isRecording) { "Backgrounding unexpectedly stopped HD" }
+            val notifications = test.targetContext.getSystemService(android.app.NotificationManager::class.java)
+            val notification = notifications.activeNotifications.firstOrNull {
+                it.notification.extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() == "QaLens · Recording screen"
+            }?.notification ?: error("HD foreground notification missing")
+            val stop = notification.actions?.firstOrNull { it.title.toString() == "Stop recording" }
+                ?: error("HD notification has no Stop action")
+            stop.actionIntent.send() // The real notification action, with the host in background.
+            await(60_000, "Background notification Stop stranded capture/saving") {
+                !QaLens.state.value.isRecording && !QaLens.state.value.isSavingRecording &&
+                    root.listFiles()?.any { it.extension == "sal" && it.name !in before } == true
+            }
+            root.listFiles()!!.single { it.extension == "sal" && it.name !in before }.let {
+                ZipFile(it).use(::verifyVideo)
+            }
+            check(notifications.activeNotifications.none {
+                it.notification.extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() == "QaLens · Recording screen"
+            }) { "HD notification survived completed stop" }
+        } finally {
+            test.runOnMainSync { if (QaLens.state.value.isRecording) QaLens.stopRecording(); QaLens.configure { allowUnmaskedVideo = false } }
+        }
+    }
+
     fun denyVideo() {
         test.startActivitySync(Intent(test.targetContext, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
@@ -36,9 +72,15 @@ internal class RecordingClipChecks(private val test: Instrumentation) {
         test.waitForIdleSync()
         val root = File(test.targetContext.filesDir, "qalens/recordings")
         val before = root.listFiles()?.map { it.name }?.toSet().orEmpty()
-        test.runOnMainSync { QaLens.configure { enabled = true; allowUnmaskedVideo = video; recordingMaxDurationMinutes = 60 }; QaLens.startRecording(video) }
-        await(90_000, "Capture did not begin; approve the OS video consent if testing video") { QaLens.state.value.isRecording }
+        val originalVmPolicy = StrictMode.getVmPolicy()
+        val contextViolations = java.util.concurrent.CopyOnWriteArrayList<String>()
+        if (Build.VERSION.SDK_INT >= 31) StrictMode.setVmPolicy(StrictMode.VmPolicy.Builder()
+            .detectIncorrectContextUse().penaltyDeath().penaltyListener(java.util.concurrent.Executor { it.run() }) {
+                contextViolations += android.util.Log.getStackTraceString(it)
+            }.build())
         try {
+            test.runOnMainSync { QaLens.configure { enabled = true; allowUnmaskedVideo = video; recordingMaxDurationMinutes = 60 }; QaLens.startRecording(video) }
+            await(90_000, "Capture did not begin; approve the OS video consent if testing video") { QaLens.state.value.isRecording }
             // Overflow keep-earliest logs; a late mark must still contain this recent failure.
             repeat(12_000) { QaLens.log("clip-burst-$it") }
             val waitMillis = if (longSession) 310_000L else 12_000L
@@ -48,7 +90,7 @@ internal class RecordingClipChecks(private val test: Instrumentation) {
                 Thread.sleep(500)
             }
             test.runOnMainSync { QaLens.log("clip-recent-failure") }
-            if (!video && !longSession) markFromUi()
+            if (!longSession) markFromUi()
             test.runOnMainSync { QaLens.saveRecentClip(10, "Synthetic late bug") }
             Thread.sleep(800)
             check(QaLens.state.value.isRecording) { "Mark stopped the master recording" }
@@ -58,9 +100,9 @@ internal class RecordingClipChecks(private val test: Instrumentation) {
             val master = files.single { it.name.startsWith("session_") }
             val clipFiles = files.filter { it.name.startsWith("clip_") }
             val clip = clipFiles.single { file -> ZipFile(file).use { JSONObject(text(it, "analysis.json")).getJSONObject("clip").getString("label") == "Synthetic late bug" } }
-            if (!video && !longSession) {
+            if (!longSession) {
                 val uiClips = clipFiles.filter { it != clip }.map { file -> ZipFile(file).use { JSONObject(text(it, "analysis.json")).getJSONObject("clip").getInt("requestedSeconds") } }
-                check(uiClips.sorted() == listOf(10, 45)) { "Preset/custom menu did not export the chosen intervals: $uiClips" }
+                check(uiClips.sorted() == listOf(10, 20, 45, 60)) { "Preset/custom menu did not export the chosen intervals: $uiClips" }
             }
             ZipFile(clip).use { zip ->
                 val logs = JSONArray(text(zip, "logs.json"))
@@ -74,16 +116,19 @@ internal class RecordingClipChecks(private val test: Instrumentation) {
                 check(manifest.getLong("endMillis") - manifest.getLong("startMillis") in 1..30_000)
                 if (video) verifyVideo(zip) else check(manifest.getJSONObject("frameIndex").length() > 0)
             }
-            if (video) ZipFile(master).use { verifyVideo(it) }
+            // Verify the UI-created clips too, not only the programmatic clip.
+            if (video) (listOf(master) + clipFiles).forEach { file -> ZipFile(file).use { verifyVideo(it) } }
             if (longSession) ZipFile(master).use {
                 val manifest = JSONObject(text(it, "manifest.json"))
                 check(manifest.getLong("endMillis") - manifest.getLong("startMillis") > 300_000) { "Old five-minute cap remains" }
             }
+            check(contextViolations.isEmpty()) { "Recording UI used a non-visual context: ${contextViolations.joinToString("\n")}" }
         } finally {
+            StrictMode.setVmPolicy(originalVmPolicy)
             test.runOnMainSync { if (QaLens.state.value.isRecording) QaLens.stopRecording(); QaLens.configure { allowUnmaskedVideo = false } }
         }
     }
-    private fun markFromUi() {
+    internal fun markFromUi() {
         val automation = test.uiAutomation
         val info = automation.serviceInfo
         val flags = info.flags
@@ -104,9 +149,11 @@ internal class RecordingClipChecks(private val test: Instrumentation) {
             check(node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
         }
         try {
-            click("Save recent bug clip"); click("Last 10s")
-            Thread.sleep(300)
-            check(QaLens.state.value.isRecording)
+            for (preset in listOf("Last 10s", "Last 20s", "Last 60s")) {
+                click("Save recent bug clip"); click(preset)
+                Thread.sleep(300)
+                check(QaLens.state.value.isRecording)
+            }
             click("Save recent bug clip"); click("Custom duration…")
             await(10_000, "Custom duration input missing") { find { it.className?.toString() == "android.widget.EditText" } != null }
             val input = checkNotNull(find { it.className?.toString() == "android.widget.EditText" })
@@ -114,10 +161,12 @@ internal class RecordingClipChecks(private val test: Instrumentation) {
             check(input.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT, arguments))
             click("Mark clip")
             check(QaLens.state.value.isRecording)
+            // Stop later with a menu still visible; the SDK must dismiss it with the REC window.
+            click("Save recent bug clip")
         } finally { info.flags = flags; automation.serviceInfo = info }
     }
 
-    private fun verifyVideo(zip: ZipFile) {
+    internal fun verifyVideo(zip: ZipFile) {
         val entry = zip.getEntry("video.mp4") ?: error("Video fell back to frames; HD path is not fixed")
         val file = File(test.targetContext.cacheDir, "qalens-video-check.mp4")
         try {
@@ -132,6 +181,15 @@ internal class RecordingClipChecks(private val test: Instrumentation) {
                 check(extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) { "Export starts without keyframe" }
                 check(format.getLong(MediaFormat.KEY_DURATION) > 0)
             } finally { extractor.release() }
+            val decoder = android.media.MediaMetadataRetriever()
+            try {
+                decoder.setDataSource(file.absolutePath)
+                val frame = checkNotNull(decoder.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)) {
+                    "Encoded master/clip had samples but could not decode a frame"
+                }
+                check(frame.width > 0 && frame.height > 0)
+                frame.recycle()
+            } finally { decoder.release() }
         } finally { file.delete() }
     }
     private fun text(zip: ZipFile, name: String): String {

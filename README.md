@@ -5,22 +5,34 @@ QA/debug build, inspect screen/network/log context, then export a bug report or 
 recording. Engineers can replay it on Android, in the browser, or inspect it with a Node CLI.
 Release builds use a separate no-op artifact.
 
+**Lens 2.0:** the `lens-2.0` branch adds reviewed local-model investigation on phone, modern web
+and the embedded Python desktop. Pause at a recorded bug, connect a local model, review the evidence
+and get a QA expected/actual report, cited observations, possible causes and next checks. Send the
+selected investigation from phone to PC for review/reanalysis. See [the workflow and limits](docs/LENS_2.md).
+
 **New to QaLens? Start with [ONBOARDING.md](ONBOARDING.md).** It covers the Android SDK, web app,
 Python desktop, local backend, recording/inspection workflows and practical team advice.
 
 For development, read [HANDOVER.md](HANDOVER.md) for the current verified baseline and engineering
 contracts, then [next.md](next.md) for the backlog.
 
+**Integrating with an AI agent? Use the [host integration runbook](docs/AI_INTEGRATION.md).** It
+covers discovery, safe variant mapping, real source hooks, phone/PC setup, troubleshooting,
+acceptance and a completion template.
+
 ## What it does
 
 - Floating QA panel, separate Control Room, Compose inspect/tag modes and accessibility checks.
-- Route history, build checks, deterministic readiness scoring, likely-owner classification and
-  reproduction timelines. Empty or incomplete evidence does not establish a healthy app.
+- Observed activity timelines, installed build/device facts, request/log tracks and concrete
+  element findings. Optional score/classification report APIs remain heuristic; incomplete
+  evidence does not establish a healthy app.
 - Optional OkHttp metadata, Timber logs, Room/DataStore changes, feature flags, application data,
   crash reporter bridges and generic network sinks. Supported Chucker coexistence keeps both tools.
 - Text bug reports, screenshots, frame/video session recording, macros and background SQL tools.
 - Android replay, v2/classic web viewers, CLI comparisons and optional webhook upload. The included
   Python backend is a local deterministic mock, not a hosted AI service.
+- Local-model Insights in Android/modern web/desktop replay, with bounded captured context, stable
+  evidence links and an optional reviewed still. Causes remain hypotheses until verified.
 
 ## Integrate
 
@@ -37,9 +49,11 @@ dependencies {
 
 For an external app, follow [integration.md](integration.md). Composite builds and local Maven
 repositories are supported. Default coordinates are `com.qalens:<module>:0.9.0`; availability on
-Maven Central is not claimed. The separate `integration-tests/consumer` builds both variants.
+Maven Central is not claimed. The separate [consumer fixture](integration-tests/consumer/README.md)
+builds both variants. Pin a revision or an immutable internal artifact version; map custom QA and
+production flavors deliberately and verify each production graph.
 
-AndroidX Startup installs the active overlay. Add `QaLensRoot`, navigation wrappers, an interceptor
+AndroidX Startup installs the active overlay. Add `QaLensRoot`, navigation observation, an interceptor
 and enrichment only where useful. Open it through the bubble, shake, notification or **QaLens
 Control** launcher. Test on a QA/debug build with synthetic data.
 
@@ -83,27 +97,36 @@ button requires HTTP serving. `web/index.html` remains the classic fallback and 
 | Understand modules and data flow | [Architecture](docs/ARCHITECTURE.md) |
 | Understand overlay behavior and token coverage | [Overlay design](docs/OVERLAY_DESIGN.md) |
 | Integrate into an app | [Integration](integration.md), [OSS contracts](docs/OSS_INTEGRATIONS.md) |
+| Give an AI agent an integration work order and acceptance criteria | [AI integration runbook](docs/AI_INTEGRATION.md), [consumer example](integration-tests/consumer/README.md) |
 | Understand client fixes and compatibility changes | [Client fixes](docs/CLIENT_SAFETY_FIXES.md) |
 | Implement or inspect recordings | [SAL format](docs/SAL_FORMAT.md), [retention](docs/RECORDING_RETENTION.md), [clips](docs/RECORDING_CLIPS.md) |
 | Pair phones, inspect components and process saved files | [Desktop guide](tools/local-bridge/README.md) |
 | Run replay/upload tools | [Web](web/README.md), [backend](backend/README.md), [demo](DEMO.md) |
+| Use capture actions, evidence views and PC connection | [Mobile overlay](docs/MOBILE_OVERLAY.md) |
+| Use synchronized Android playback and event following | [Mobile replay](docs/MOBILE_REPLAY.md) |
+| Query SQLite and connect searchable decoded DataStore values | [App data](docs/APP_DATA.md) |
 | Build, verify or distribute locally | [Contributing](CONTRIBUTING.md) |
 | Review history | [Changelog](CHANGELOG.md), Git history |
 
 ## Desktop and phone inspection
 
-The [local PC tool](tools/local-bridge/README.md) reads a live Compose tree, searches test tags,
-shows selectable bounds and runs exact-tag/ID tap, type and scroll actions in an explicitly paired
-QA build. It also reads recent observed logs/network metadata and cached host data snapshots.
-Run `python3 tools/local-bridge/server.py --gui` after starting the sample’s bridge in Settings.
-Pair from the GUI, send component attributes from the phone, save hashed JSON snapshots, remember
-device/app profiles and run locally configured processing pipelines. Release/no-op builds remain inert.
+The [local PC tool](tools/local-bridge/README.md) links phone/browser selections, reads a live Compose
+tree, searches tags/roles/actions and shows attributes, bounds and checked QaLens XPath selectors.
+Tap, type and scroll are explicit host actions. It also reads recent observed logs/network metadata
+and cached host data snapshots. Run `python3 tools/local-bridge/server.py --gui`, choose the host
+QA package on **Landing → Connect** and approve on the phone through SDK Control Room. This works
+in any active SDK integration; no sample Settings or backend is required. Return to the host for
+live inspection. Save hashed component JSON explicitly, remember device/app profiles and run
+locally configured processors. Release/no-op builds provide no listener or pairing UI.
 
 On the phone, use two fingers to scroll in inspect/tag mode, and drag **Move inspector** to reposition
 the filters and selected-node card. Bubble/dock movement follows physical screen directions in RTL.
 
 The [local desktop launcher](tools/local-bridge/README.md) embeds the existing replay viewers alongside
 phone pairing, Compose inspection, saved components, processing pipelines and adb/file tools.
+Landing now uses an inline scrcpy 5.0 H.264/WebCodecs mirror with continuous phone control and linked
+SDK inspection; first Start verifies the official server download. The previous PNG mirror remains
+behind a default-off code flag. [Setup, browser requirements and fallback](tools/local-bridge/README.md#scrcpy-setup-and-fallback).
 [Long sessions and bug clips](docs/RECORDING_CLIPS.md) describes retrospective 10/20/60-second/custom marks
 without stopping capture, plus opt-in finished-recording collection on your PC.
 

@@ -76,11 +76,13 @@ object QaLens {
 
     /** App context for paths/notifications/services when no activity is alive (e.g. mid-recording). */
     internal val appContext: Context? get() = appRef?.get()
+    internal fun rememberApplication(application: Application) { appRef = WeakReference(application) }
     internal val currentActivity: Activity? get() = currentActivityRef?.get()
 
     /** Recording mode armed from the Control Room: started on the next host-app activity resume. */
     internal var pendingRecordingVideo: Boolean? = null
         private set
+    private var pendingRecordingTimeout: Runnable? = null
 
     val state: StateFlow<QaLensUiState> = uiStateMutable.asStateFlow()
     val config: StateFlow<QaLensConfig> = configState.asStateFlow()
@@ -100,12 +102,12 @@ object QaLens {
         if (!nowEnabled) { captureEpoch++; QaLensLocalBridge.stop() }
         onMain {
             if (allowedVideo && !configState.value.allowUnmaskedVideo) {
-                pendingRecordingVideo = null
+                consumePendingRecording()
                 QaLensSessionRecorder.stop(share = false)
             }
             if (!nowEnabled) {
                 clearPendingEvents()
-                pendingRecordingVideo = null
+                consumePendingRecording()
                 QaLensMacros.cancel()
                 QaLensWebhook.stop()
                 QaLensSessionRecorder.stop(share = false)
@@ -239,13 +241,15 @@ object QaLens {
         redactAll: Boolean = false,
         provider: () -> Map<String, String>
     ) {
-        dataSourceProviders[name] = DataSourceEntry(
-            provider = provider,
-            redactKeys = redactKeys.toSet(),
-            redactPatterns = redactPatterns,
-            redactAll = redactAll
-        )
-        markAnalysisDirty()
+        onMain {
+            dataSourceProviders[name] = DataSourceEntry(
+                provider = provider,
+                redactKeys = redactKeys.toSet(),
+                redactPatterns = redactPatterns,
+                redactAll = redactAll
+            )
+            markAnalysisDirty()
+        }
     }
 
     // ── Room / DataStore change events ─────────────────────────────────────────
@@ -254,16 +258,44 @@ object QaLens {
      * Captures *that* a table changed (not row contents). Debug/QA only — call from a debug build.
      */
     private data class RoomBinding(val db: RoomDatabase, val tables: List<String>, val observer: InvalidationTracker.Observer, var active: Boolean = false)
-    private data class FlowBinding(val start: () -> kotlinx.coroutines.Job, var job: kotlinx.coroutines.Job? = null)
+    private data class FlowBinding(
+        val start: () -> kotlinx.coroutines.Job, var job: kotlinx.coroutines.Job? = null,
+        val values: DataSourceEntry? = null
+    )
     private val roomBindings = mutableListOf<RoomBinding>()
     private val flowBindings = linkedMapOf<String, FlowBinding>()
+    private val dataStoreValueStatusMutable = MutableStateFlow<Map<String, DataStoreValueStatus>>(emptyMap())
+    internal val dataStoreValueStatus = dataStoreValueStatusMutable.asStateFlow()
+
+    /** Remove only the snapshot owned by this observer; never remove a host replacement. */
+    private fun removeFlowBinding(name: String) {
+        val previous = flowBindings.remove(name)
+        previous?.job?.cancel()
+        previous?.values?.let { entry ->
+            if (dataSourceProviders[name] === entry) {
+                dataSourceProviders.remove(name)
+                uiStateMutable.update { it.copy(dataSources = it.dataSources - name) }
+                markAnalysisDirty()
+            }
+        }
+        dataStoreValueStatusMutable.update { it - name }
+    }
+
+    private fun valueSourceStatus(name: String, phase: DataStoreValuePhase, updated: Long? = null) {
+        dataStoreValueStatusMutable.update { old ->
+            old + (name to DataStoreValueStatus(phase, updated ?: old[name]?.updatedAtMillis))
+        }
+    }
 
     private fun suspendDataObservers() {
         roomBindings.filter { it.active }.forEach { binding ->
             runCatching { binding.db.invalidationTracker.removeObserver(binding.observer) }
             binding.active = false
         }
-        flowBindings.values.forEach { it.job?.cancel(); it.job = null }
+        flowBindings.forEach { (name, binding) ->
+            binding.job?.cancel(); binding.job = null
+            if (binding.values != null) valueSourceStatus(name, DataStoreValuePhase.PAUSED)
+        }
     }
 
     private fun resumeDataObservers() {
@@ -275,7 +307,12 @@ object QaLens {
                 pushError(ErrorKind.DATA_SOURCE, "Room observer registration failed: ${it.javaClass.simpleName}")
             }
         }
-        flowBindings.values.forEach { if (it.job?.isActive != true) it.job = it.start() }
+        flowBindings.forEach { (name, binding) ->
+            if (binding.job?.isActive != true) {
+                if (binding.values != null) valueSourceStatus(name, DataStoreValuePhase.WAITING)
+                binding.job = binding.start()
+            }
+        }
     }
 
     fun observeRoom(db: RoomDatabase, vararg tables: String) {
@@ -311,7 +348,7 @@ object QaLens {
      */
     fun <T> observeDataStore(name: String, flow: Flow<T>, describe: (T) -> String = { "updated" }) {
         onMain {
-            flowBindings.remove(name)?.job?.cancel()
+            removeFlowBinding(name)
             flowBindings[name] = FlowBinding(start = {
                 bgScope.launch {
                     try {
@@ -332,10 +369,69 @@ object QaLens {
         }
     }
 
-    /** Cancel a host-owned preference Flow when its owner is disposed. */
-    fun stopObservingDataStore(name: String) = onMain {
-        flowBindings.remove(name)?.job?.cancel()
+    /**
+     * Observe decoded, app-owned DataStore values for Control Room, reports and recordings.
+     * [snapshot] runs on a worker; expose only allowlisted fields. No file decoding, encryption
+     * bypass or extra DataStore dependency is involved. Up to 100 fields / 2,048 chars per value
+     * are retained. Credential-like keys, source rules and current global redaction apply.
+     * The initial emission populates values without a change event; later events contain counts,
+     * never values. Stop with [stopObservingDataStore]; disable pauses collection until re-enable.
+     */
+    fun <T> observeDataStoreValues(
+        name: String, flow: Flow<T>,
+        redactKeys: List<String> = emptyList(), redactPatterns: List<Regex> = emptyList(),
+        redactAll: Boolean = false, snapshot: (T) -> Map<String, String>
+    ) {
+        onMain {
+            removeFlowBinding(name)
+            val cache = java.util.concurrent.atomic.AtomicReference<Map<String, String>>(emptyMap())
+            val entry = DataSourceEntry(provider = { cache.get() }, redactFieldNames = true)
+            lateinit var binding: FlowBinding
+            binding = FlowBinding(values = entry, start = {
+                bgScope.launch {
+                    var first = true
+                    try {
+                        flow.collect { value ->
+                            val safe = DataValuePreview.sanitize(snapshot(value), configState.value,
+                                redactKeys.toSet(), redactPatterns, redactAll)
+                            kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+                                if (flowBindings[name] === binding && configState.value.enabled) {
+                                    cache.set(safe)
+                                    valueSourceStatus(name, DataStoreValuePhase.LIVE, System.currentTimeMillis())
+                                    if (!first) event(QaLensDataEvents.DATASTORE, "$name changed: ${safe.size} exposed fields")
+                                    first = false
+                                    markAnalysisDirty()
+                                }
+                            }
+                        }
+                        kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+                            if (flowBindings[name] === binding) valueSourceStatus(name, DataStoreValuePhase.STOPPED)
+                        }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+                            if (flowBindings[name] === binding && configState.value.enabled) {
+                                valueSourceStatus(name, DataStoreValuePhase.ERROR)
+                                pushError(ErrorKind.DATA_SOURCE, "DataStore values '$name' unavailable: ${failure.javaClass.simpleName}")
+                            }
+                        }
+                    }
+                }
+            })
+            dataSourceProviders[name] = entry
+            flowBindings[name] = binding
+            valueSourceStatus(name, DataStoreValuePhase.PAUSED)
+            markAnalysisDirty()
+            resumeDataObservers()
+        }
     }
+
+    /** Cancel a host-owned preference Flow and remove its observer-owned value preview. */
+    fun stopObservingDataStore(name: String) = onMain {
+        removeFlowBinding(name)
+    }
+
+    internal fun refreshAppData() = markAnalysisDirty()
 
     // ── A6: Generic data-source observer (Room/DataStore agnostic) ───────────
     private val dataObservers = mutableListOf<DataSourceObserver>()
@@ -385,7 +481,7 @@ object QaLens {
     val localBridgeStatus: StateFlow<String> = QaLensLocalBridge.status
 
     fun install(application: Application) {
-        appRef = WeakReference(application)
+        rememberApplication(application)
         // Restore persisted QA preferences so overlay setups survive process death.
         uiStateMutable.update {
             it.copy(
@@ -467,7 +563,7 @@ object QaLens {
         it.copy(isInspectMode = enabled, isTagMode = if (enabled) false else it.isTagMode)
     }
 
-    /** Tester quick-actions sheet vs the full developer panel. Persisted per app install. */
+    /** Tester quick actions vs Review evidence as the starting view. Persisted per app install. */
     fun setPanelMinimal(minimal: Boolean) {
         uiStateMutable.update { it.copy(minimalPanel = minimal) }
         appContext?.let { com.qalens.android.QaLensAppSal.setPanelMode(it, if (minimal) "minimal" else "full") }
@@ -487,14 +583,14 @@ object QaLens {
         it.copy(isTagMode = enabled, isInspectMode = if (enabled) false else it.isInspectMode)
     }
 
-    /** Overlay opacity for the panel / watch HUD (clamped 0.1–1.0). Persisted. */
+    /** Opacity for the optional Watch HUD (clamped 0.1–1.0). Capture/evidence panels stay opaque. Persisted. */
     fun setOverlayAlpha(alpha: Float) {
         val clamped = alpha.coerceIn(0.1f, 1f)
         uiStateMutable.update { it.copy(overlayAlpha = clamped) }
         appContext?.let { QaLensPrefs.setOverlayAlpha(it, clamped) }
     }
 
-    /** Move the panel / watch HUD between the top and bottom edge (frees the opposite edge). Persisted. */
+    /** Move quick actions / Watch HUD between top and bottom. Review evidence uses the full height. Persisted. */
     fun toggleDock() {
         var newValue = false
         uiStateMutable.update { newValue = !it.dockBottom; it.copy(dockBottom = newValue) }
@@ -522,6 +618,7 @@ object QaLens {
      * and refreshes the notification. Wired to the Control Room and the notification panic action.
      */
     fun panicRestore() {
+        consumePendingRecording()
         QaLensSessionRecorder.cancel()
         uiStateMutable.update {
             it.copy(
@@ -557,8 +654,19 @@ object QaLens {
      * Arm a recording from the Control Room: it starts automatically on the next host-app activity
      * resume, so the recording captures the app — not the Control Room itself.
      */
-    internal fun armRecording(video: Boolean) { pendingRecordingVideo = video }
-    internal fun consumePendingRecording(): Boolean? = pendingRecordingVideo.also { pendingRecordingVideo = null }
+    internal fun armRecording(video: Boolean) {
+        consumePendingRecording()
+        pendingRecordingVideo = video
+        pendingRecordingTimeout = Runnable {
+            if (consumePendingRecording() != null) pushError(ErrorKind.RECORDING,
+                "Recording did not start: no host screen resumed. Return to Control Room and try again.")
+        }.also { mainHandler.postDelayed(it, 10_000) }
+    }
+    internal fun consumePendingRecording(): Boolean? {
+        pendingRecordingTimeout?.let(mainHandler::removeCallbacks)
+        pendingRecordingTimeout = null
+        return pendingRecordingVideo.also { pendingRecordingVideo = null }
+    }
 
     /**
      * Watch mode — a translucent, non-interactive live overlay. QA uses the real app (touches pass
@@ -866,6 +974,7 @@ object QaLens {
 
     internal fun attachOverlay(activity: Activity) {
         if (!configState.value.enabled) return
+        rememberApplication(activity.application)
         currentActivityRef = WeakReference(activity)
         updateDeviceAndScreen(activity)
         QaLensActivityInstaller.attachOverlay(activity)
@@ -885,6 +994,7 @@ object QaLens {
     internal fun refreshInspection(rootView: View? = currentActivityRef?.get()?.window?.decorView) {
         val config = configState.value
         if (!config.enabled) return
+        currentActivity?.let(QaLensInspectionWindows::sync)
         val autoNodes = rootView
             ?.takeIf { config.enableSemanticsReflection }
             ?.let { QaLensActivityInstaller.readVisibleNodes(it) }
@@ -1007,11 +1117,13 @@ object QaLens {
         if (!configState.value.enabled) return
         if (manualNodes[node.id]?.let { it.node == node && it.view.get() === view } == true) return
         manualNodes[node.id] = ManualNode(node, WeakReference(view))
+        QaLensInspectionWindows.rememberManual(node.id, view)
         scheduleInspection()
     }
 
     internal fun unregisterManualNode(id: String) {
         manualNodes.remove(id)
+        QaLensInspectionWindows.forgetManual(id)
         scheduleInspection()
     }
 
@@ -1127,7 +1239,7 @@ object QaLens {
         else mainHandler.post { appendCrash(safe, enrich = false) }
     }
 
-    /** The most recent crash/ANR captured this session, or null. Surfaced in the Overview tab. */
+    /** The most recent crash/ANR captured this session, or null. Surfaced in Review evidence → Activity. */
     fun lastCrash(): QaLensCrash? = QaLensCrashHandler.peekLastCrash() ?: uiStateMutable.value.crashes.lastOrNull()
 
     /** Called by [QaLensFrameMetrics] to append a frame-timing sample (capped at 1000). */

@@ -1,33 +1,45 @@
 # QaLens desktop and component workbench
 
 A local browser GUI for a **QaLens-enabled Android QA build**. Inspect the live Compose tree, search
-exact tags, highlight components on the phone and invoke public tap/type/scroll actions. Send a
-selected component from the phone, read its attributes and tree position, save deduplicated JSON,
-and run your own processors. Python standard library only; no Appium server or extra Android
+tags, text, roles and actions, and link selections between the phone and browser. Generate/check
+QaLens XPath, highlight components and invoke public tap/type/scroll actions. Read a selected
+component's attributes and tree position, save deduplicated JSON,
+and run your own processors. Control the phone mirror, record sessions/bug clips and capture masked
+screenshots from Landing. Search live network/logs, compare decoded app values and run read-only SQL
+from Data tools. Python standard library only; no Appium server or extra Android
 library is required. Release builds still use `qalens-noop`.
+
+Lens 2.0 adds **Replay → Insights** through the existing modern web player. Open a saved `.sal`,
+pause at the bug, connect a local chat model and review the evidence before Analyze. The Python
+service handles OpenAI-compatible/Ollama requests with bounded async jobs and cancellation without
+holding the phone/mirror mutex. Findings cite captured events and separate observations from possible
+causes; an optional reviewed still needs explicit consent and a vision model. No phone pairing is
+needed for local-file investigation. [Full workflow, model setup and limits](../../docs/LENS_2.md).
+Phone **Send to PC** delivers reviewed evidence and optional completed QA reports to Landing's
+**Phone investigations**. Receive keeps them in bounded memory; opening, model analysis and saving
+are explicit. Selected evidence alone cannot replay a missing original video. Tester expected/actual
+fields and copied QA Markdown retain their provenance.
 
 Start with [ONBOARDING.md](../../ONBOARDING.md) for the SDK/web/Python overview. This guide owns
 the desktop pairing, component, transfer and processor contracts.
+For integrating the SDK into another app, follow [integration.md](../../integration.md) and the
+[AI agent runbook](../../docs/AI_INTEGRATION.md). Pairing and inspection are SDK features; copying
+the sample app or adding the mock backend is unnecessary.
 
-Coverage is visible Compose semantics from attached/registered roots in the foreground Activity.
-Native views, WebViews, arbitrary private state and unregistered windows are outside this tool.
+Inspection coverage is visible Compose semantics from attached roots in the foreground Activity:
+API 29+ automatically discovers its Dialog/AlertDialog/Popup windows; API 23–28 requires
+`qaInspectionRoot` for separate windows. Existing explicit hooks deduplicate. New snapshots include
+`windows` (ephemeral ID, order, kind, app-window bounds) and each node's `windowId`. Mirror inspection
+uses the foremost containing window before choosing its smallest node, including empty-window
+space; older SDKs retain their existing geometry behavior. Search, attributes, tags, XPath and
+supported actions work on dialog nodes. Rebuild/reinstall the host SDK and refresh the desktop.
+Native views, WebViews, arbitrary private state and windows outside that Activity are outside semantics inspection;
+mirror touch input uses scrcpy over adb and can interact with whatever is visible on the whole phone.
 An accepted semantics action is not proof of the resulting app state: refresh/assert its effect.
 
 ## Start and pair
 
 Prerequisites: Python 3.9+, adb, an authorized USB/emulator device, an active QaLens QA build.
-In the sample open **More → Settings → PC inspector → Start bridge**. Its random token is held in
-process memory and hidden from QaLens reports. For a host app, expose a QA-only pairing control:
-
-```kotlin
-// Generate once per pairing; display privately to the authorized tester, never log/save it.
-val token = ByteArray(24).also { java.security.SecureRandom().nextBytes(it) }
-    .joinToString("") { "%02x".format(it) }
-QaLens.startLocalBridge(token) // default device loopback port 8766
-// Observe QaLens.localBridgeStatus. When finished:
-QaLens.stopLocalBridge()
-```
-
 From the repository root:
 
 ```sh
@@ -35,18 +47,62 @@ python3 tools/local-bridge/server.py --gui \
   --pipeline-config tools/local-bridge/examples/pipelines.json
 ```
 
-Open **http://127.0.0.1:8765**. In **Devices & apps**, scan phones, choose a serial, enter the real
-Android package (`com.example.app`), optional activity (`.MainActivity`) and current pairing token.
-**Find installed apps** supplies package suggestions. **Save profile** remembers the setup;
-**Connect this profile** creates a dedicated adb forward. Launching is a separate button. It never
-clears/uninstalls app data or changes device animations. Expected Android version mismatches are
-reported; the device's actual version is displayed after pairing. Connecting establishes transport;
-**Refresh tree** verifies that the app bridge is running and the token matches.
+Open **http://127.0.0.1:8765**. **Landing** discovers authorized phones and installed QaLens apps.
+Choose the phone/app, click **Connect**, then **Approve desktop** on the phone. No token copying,
+custom host Settings or sample-app code is needed. The SDK Control Room asks for access to Compose
+inspection/actions, observations, completed recordings and explicit recording/clip/screenshot commands.
+It also discloses decoded values, explicit preference/SQLite reads and shared saved-query management.
+Approval does not start recording. HD also needs host opt-in and Android's separate consent. Approval
+returns to the host app. Connecting remembers a profile and preserves app data.
 
-Profiles remember name, serial, package, activity, expected version and port. Tokens stay in server/
-page memory and are cleared from the profile form after successful connection. A PC restart needs
-pairing again; saved profiles and component files remain. A device switch invalidates browser
-commands against an old tree, requiring refresh. There is no automatic launch, capture or recording.
+The PC creates a strong random credential internally, offers it through an explicit SDK receiver
+restricted to senders with Android's `DUMP` permission (authorized adb shell), and opens Control Room
+without credentials in Activity extras. The pending request expires after two minutes, stays stable
+under repeated offers, and is rejected by Deny, cancellation or SDK disable. A listener starts only
+after phone approval. **Cancel pairing**/**Cancel connection** cancels this exact pending or
+newly approved request, including approval racing Cancel. A different token's listener or newer
+approval prompt is preserved. Ordinary other app UIDs cannot
+offer pairing. The host's own code remains trusted and can use the existing API.
+
+With the current SDK, pairing health uses authenticated `/v1/health`, which needs no foreground
+Activity, main-thread recording controls or directory scan. If transport fails during approval,
+the PC asks the same protected receiver for **this request's** state and port. **Phone approved ·
+connecting…** means consent succeeded but the inspector is still unreachable; a missing owned adb
+forward is repaired with Auto reconnect. The PC can use a different phone-reported port only for
+its exact credential; it never scans ports or accepts another manual token. Mirror/actions stay
+disabled until authenticated transport succeeds. Denied/cancelled/failed requests report an ended
+connection instead of waiting indefinitely. Local phone HTTP bypasses company/system proxies.
+
+If the phone says **Listening on 127.0.0.1:8767** but Landing still waits, rebuild/reinstall the
+host with the current SDK, restart Python and refresh the desktop page, then Connect and approve
+once. Do not also press **Start PC inspector**/**New pairing token**: those create a separate manual
+credential. Check the chosen USB serial/package and enable Auto reconnect. Returning to the visible
+desktop immediately checks approval. Older SDKs retain the recordings-based health fallback after
+`/v1/health` returns 404 and cannot provide the new independent approval status.
+
+**Auto connect saved app** is opt-in after connecting once. It remembers that profile ID and
+requests approval when the desktop starts with that authorized phone available; new access still
+requires approval on the phone. It makes at most one request per page session and does not override
+Deny/expiry/revocation. Disconnect turns the remembered choice off.
+
+**Auto reconnect** repairs a missing adb forward after a temporary USB outage within this approved
+session. It keeps the connection nonce and collection choices; it never retries host actions or
+silently approves new access. Turn it off to stop transport repair. Token revocation, a device change,
+Disconnect or a PC restart requires a new connection/approval. SDK **Stop PC inspector** stops
+access; re-enable does not restart it. If the device listener is simply offline, the PC cannot
+distinguish Stop from a crashed/offline app and shows reconnection status until you Disconnect.
+
+For an older SDK or a custom/manual bridge, open **Device tools → Advanced manual pairing & saved
+profiles**. On the phone, **QaLens Control → Desktop connection → PC inspector** (or overlay **More
+tools**, full overlay **Tools**) offers Start, hidden-token copy, rotation and Stop. Copy its token
+into the advanced form. Tokens are memory-only and excluded from reports; explicit Android 13+
+clipboard copies use sensitive metadata and can outlive pairing. Existing `QaLens.startLocalBridge`
+custom controls and terminal pairing remain supported.
+
+Profiles remember name, serial, package, activity, expected Android version and port, without tokens.
+A PC restart retains profiles/saved files and requires approval again. An old-tree command cannot
+operate on a newly paired phone. There is no automatic recording or app reset. **Launch connected
+app** is available separately under Device tools.
 
 Appium-style capability import maps `appium:udid`, `appium:appPackage`, `appium:appActivity` and
 `appium:platformVersion`. `platformName` must be Android. A URL is not a package and whitespace is
@@ -65,15 +121,48 @@ for the browser port or `--device-port` for a custom SDK port. `--no-adb` uses a
 at `--device-port`. `QALENS_BRIDGE_TOKEN` can replace the terminal prompt; never commit it. Ctrl-C
 or Disconnect removes only a forward created by this workbench, preserving other adb forwards.
 
+### Startup recovery
+
+The launcher reports startup problems without a Python traceback and exits with a nonzero status.
+It checks actual writes in the data root and `components`, `runs`, `recordings` and `transfers`,
+including folders that already exist. A storage error identifies the blocked folder and prints a
+quoted restart command using a separate folder under your home directory. Use that command for a
+new workspace, or restore ownership/read/write access to the original folder to retain its profiles
+and saved files. A previous run with sudo can leave folders owned by another account; run the
+desktop as your normal user. The checks preserve existing permissions and saved data.
+
+If the browser port is occupied, the error identifies the port and shows the existing URL if that
+process is already QaLens. Use that instance, stop it with Ctrl-C and restart, or choose a free port:
+
+```sh
+python3 tools/local-bridge/server.py --gui --port 0
+```
+
+Open the **HTTP URL printed by the launcher**; the actual port replaces `0`. An explicit fixed port
+still fails clearly when occupied. Port selection does not change the phone's `--device-port` or
+workspace. Saved desktop profiles/files remain in `--data-dir`; browser viewer preferences/recents
+are tied to the URL's origin and can differ on another port. Port binding happens before terminal
+token prompting or adb forwarding. Startup does not terminate an existing process or modify its
+listener. The focused CLI regressions are `python3 tools/local-bridge/test_startup.py`; actual
+permission-denial cases require a non-root POSIX account.
+
 ## Phone → preview → file
 
-1. Pair and enable **Receive phone selections** in the inspector. It checks a memory inbox every
-   2.5 seconds while the page is visible. This does not continuously scan the Compose tree.
-2. Select a component on the phone. **Send to PC** is beside **Copy test tag**, including for
-   components without a tag. Alternatively choose a live node on the PC and **Capture attributes**.
-3. Review the attributes table, viewport bounds diagram and ancestry/sibling indices. The complete
-   JSON remains available. These are bounds and semantics, not a pixel screenshot or recreated widget.
-4. **Save JSON** writes a content-addressed file. Repeated saves reuse it. **Download JSON** exports
+1. Pair with **Link phone & web selection** checked (the default). Select in the SDK inspector or
+   its **Search selectors & tags** screen: the browser loads attributes/selectors automatically.
+   Selecting a tree node or an **Inspect** mirror rectangle highlights it on the phone. Selection never invokes
+   a host tap/type/scroll action; those keep their separate buttons.
+2. Linking reads only the cached selected ID every 1.5 seconds while Landing is visible. A changed
+   selection reads a fresh visible tree and component; it does not continuously walk Compose.
+   Turn linking off for independent inspection. Requests are bounded and stale replies/device
+   changes cannot replace a newer choice. Rapid browser highlights are serialized; superseded
+   queued choices are skipped. Stale targets explain the failure; actions are never retried.
+3. **Send to PC** remains beside **Copy test tag**, including for untagged elements. Optional
+   **Receive sent components** reads its bounded inbox every 2.5 seconds; it can receive already
+   captured components while Control Room is in front. It is independent of live selection linking.
+4. Use the selected element’s **Attributes**, **Selectors**, **Semantics**, **Tree position** and **Diagnostics** tabs. The complete
+   JSON remains available. Component JSON contains bounds and semantics; screen pixels are a separate preview and are not saved with JSON.
+5. **Save JSON** writes a content-addressed file. Repeated saves reuse it. **Download JSON** exports
    to the browser's download location. **Import component JSON** opens a preview without saving;
    imported documents depend on their producer's redaction rules.
 
@@ -101,18 +190,215 @@ Limits: device components <=256 KiB after redaction, strings <=2048 characters, 
 child/path counts are disclosed. Device inbox: 10 previews / 1 MiB, oldest dropped with a counter.
 Reads are non-destructive; acknowledgements are idempotent after PC memory accepts a preview.
 Stop/disable clears the inbox. PC previews: 10 / 2 MiB, omission counter exposed. Neither inbox is
-durable: process/PC restarts and budget eviction can discard unsaved data. Receive pauses on an
-error until explicitly enabled again. Saved library lists the newest 500 files and reports omissions.
+durable: process/PC restarts and budget eviction can discard unsaved data. Receive stays enabled after temporary errors; authentication/connection changes stop it. Saved library lists the newest 500 files and reports omissions.
+
+## Landing workspace and phone control
+
+On wide windows the adjustable panes are **mirror → selected element → semantics tree**. Drag the
+two vertical separators to redistribute space and the bottom handle to change workspace height.
+Separators also accept arrow keys; Home, double-click or **Reset layout** restores defaults.
+Only dimensions are remembered in origin-scoped browser storage. Smaller windows stack panels;
+the tree and detail views keep independent scrolling. No credentials/components enter layout storage.
+
+**Start mirror** explicitly streams the whole phone, including other apps, unmasked and in memory
+only. The default is scrcpy 5.0 H.264 decoded directly into Landing's canvas with browser WebCodecs;
+there is no intermediate PNG/JPEG encoding. Use Chrome/Edge with H.264 WebCodecs support. First Start
+downloads the pinned official server after a SHA-256 check; see [setup](#scrcpy-setup-and-fallback).
+Startup shows preparation, first-time download, phone video and first-frame progress, then the
+measured click-to-display time. You should not need to tap around for an idle screen to appear.
+The browser flushes its first key once, restores prediction and repeats this after rotation;
+WebCodecs' latency option alone is a [hint](https://www.w3.org/TR/webcodecs/#dom-videodecoderconfig-optimizeforlatency).
+If no frame appears within eight seconds of browser streaming, capture stops with a restart
+message. This timeout excludes first-time download/phone startup. Retry explicitly with Start;
+check the displayed stage when diagnosing slow startup. Restart Python and refresh the page
+to load these PC changes; a host rebuild is unnecessary for this startup change alone.
+Leaving Landing, hiding the page, stopping or disconnecting ends the stream. **Control** is the
+default: click to tap, drag to swipe, wheel to scroll and hold to long-press. Type with the mirror
+focused; supported printable text and navigation/editing keys go to Android. Escape sends Phone Back.
+Back/Home/Wake are beside the mirror. This is basic text/key input, not full desktop IME or shortcuts.
+**Preview** pauses touch/navigation input. **Inspect elements** overrides both modes with all visible
+Compose outlines; clicking reads/highlights the smallest element without executing a host action.
+Tree filters do not hide mirror outlines. Selecting in the linked tree also enters inspection;
+choose Control or Done inspecting to return to normal touch. Phone inspection state is synchronized.
+
+Touch coordinates use the decoded image's aspect ratio and actual pixel dimensions; letterbox areas
+cannot send input. Continuous Down/Move/Up and native mouse-wheel messages use scrcpy's control
+socket, rather than launching an adb process per gesture. Moves coalesce under load. Stream identity,
+current video dimensions/revision, mode epoch and connection nonce reject stale input; mode changes,
+rotation and Stop cancel a held finger. Preview/Inspect refuse host input. Inspection maps scaled
+video to the SDK's full-display viewport/window origin and refuses mismatched aspect ratios. Native
+or unsupported areas remain visible but cannot become Compose targets.
+
+Only one page owns a stream. Static screens remain usable while authenticated heartbeats continue;
+seven seconds without a responding page ends capture. Decoder/transport queues are bounded and a
+slow consumer stops with a restart message. Input is never retried: scrcpy confirms socket delivery,
+not completion of the host action, so verify app state before repeating an uncertain action. After a
+stream/device/decoder failure, reconnect if needed and choose Start mirror again. The existing SDK
+**Auto reconnect** repairs pairing transport; it does not restart video or repeat input.
+
+The encoder is limited to a 1600-pixel longest edge, up to 60 fps and 6 Mbps, with audio and automatic
+clipboard synchronization disabled. Browser decoding prefers hardware and checks a software-compatible
+configuration when unsupported. Actual frame rate, latency, hardware decoding and concurrent encoder
+capacity depend on the phone/browser; no scrcpy native-client performance benchmark is claimed here.
+**Open desktop window** separately launches an installed/cached native scrcpy client when available.
+
+### Live diagnostics
+
+Open **Live diagnostics · Network, Logs & App values** below the mirror workspace. It reads a
+snapshot when opened or switched; **Follow live** refreshes the selected view every two seconds.
+**Pause live** freezes the display. Closed panels, other pages and hidden browser tabs do not poll.
+Search stays local to the bounded snapshot. Network/Logs offer **Errors only**; network failures
+use status/error fields, while log severity is inferred from message/tag text because the existing
+SDK log model has no structured severity. Follow scrolls only when already at the bottom, preserving
+manual browsing. Network details show request time/status/duration/connectivity/byte counts and
+host-approved redacted body previews. Desktop never enables body capture for you.
+
+The bridge offers the last 100 retained dashboard network requests and last 100 retained logs.
+Omission counters describe older entries still in the dashboard, not every earlier queue eviction.
+This is recent debugging evidence, not an uninterrupted recording or all phone logcat traffic.
+Connect the existing OkHttp/Chucker/log adapters in the host; an empty view cannot prove success.
+
+**App values** uses the host's cached decoded fields, including `observeDataStoreValues` and
+`registerDataSource` snapshots. Search source/key/value, pin up to ten fields, and compare current
+values with the first read or **Set comparison baseline**. Changed rows show their previous value;
+new/missing fields are described without claiming a database deletion. WAITING/LIVE/PAUSED/STOPPED/
+ERROR source status and last-received time distinguish a hook from a live update guarantee.
+Pins/baselines/rows stay in memory and reset on connection loss/change or detected config/privacy
+change. They do not create files or force a host provider/database read on main.
+When a hook masks a field without changing global config, its previous plaintext baseline is
+also removed; comparison must not reveal a value the current snapshot has masked.
+
+Values are bounded to 30 sources, 100 fields per source and 300 fields / 100,000 key/value characters
+overall; omitted counts are explicit. Global rules and credential-like keys are masked before
+preview truncation. Custom Room/Proto/encrypted stores expose fields through their existing decoded
+owner. A `.preferences_pb` file is binary, not necessarily encrypted; an IDE decoder does not give
+QaLens the app's serializer or keys. File-only stores have metadata and integration guidance under
+Data tools. See [host data hooks](../../docs/APP_DATA.md).
+
+### SQL workbench and storage
+
+**Data tools** lists the connected app's SQLite databases and queries shared with **Control Room**.
+Choose a database, **List tables**, load a quoted table query or type `SELECT` / `WITH … SELECT`,
+then **Run read query**. The PC uses a distinct Android `OPEN_READONLY` connection, accepts only
+wrapped result-producing reads, confines resolved files to the app's own database directory and
+does not expose PRAGMA/ATTACH/writes. Control Room's existing explicit write tools stay separate.
+Room needs no new dependency; nonstandard/encrypted SQLite formats need decoded host snapshots.
+
+Reads run on an IO worker as one asynchronous job; the bridge can continue serving other commands.
+**Cancel query**, leaving the page, hiding the tab or SDK Stop/disable requests cancellation.
+A ten-second watchdog signals cancellation; the next read waits for that worker to finish. Native
+SQLite/file-open behavior can delay completion, so Cancel is not a fixed completion-time guarantee.
+Only one current job/result is retained, expiring after five minutes or bridge Stop. Stale job IDs,
+device switches and late start/status replies cannot populate another phone's results. No command
+is automatically retried. A lost client response can leave a read until the native watchdog runs.
+
+Results show at most 100 rows, 30 columns, 512-character cells and 60,000 cell characters overall;
+the UI reports bounded/truncated previews and scrolls both axes. Binary values get a placeholder.
+Credential-like column names and current text rules mask cells before truncation; aliases and
+ordinary business data still require deliberate queries/host policy. Config changes invalidate old
+results; run the query again. SQL source/literals are not added to the recording breadcrumb.
+
+**Save on phone** stores the name/database/SQL in the existing app-local saved query list (50 maximum
+from desktop). These appear in Control Room on entry or **Rescan** and `.appsal` export. Names cannot
+silently overwrite a query; Load does not execute it, and existing writes still fail in desktop.
+Masked saved SQL cannot be loaded as executable text. **Delete saved query** removes only the current
+matching content ID. Do not put secrets in saved literals. Desktop never persists rows/live values.
+
+**Show storage files** is explicit. Standard preference files offer a redacted snapshot and exclude
+`qalens*` settings; recognized AndroidX encrypted envelopes show decoded-hook guidance, not ciphertext.
+Other encryption schemes cannot be reliably inferred. Standard DataStore files show names/sizes
+only; custom locations may be absent. File targets use opaque IDs from a fresh catalog and resolved
+directory checks; there is no arbitrary path/file reader. Rebuild/reinstall the host SDK, restart
+Python and refresh the browser when adopting these endpoints; older SDKs get update guidance.
+
+### Recording, clips and screenshots
+
+Use **Frames** for the existing permission-free masked recorder, or **HD** when the host has enabled
+`allowUnmaskedVideo`. **Start recording** requires a resumed host app and uses the existing SDK
+recorder; it closes inspection but does not bypass host policy or Android consent. Pending HD consent
+has a separate status/Cancel request and cannot mark clips. Cancelling invalidates the recording
+request; dismiss the Android dialog on the phone if it remains visible. **Stop** saves without a
+phone share sheet. Capture continues if the desktop mirror stops or the browser closes; use the
+phone's REC Stop or reconnect. Desktop disconnection alone does not discard a session.
+
+**Mark clip** supports 10/20/60-second presets and custom whole seconds from 1–300. The master keeps
+recording. The clip ends at the mark, is capped by captured history, and exports after normal Stop;
+it is not immediately playable mid-recording. At most 20 marks per session, with existing evidence/
+media budgets and omission reporting. Failed deferred clip processing can leave fewer exported clips
+than marks. See [recording clips](../../docs/RECORDING_CLIPS.md).
+
+Enter **What went wrong?** before Mark clip to attach a note (up to 256 characters). Current host
+redaction applies; the note becomes a BUG mark in the master timeline and the clip's label in
+`analysis.json`. It does not stop capture or change archive format. Empty notes use the duration
+label. Successful marks clear the submitted note; a newly edited note or failed request is retained.
+
+**Watch latest**, a phone recording's **Watch**, and PC library replay reuse the existing web player.
+**Replay after Stop** is an explicit opt-in for that browser connection: wait for the exact master
+session to finish saving, copy it privately, then open replay. Device switches/disconnects, navigation
+away from Landing/Recordings, errors or a two-minute wait cancel it; no capture command is retried.
+Automatic collection is independently opt-in and unchanged. Watch can show an older completed file
+while a new session is still active; it never reads a partially written archive.
+
+**Take screenshot** captures the foreground app window through the SDK's existing masking policy,
+not the whole-phone adb image. By default the in-window QaLens overlay is temporarily hidden and
+its prior visibility restored, even on capture failure. **Include overlay** retains its current
+visibility; it does not enable an already-hidden overlay or include separate system windows.
+Password/hidden/redacted semantics are masked; secure windows reject capture. Custom Canvas/View
+content still needs the host's masking/secure policy. PNG encoding and transport stay off main.
+Review the image, **Save PNG**, or **Copy image** where supported. A screenshot stays in browser
+memory until an explicit save/copy; no gallery, share sheet or PC workspace file is created.
+
+New capture/mode endpoints require the updated SDK in the consuming QA app. The GUI detects
+capabilities from `/v1/recordings`; older SDKs keep existing inspection/library features and explain
+disabled capture controls. Rebuild/reinstall the QA app, restart Python and refresh the browser.
+
+## Search and selectors
+
+Landing searches tags, labels, text, descriptions, roles, state and supported actions; filter by
+tag presence, role or tap/type/scroll/no actions. **Selectors** suggests exact tags, ancestor-tag
+scopes for duplicates, role/content matches and visible sibling paths, with a match count for each.
+**Check matches** opens the results; choose a result to inspect/highlight it. The builder combines
+an exact attribute, optional parent tag and required action. Zero/duplicate matches are explicit.
+**Export tree XML** and **Export selectors JSON** are explicit browser downloads; neither linking
+nor generating suggestions writes application data to disk.
+
+Android **Inspect elements** opens the movable inspector, whose **Search selectors & tags**
+searches the visible tree. **Review evidence → Elements → Search** has the same searchable list. Choose a result to highlight its live host
+element; **Actions & XPath selectors** shows actions and copyable suggestions. Tree capture stays
+on main; redaction, matching, XML and selector generation run off main. Refresh after navigation
+or changing content. Hidden/password values remain excluded, and custom/private state is not read.
+
+XPath addresses **QaLens XML**, whose root is `<qalens>` with nested `<node>` elements. It is not
+an Appium/UIAutomator XPath. Each node has a live `id`, plus allowlisted attributes `tag`, `label`,
+`text`, `description`, `role`, `enabled`, `selected`, `heading`, `clickable`, `focusable`, `tap`,
+`type` and `scroll`. Boolean/action values are strings `true`/`false`. Missing attributes stay absent.
+The live evaluator accepts a bounded XPath 1.0 subset: child/descendant `node` paths, one positive
+sibling-position predicate **or** exact attribute equalities joined with `and` per step; quoted
+literals and `concat()` handle mixed quotes. Wildcards, arbitrary functions, unions and imported
+XML evaluation are rejected. Examples:
+
+```xpath
+//node[@tag='checkout.submit']
+//node[@tag='cart.row.42']//node[@tag='remove' and @tap='true']
+/qalens/node[1]/node[2]
+```
+
+Counts describe the current visible tree (up to 1,000 nodes), not uniqueness across screens or an
+entire list. Omitted nodes are disclosed; XPath commands reject truncated trees, duplicates and
+trees that change during resolution. Prefer stable unique tags; content depends on values/language
+and positional paths change with layout. XPath length <=4,096, <=64 steps; query returns at most
+100 matches with omission counts. XML and selector strings follow host redaction; illegal XML
+characters are removed consistently. This feature does not change `.sal` replay or add a runner.
 
 ## Persistence and automation
 
 Default storage is **`~/.qalens/bridge`**; override with `--data-dir /your/local/directory`.
-`profiles.json` holds allowlisted settings, `components/<hash>.json` holds explicitly saved data,
+`profiles.json` holds allowlisted settings, `desktop.json` holds the opt-in auto-connect profile ID, `components/<hash>.json` holds explicitly saved data,
 and `runs/<random-id>/` holds processor outputs plus `result.json`. New directories/files use
 private permissions where supported. Existing directory permissions, disk encryption, backups,
 retention and deleting files remain the PC owner's responsibility. The component workspace uses
 no cookies or localStorage for pairing/credentials. Embedded
-web viewers use origin-scoped browser storage for their own preferences/recents; recording
+workspace pane dimensions and web viewers use origin-scoped browser storage for preferences/recents; recording
 automatic-copy is separately opt-in and memory-only. No telemetry is added.
 
 Configure trusted processors with `--pipeline-config`. The GUI cannot author executable commands.
@@ -161,9 +447,30 @@ This trusts the local OS/adb environment; it is not a remotely exposed or multi-
 
 | PC endpoint | Device endpoint / behavior |
 |---|---|
-| `GET /api/snapshot` | `/v1/snapshot`: forest, viewport, parent IDs, tags, actions |
-| `GET /api/events` | `/v1/events`: last 100 observations/network entries and cached data |
-| `POST /api/command` | `/v1/command`: `{action,id}` or `{action,tag}`, tap/type/scroll/select |
+| `POST /api/apps` | `{serial}` → launcher activities with QaLens availability |
+| `POST /api/pair` | `{profile}` → memory-only request for explicit phone approval |
+| `POST /api/connection/check` | `{reconnect}` → pending/connecting/connected status, authenticated `/v1/health`, exact-request phone approval/port query and owned forward repair; recordings fallback only for old SDK 404 |
+| `POST /api/preview` | `{enabled,mode,connectionId,streamId?}`; returns owned scrcpy stream ID/dimensions/revision/mode epoch; require its ID to change/stop |
+| `POST /api/mirror/setup` | Desktop session only; checksum-pinned server cache setup, no capture |
+| `GET /api/mirror/video` | Desktop session + `X-Qalens-Connection`/`X-Qalens-Mirror`; one chunked H.264 viewer, memory-only |
+| `POST /api/mirror/heartbeat` | `{connectionId,streamId}`; verifies current SDK access, renews seven-second page lease |
+| `POST /api/mirror/input` | `{connectionId,streamId,revision,modeEpoch,action,...}`; Control-only touch states/normalized coordinates, wheel, limited keys or <=300-byte UTF-8 text |
+| `GET /api/screen` | Legacy-flag-only memory PNG + `X-Qalens-Frame`; requires session/connection and active preview |
+| `POST /api/input` | Legacy-flag-only `{connectionId,frameId,action,x,y,endX?,endY?,duration?}`; normalized coordinates and bounded adb gestures |
+| `POST /api/inspection` | `/v1/inspection`: `{enabled}`; closes SDK panel/watch/tag modes, toggles inspector |
+| `GET /api/recordings/device` | `/v1/recordings`: completed items, `recording`, `saving`, `controls` phase/mode/capabilities |
+| `POST /api/recording` | `/v1/recording`: `{action:"start",video:boolean}`, `{action:"stop"}` or `{action:"clip",seconds:1..300,label?:string}` |
+| `POST /api/screenshot` | `/v1/screenshot`: `{includeOverlay:boolean}` → masked app-window PNG; <=16 MiB, no persisted screenshot |
+| `GET /api/snapshot` | `/v1/snapshot`: forest, viewport, parent IDs, tags, actions, optional `windows`/node `windowId` |
+| `GET /api/selection` | `/v1/selection`: cached selected ID, no Compose walk |
+| `POST /api/selectors` | `/v1/selectors`: `{id}` → suggestions, match counts and redacted QaLens XML |
+| `POST /api/query` | `/v1/query`: `{xpath}` → current visible matches and omission counts |
+| `GET /api/events` | `/v1/events`: last 100 observations/logs/network entries, time/error/preview details and bounded cached data |
+| `GET /api/data` | `/v1/data`: redacted cached fields/source status, omissions and privacy revision |
+| `POST /api/data` | `/v1/data`: `{action:"files"}` for metadata; `{action:"preferences",id}` for an explicit snapshot |
+| `GET /api/sql` | `/v1/sql`: database opaque IDs/display names, shared saved-query IDs/SQL and limits |
+| `POST /api/sql` | `/v1/sql`: `{action:"start",database:<id>,sql}`, `{action:"status"|"cancel",id}`, `{action:"save",database:<id>,name,sql}` or `{action:"delete",id}` |
+| `POST /api/command` | `/v1/command`: one of `{action,id}`, `{action,tag}`, `{action,xpath}`; tap/type/scroll/select |
 | `POST /api/component` | `/v1/component`: `{id}` or `{tag}`, returns a component preview |
 | `GET /api/inbox` | `/v1/components/inbox` + `/ack`: bounded phone selections → PC previews |
 | `GET /api/previews`, `/api/saved`, `/api/workbench` | Memory previews, saved metadata, profiles/jobs |
@@ -174,8 +481,10 @@ This trusts the local OS/adb environment; it is not a remotely exposed or multi-
 
 Duplicate tags return 409; absent/hidden/off-screen targets 404; unsupported/disabled/declined actions
 409. Scroll deltas are pixels <=10,000 magnitude; type text <=4096 characters. Refresh live IDs
-before use. Recent diagnostics contain no network bodies and use cached, host-registered data;
-providers/Room are not queried on demand. Empty tracks do not establish complete coverage.
+before use. Recent diagnostics include body previews only when the host already enables
+`captureNetworkBodies`; they are redacted and bounded to 2,048 characters on the bridge. Cached
+values do not invoke providers or query Room on demand. SQL is a separate explicit read. Empty
+tracks do not establish complete coverage.
 
 Device headers/body: 8 KiB / 16 KiB; snapshot <=1000 nodes (`omittedNodes`); responses <=4 MiB.
 PC component import <=256 KiB + envelope, other bodies <=16 KiB. Live semantics stay on main;
@@ -195,8 +504,16 @@ are clamped within system/IME bounds in LTR/RTL and retained across size changes
 ```sh
 python3 tools/local-bridge/test_server.py
 python3 tools/local-bridge/test_workbench.py
+python3 tools/local-bridge/test_connection.py
 python3 tools/local-bridge/test_desktop.py
+python3 tools/local-bridge/test_controls.py
+python3 tools/local-bridge/test_scrcpy.py
 node --check tools/local-bridge/app.js
+node tools/local-bridge/test_recording_transfer.js
+node tools/local-bridge/test_polling.js
+node tools/local-bridge/test_selectors.js
+node tools/local-bridge/test_mirror.js
+node tools/local-bridge/test_scrcpy_stream.js
 # Build/install sample debug + androidTest APKs as in CONTRIBUTING.md, then:
 adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e bridgeOnly true \
   com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
@@ -207,22 +524,111 @@ phone button transfers, queue overflow/ack/restart, main timeout cancellation, d
 LTR/RTL gestures. Python checks cover hashing/dedup/restart, profiles/no-reset, local API controls,
 connection freshness and real pipeline success/failure/timeout/shutdown/output paths. Physical
 phones, TalkBack, other Compose versions and Windows processor cleanup remain unverified.
+The selector browser regression uses the actual `app.js` and exercises inspection-only linking,
+search/filtering, visible query results, clearing selection, stale reads/device switches and serialized
+latest highlights. Core tests compare generated XPath with a standard XML XPath engine.
+
+`desktopCaptureOnly` runs actual recorder/clip commands, host HD rejection/pending consent/cancel,
+PixelCopy PNG decoding/password masks, secure-window rejection, visible/invisible overlay restoration
+and screenshot completion racing phone recording Start/Stop. Build/install the sample/test APKs as
+above, then:
+
+```sh
+adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e desktopCaptureOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+For manual browser QA with a temporarily HD-enabled **sample only**, use
+`-e desktopGuiHoldSeconds 300` on the same runner. It runs the normal sample UI, keeps main free,
+requires ordinary phone pairing/Android consent and restores HD policy/bridge access at expiry.
+It is a test fixture, absent from the SDK/release. It does not assert browser results by itself.
+
+Phone approval also has a focused check:
+
+```sh
+adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e pcPairingOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+It checks a distinct app UID cannot offer access, no listener before approval, Deny/cancel/expiry,
+real approval returning to a manual-root host, exact-request status/port, normal-app query denial,
+authenticated health while main is busy, recording-control timeouts and disable/re-enable.
+
+The SDK pairing UI also has a focused regression (with Startup installation removed):
+
+```sh
+adb -s YOUR_DISPOSABLE_EMULATOR shell am instrument -w -e pcUiOnly true -e manualRootOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+```
+
+It exercises SDK overlay/Control Room pairing, Send to PC, token rotation, paused-host inbox and
+recording discovery, shutdown and disable/re-enable. Live tree reads/actions require the host app
+screen in front; receiving already captured attributes and copying completed recordings do not.
+
+The optional end-to-end transfer check requires installed sample/test APKs, Node 18+ and Python 3:
+
+```sh
+node tools/local-bridge/test_device_transfer.js emulator-SERIAL
+python3 tools/local-bridge/test_device_pairing.py emulator-SERIAL --device-port 8767
+```
+
+Use a disposable emulator. The check owns its temporary server/storage/forward and generates a
+one-run token; it never uses a saved customer profile. It verifies busy enable, an adb outage and
+recovery, automatic master/clip copies with Control Room foreground, file hashes/private permissions,
+deduplication and authentication revocation. It tests the same controller the GUI uses, without a
+browser; browser checkbox/layout/navigation need a separate live check.
 
 ## Desktop launcher, replay and phone tasks
 
-`--gui` starts on a choice screen: Replay evidence, Connect a phone, Inspect components or Collect
-recordings. Sticky Back/Start and browser history navigate between pages; leaving Replay pauses its
+`--gui` starts on **Landing**: connection, screen mirror, semantics tree and selected element
+details together. Recordings, Saved elements, Automation, Replay and Device tools remain in the
+compact navigation. Back and browser history navigate between pages; leaving Replay pauses its
 video. Modern and classic replay load directly from the repository's `web/` source files through
 an explicit asset allowlist, so fixes to those viewers apply here too. File picking/drop, timeline,
 comparisons and the `.appsal` editor remain the existing web client's features. The shell and
 viewers share one localhost origin; viewer preferences/recents use that origin's browser storage.
 
-Devices & apps includes phone Back/Home/Wake, Android settings and the existing explicit no-reset
-launch. Start mirror launches **your installed `scrcpy`** in a separate window, using this profile's
-serial and adb executable. Stop mirror/disconnect/server exit closes the owned process. If scrcpy
-is absent the GUI reports how to enable it; this tool does not download/install it. No external
-mirror is embedded or remote-exposed. scrcpy launch was covered by the argv contract; real mirroring
-requires installed scrcpy and remains unverified on this host.
+Device tools includes phone Back/Home/Wake, Android settings and the existing explicit no-reset
+launch. **Open desktop window** launches your installed scrcpy, or a native bundle explicitly placed
+under the pinned dependency cache's `native/` directory. It uses the selected serial/adb executable;
+Stop/disconnect/server exit closes only the owned process. Native scrcpy is optional; the embedded
+video needs only adb, the verified server and a compatible browser. No audio/clipboard features of
+the native client are controlled by the embedded adapter's options.
+
+### scrcpy setup and fallback
+
+First **Start mirror** sets up only the official `scrcpy-server-v5.0` asset, not a global executable
+or package manager. For offline preparation on the PC, run:
+
+```sh
+python3 tools/local-bridge/scrcpy_mirror.py
+```
+
+The cache is `~/.qalens/dependencies/scrcpy/5.0/scrcpy-server`, with the included Apache 2.0 license.
+Version, fixed release URL and digest live in [scrcpy_mirror.py](scrcpy_mirror.py). A corrupt/oversized
+download never replaces the prior server. Setup errors explain connectivity/write access. An offline
+installation may copy that exact official asset and its license to the cache; every Start verifies its digest.
+The protocol adapter is pinned to 5.0: upgrading needs coordinated framing/control tests, not just a
+version edit. [Upstream/license notes](SCRCPY_NOTICE.md) identify the sources and ownership.
+
+The earlier adb PNG mirror and bounded adb gesture implementation remain intact behind the **code-only**
+`ENABLE_LEGACY_MIRROR = False` in [mirror_flags.py](mirror_flags.py). Set it to `True`, restart Python
+and refresh the browser to deliberately use the old roughly-one-fps preview. There is no user-facing,
+URL, environment or saved-preference switch, and no silent fallback after video failure. Legacy
+screenshots have a 16 MiB/24-million-pixel budget and two six-second frame leases.
+
+Both paths capture unmasked whole-phone pixels, including other apps. SDK text redaction/pixel masks
+do not sanitize mirroring. Approved connection and explicit Start are required; video is memory-only
+and stops when the page leaves/hides/disconnects. Session-owned adb forwards/random phone jars are
+removed on shutdown/expiry, without killing adb or another scrcpy instance. Packet size is limited
+to 2 MiB, queued transport to 8 MiB/128 records, decode backlog to 90 records/eight decoder entries,
+and queued input to 24 messages. Tokens/stream identifiers travel in headers/bodies, not URLs.
+
+API 36 emulator checks exercise real H.264 HTTP transport/FFmpeg decoding, native touch/text/wheel,
+rotation, linked SDK selection, Preview/Inspect rejection, stream stop/restart and concurrent SDK
+Frames/HD, consent, screenshots and master/clip MP4 decoding. See the reproducible commands in
+[CONTRIBUTING](../../CONTRIBUTING.md#scrcpy-mirror-checks). Browser canvas visual/rendering acceptance,
+physical/OEM encoders, USB loss, hour-long endurance and other platforms remain separate checks.
 
 Push explicitly chooses a browser file, up to 32 MiB, and writes `/sdcard/Download/<filename>`;
 an existing same-name phone file is replaced. Names allow only letters/numbers/dot/dash/underscore.
@@ -231,9 +637,9 @@ under `transfers/`. Arbitrary device paths, shell commands, resets and uninstall
 not exposed. These actions require the current connection nonce; they never operate on a new
 phone using a stale page's request. adb operations time out after 10 seconds.
 
-Recordings lists completed device `.sal` files and offers explicit Copy to PC / Open replay.
+Landing’s **Collect finished recordings** checkbox controls automatic collection. Recordings lists completed device `.sal` files and offers explicit Copy to PC / Watch.
 Automatic copy is opt-in, watches new completed files only after enabling, is not persisted,
-and resets on device changes or failures. Archives stream over the authenticated device bridge
+and resets on device changes, disconnect or revoked authentication. Temporary failures retain the choice with bounded retries. Archives stream over the authenticated device bridge
 into private `recordings/<sha256>.sal` files; metadata remembers the original filename/app.
 Transfer is bounded to 400 MiB / 60 seconds, basic ZIP/manifest budgets are checked before
 publication, and the replay reader performs full track/checksum validation. A slow/failed transfer

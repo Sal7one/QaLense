@@ -81,6 +81,7 @@ class WorkbenchTests(unittest.TestCase):
             if args[:3] == ["shell", "getprop", "ro.build.version.release"]: return "13\n"
             if args[:3] == ["shell", "pm", "path"]: return "package:/data/app/app.apk\n"
             if args[:2] == ["forward", "tcp:0"]: return "19333\n"
+            if args == ["forward", "--list"]: return "emulator-5560 tcp:19333 tcp:8766\n"
             return ""
         self.bench.adb_call = Mock(side_effect=adb)
         self.bench.connect(server, {"serial":"emulator-5560","package":"com.example.app"}, "synthetic-pairing-token-0123456789")

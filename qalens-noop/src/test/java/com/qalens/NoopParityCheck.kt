@@ -143,6 +143,9 @@ object NoopParityCheck {
 
         // Existing
         q.observeDataStore("name", kotlinx.coroutines.flow.flowOf("v"))
+        q.observeDataStoreValues("name", kotlinx.coroutines.flow.flowOf("v"), redactKeys = listOf("secret")) {
+            mapOf("value" to it)
+        }
         q.stopObservingDataStore("name")
         q.registerDeepLinkScenario("name", "uri")
     }
@@ -153,6 +156,21 @@ object NoopParityCheck {
  * JUnit4 needs a plain class — the object above is the compile-time reference surface.
  */
 class NoopParityCheckTest {
+    @org.junit.Test
+    fun dataStoreValuesDoNotSubscribeOrEvaluateInRelease() {
+        var subscribed = false
+        var evaluated = false
+        QaLens.observeDataStoreValues("fixture", kotlinx.coroutines.flow.flow<String> {
+            subscribed = true
+            emit("secret")
+        }) {
+            evaluated = true
+            mapOf("value" to it)
+        }
+        org.junit.Assert.assertFalse(subscribed)
+        org.junit.Assert.assertFalse(evaluated)
+    }
+
     @org.junit.Test
     fun coroutineFailureReachesHostUnchanged() {
         val thread = Thread.currentThread()

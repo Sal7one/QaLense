@@ -2,6 +2,286 @@
 
 ## Unreleased — post-0.9.0
 
+### Lens 2.0 local-model investigation — 2026-10-11
+
+- Add local-model Insights to Android and modern web replay, reused by the Python desktop through
+  its authenticated parent bridge. Discover installed chat models on Ollama/OpenAI-compatible servers.
+- Build bounded captured evidence around a reviewed bug moment, including raw crashes/frame metrics/
+  connectivity/memory, state, network/logs and analysis. Retain source IDs, timestamps and honest omissions.
+- Distinguish recorded-app investigations from QaLens player investigations, with a separately
+  labeled current replay media/clock/error snapshot rather than fabricated host events.
+- Separate cited observations, uncertain causes, missing evidence and next checks; reject malformed
+  reports and unsupported observations, and link valid citations back to playback.
+- Add tester expected/actual fields and a QA-format Markdown report derived from captured action
+  context. Transfer reviewed evidence and optional completed reports from phone to PC for explicit
+  review/reanalysis, with bounded queues and deliberate hash-deduplicated case saves.
+- Add one optional reviewed saved still for image-capable models, explicit consent, size/time metadata
+  and disclosure of unmasked HD pixels. No full video/audio or automatic live capture is sent.
+- Keep model calls off main, bound/cancel jobs and refuse public URLs/redirects/proxy forwarding.
+  Model credentials and analysis jobs remain in memory; case saves/exports are explicit and no
+  model suggestions execute host actions or code.
+- Add shared evidence/report schemas, synthetic protocol/workflow regressions and host-agent/player
+  setup documentation. Real model reasoning and physical/company-host acceptance remain separate.
+
+### Mirror startup — 2026-10-06
+
+- Flush the first video key once per decoder configuration so idle screens need no phone
+  interaction to appear; restore prediction with that same key before subsequent frames.
+- Show mirror preparation, first-time setup and video stages plus click-to-display elapsed time.
+  Stop stalled first-frame decoding after eight seconds of browser streaming, including rotation.
+- Guard pending flush errors, timers and late stream reads across rotation/Stop/restart; close
+  duplicate decoded output without repainting. Add buffered-decoder/race/UI regressions and
+  an idle-screen startup measurement to the real emulator HTTP check.
+
+### Phone approval handoff — 2026-10-06
+
+- Confirm pairing through bounded authenticated health independent of the host Activity, main
+  thread and recording storage; retain an older SDK fallback only after health 404.
+- Query the offered credential's approval state/actual port through the existing DUMP-protected
+  receiver. Distinguish approved-but-connecting from pending approval, handle ended requests and
+  repair only owned forwards without reapproval or trusting a different manual session.
+- Cancel during the approval handoff revokes only its matching pending/approved request, including
+  the phone approving before the PC learns it; a newer/different token's listener/prompt is preserved.
+- Check immediately after Connect/desktop visibility returns; keep input/capture disabled before
+  authenticated readiness. Bypass company/system proxies for loopback phone requests.
+- Add real API 36 busy-main/approval/security and port-8767 handoff/stream/transfer/revocation checks,
+  plus legacy/identity/transport/proxy and actual desktop JavaScript state regressions.
+
+### Compose dialog inspection — 2026-10-06
+
+- Automatically discover visible host Compose Dialog/AlertDialog/Popup windows on Android 10/API 29+
+  through public `WindowInspector`; retain explicit roots for API 23–28 and deduplicate both paths.
+- Put active phone inspection above extra windows, preserve host focus/geometry and direct
+  two-finger scrolling into their actual content. Clean up on dismissal, pause, disable and recording;
+  a stationary two-finger touch cancels instead of clicking the host.
+- Resolve hits in the foremost containing window, then prefer tagged/actionable/labeled components
+  over equal-sized empty containers. Add optional live window metadata and matching desktop hit rules.
+- Exclude SDK selector/pairing windows from discovery, retain dialog search/attributes/XPath/actions
+  and keep hidden/password filtering. Transform pixel-mask coordinates and share screenshot visibility
+  ownership across inspection-window changes; propagate secure capture flags to SDK inspection/
+  selector/pairing windows. Screenshots remain Activity-window capture.
+- Add real dialog/search/popup/gesture/lifecycle/capture regressions and API-level integration guidance.
+
+### Embedded scrcpy mirror — 2026-10-06
+
+- Make official checksum-pinned scrcpy 5.0 H.264 the inline Landing mirror with WebCodecs decoding,
+  continuous native touch/wheel/basic keyboard input and SDK-linked scaled Compose inspection.
+- Preserve the old PNG/adb implementation behind `ENABLE_LEGACY_MIRROR`, false by default; offer
+  deliberate code rollback and retain the separate optional native desktop window.
+- Guard one viewer, stream/dimension/mode/connection ownership, canceled fingers, phone-auth
+  heartbeats and scoped cleanup; bound video/decode/input queues and fail without replaying actions.
+- Download only the official server into a private PC dependency cache with SHA-256 verification
+  and its Apache license. Disable embedded audio/clipboard sync and retain explicit unmasked,
+  memory-only whole-phone capture. Keep SDK recording, privacy/OS consent and `.sal` schema intact.
+- Move long recording transfer/validation outside the shared workbench lock so video/input and
+  heartbeat can progress. Add HTTP/controller/native input/rotation/HD-clip coexistence regressions
+  and reproducible disposable emulator checks. New browser rendering/hardware performance remains
+  unverified; this does not establish that the reported consuming-app HD failure is resolved.
+
+### Desktop live diagnostics and data tools — 2026-10-05
+
+- Add collapsible Landing Network/Logs/App values with local search, Errors only, bounded Follow/
+  Pause, source status, ten pins and change baselines; clear stale/private comparisons on detected
+  config/connection changes. Body previews keep the host's existing opt-in.
+- Add bug notes to recent clips and retain them in the master BUG mark and clip analysis label.
+- Add a Data tools SQL workbench with genuine read-only SQLite/Room connections, table reads,
+  bounded masked results, async cancel/deadline/expiry and phone-shared saved-query management.
+- Offer explicit redacted ordinary preference snapshots and DataStore file metadata/guidance;
+  reuse decoded host Flows without creating stores, parsing arbitrary files or bypassing encryption.
+- Extend authenticated internal bridge/data capabilities, approval disclosure and regression/
+  integration guidance. Preserve public/no-op API and recording schema. New GUI visual acceptance
+  remains open because desktop UI access was unavailable; protocol/controller/native checks pass.
+
+### Desktop mirror and capture workspace — 2026-10-05
+
+- Arrange Landing as resizable mirror, selected attributes and smaller semantics tree. Add height
+  adjustment, keyboard controls, remembered layout/reset and responsive window layouts.
+- Default to mirror Control with adb tap/swipe/wheel/long-press; add read-only Preview, Inspect
+  outlines/selection and explicit return to Control. Reject stale frames/connections/modes and
+  letterbox targets, pause hidden-page sampling and offer optional installed scrcpy.
+- Add Start/Stop, Frames/host-approved HD, recent clip presets/custom seconds, Watch latest and
+  opt-in exact-session replay after saving through the existing recorder and web player.
+- Add masked app-window screenshot review/save/copy with optional overlay and secure-window
+  refusal. Preserve overlay visibility during concurrent recording Start/Stop, bound binary
+  transfers, recycle canceled captures and explain offline/older-SDK capability states.
+- Extend authenticated internal SDK bridge capabilities, phone approval disclosure, HTTP/JS/native
+  regressions and integration documentation; retain public/no-op API and recording format.
+
+### Desktop startup recovery — 2026-10-05
+
+- Replace raw permission/bind tracebacks with clear startup errors, nonzero exit status and quoted
+  recovery commands. Write-check every workspace directory, including existing read-only folders,
+  while preserving saved data and permissions. Explain file-versus-directory and config failures.
+- Support `--port 0` for OS-selected loopback ports and print the actual HTTP URL. Keep fixed ports
+  explicit; report occupied ports before terminal credentials or adb forwarding. Preserve scoped
+  forward cleanup on shutdown and leave existing listeners intact.
+- Add real subprocess/permission/listener/GUI/forward-cleanup tests to CI and document recovery.
+
+### Compose host compatibility and quick actions — 2026-10-05
+
+- Fix the reproduced Control Room `FlowRow` `NoSuchMethodError` with newer host Foundation:
+  replace all three experimental calls with a small wrapping layout built on stable Compose UI.
+  Preserve the host's dependency versions and action wrapping, including RTL placement. Reserve
+  actual 48 dp touch size for Control Room small buttons to avoid overlapping expanded tap bounds.
+- Widen quick actions and the evidence return control; keep Review evidence visible above the
+  scrolling action list. Center report/Refresh labels with compact 48 dp minimum touch targets.
+- Restore distinct Inspect elements and Inspect tags destinations. Give tags a named, inset-safe
+  Done button alongside system Back; keep copy-on-component-tap and two-finger scrolling.
+- Add side-by-side Record/Record HD buttons; frame capture remains masked, and HD requires host
+  opt-in plus Android consent. Preserve saving/stop controls and expose the disabled HD state.
+- Add a precompiled-SDK/newer-runtime consumer UI fixture and compile it in CI. Extend actual
+  overlay tests for navigation, action dimensions, inspection exits and quick-button HD decoding.
+
+### Control Room SQL and decoded app values — 2026-10-05
+
+- Give SQL selection, query, Run, name and Save separate space with 48 dp actions; expose every
+  database, saved Run/Delete and lazy bounded rows with horizontal columns. Reset preview on
+  every run, show errors, retain cancellation and respect system bars/keyboard. Wrap adjacent
+  recording/config action groups at narrow widths instead of squeezing their last button.
+- Lead App data with searchable read-only host values and update/completion/error status.
+  Add `observeDataStoreValues` for a host-owned decoded Flow: worker mapping/redaction, cached
+  recording state, count-only change labels, credential masking and bounded fields. Preserve
+  event-only observation; pause on disable and remove only observer-owned previews on stop.
+- Keep file details optional, exclude SDK preferences, mask plain values before truncation and
+  explain recognized encrypted envelopes and metadata-only DataStore files. Bound expanded
+  results; keep stale privacy-policy previews hidden. Mirror the API in the non-collecting no-op.
+- Add focused actual SQL/DataStore/storage UI checks, preview/privacy unit tests and external
+  active/no-op consumer compilation. Document decoded Preferences/Proto/encrypted Flow wiring,
+  QA acceptance and the limits of emulator/synthetic-envelope evidence in `docs/APP_DATA.md`.
+
+### Task-based mobile overlay — 2026-10-05
+
+- Replace 12 diagnostic tabs with Activity/Network/Logs/Elements/Device and retain host-provided
+  extensions. Remove health scores, guessed owner/completeness cards, bookmark editor and duplicate
+  report/tool/recording controls from the overlay; preserve public APIs and recording tracks.
+- Give capture, element inspection, evidence review, PC connection and Control Room clear routes.
+  Keep Close visible above a scrollable action list, respect safe insets and add inspector Done/Back.
+  Clear evidence search on view changes; Back clears a query before returning to quick actions.
+- Keep observed failure summaries/expandable redacted stacks, reports, concrete findings and
+  integration facts. Use the host-selected palette for evidence and background work/lazy rows.
+  Collapse element filters initially, scroll expanded options with results on short screens and
+  explain loading, no matches and unavailable inspection.
+- Open PC connection guidance separately; place manual credentials behind Manual pairing without
+  changing approval, token lifetime or privacy. Move named macros to Control Room and wait for a
+  resumed host before running their UI/capture actions; report launch/resume failures.
+- Extend actual Android workflows for Back, search/selection, filters, report/stack copy, host tabs
+  and Control Room macros. Verify continuous traffic, LTR/RTL/two-finger gestures and release
+  isolation; document the current menus and remaining device/host validation limits.
+
+### Mobile replay clock and event following — 2026-10-05
+
+- Replay Timeline/Network/Logs chronologically with a current row that follows playback and seeking;
+  allow manual browsing without pausing media and explicit Follow to return. Default to Timeline.
+- Use monotonic elapsed time for frames and decoder position only inside video coverage. Preserve
+  consent/clip offsets and legacy end alignment; disclose preroll/trailing gaps, freeze during
+  buffering, restart at end, pause on background and preserve Play/Pause after slider scrubs.
+- Step within the selected track and open the earliest error's track. Sort imported tracks once,
+  cache merged events and use binary lookups; exclude future frames/state before their timestamps.
+- Coalesce drag previews, request exact media seeks and detach fullscreen PlayerViews. Guard loop
+  cleanup after release; expose control names/roles and bound long row previews with ellipses.
+- Report decoder/frame failures; allow retained event playback after video failure. Stamp HD start
+  on the encoder worker rather than in the later main-thread UI callback; keep capture opt-ins.
+- Add 12 replay policy/index regressions and a focused Android runner with synthetic decoded color
+  checks. Verify API 36 normal/small display/150% font, large details, actual tester workflow and
+  HD notification Stop; update mobile replay guidance and preserve physical/host validation limits.
+
+### Host integration documentation for AI agents — 2026-10-05
+
+- Add a consumer-agent runbook with discovery/work order, public source index, privacy review,
+  troubleshooting, acceptance routing and a concrete host handoff template.
+- Expand integration recipes for custom QA/production variants, shared module dependencies,
+  resolved production graph checks, Startup/manual lifecycle, existing navigation observation,
+  stable tags/windows, actual OSS owners and phone/browser selection/collection workflows.
+- Document external consumer fixture coverage and limits; update entry points/document ownership
+  and remove stale sample-only desktop pairing guidance. Preserve unresolved host/device limits.
+- Verify local document links/anchors/fences, external consumer debug/release/isolation, the
+  documented production gate and consumer merged manifests; source-check public API examples.
+
+### Linked QA inspection and selectors — 2026-10-05
+- Link live selection between the Android inspector and desktop Landing. Phone selections load
+  attributes/selectors automatically; browser tree/preview selection highlights the phone without
+  tapping the app. Preserve optional captured Send/Receive, explicit actions and phone approval.
+- Add searchable tags/text/roles/actions, tag/action filters in SDK More tools/Tools/inspector and
+  Automation Tags, plus browser role filtering. Keep selectors collapsible in the movable dock.
+- Generate scoped-tag, content/role and visible-position QaLens XPath with match counts; add browser
+  builder, live matching and explicit redacted XML/selector JSON exports. Bound the evaluator;
+  reject unsupported/ambiguous/truncated/stale targets and keep work off main after semantics copy.
+- Guard stale device/selection replies and serialize rapid highlights, skipping superseded choices.
+  Restore selection after browser refresh and clear desktop selection when the phone clears it.
+- Resolve preview clicks once from fresh bounds instead of selecting again as the event bubbles.
+- Fix the search field's accessible edit label and reveal results when checking a generated selector.
+  Verify standard XPath equivalence/privacy, actual overlay search/copy and live phone/browser
+  round trips; add browser wiring regressions to CI and update onboarding/protocol documentation.
+
+### Android feature verification and tester UI — 2026-10-04
+- Make system Back exit fullscreen Android replay and return to its controls.
+- Keep the diagnostic title/Close reachable at large font sizes; move tools into their own
+  scrollable row, name icon buttons and expose selected diagnostic tabs to accessibility.
+- Add positive tester workflow instrumentation for screenshots/bug marks, actual Record/REC Stop,
+  all diagnostic panes, Watch, successful macros, configuration, real profile upload, replay and
+  Panic. Verify at 360 × 640 dp, 150% font and three-button navigation.
+- Exercise all 10/20/60s presets and custom duration in frame/HD tests, and actual notification Stop
+  with HD in the background. Add opt-in test-only handling of the real English OS consent dialog.
+- Record the executed Android feature/build/OSS/PC/privacy matrix and remaining device/host limits
+  in `docs/ANDROID_VERIFICATION.md`; update contributor commands and current handover.
+- Fix desktop Receive polling starving connection health and automatic recording discovery at
+  aligned timer intervals. Keep bounded reads independent and preserve generation/in-flight guards.
+  Add an actual-app wiring regression to CI; verify owned-forward recovery with Receive/collection
+  enabled, actual SDK Send, private master/clip copies, remembered-app fresh approval and replay/Back.
+- Clear the connection hint on Disconnect so it cannot claim the phone is still connected.
+- Configure CI Android setup to install `platform-tools` explicitly; the old default requested the
+  retired `tools` package and failed before compilation.
+
+### Landing workspace and phone-approved connection — 2026-10-04
+- Bring screen preview, live semantics tree and selected-element attributes into Landing; load
+  attributes on selection, add focused detail tabs and consolidate secondary tools/navigation.
+- Discover SDK-enabled apps; primary Connect handles random credentials internally and opens a
+  shared SDK phone approval prompt through a DUMP-protected receiver. Keep manual/terminal pairing.
+- Bound pending approval, reject other app senders, allow Deny/cancel/expiry/disable and keep tokens
+  out of Activity extras, saved profiles and reports. Preserve no-op release dependency isolation.
+- Add opt-in remembered-app connection requests, session-preserving owned-forward reconnect and
+  explicit memory-only whole-phone screen PNG preview (up to 1 fps); keep scrcpy optional.
+- Pass 26 Python regressions, shared transfer-controller checks, SDK/sample/consumer builds/lint/
+  isolation and real Android/adb/Python approval, screen, attributes, repair, paused-host transfer and
+  token revocation. Later live checks pass redesigned browser selection/detail tabs, connection
+  restart/recovery, recording collection, replay/Back and 1440px/390px layouts.
+
+### Host lifecycle, SDK pairing and resilient PC transfers — 2026-10-04
+- Let explicit `QaLensRoot` integrations establish application context and scoped Activity lifecycle
+  callbacks when Startup installation is absent. This fixes foreground-host discovery for Send to PC
+  and recording controls without requiring sample-app setup.
+- Make the delayed clip acknowledgement retain a nullable-safe application context and guard its
+  actual main-thread execution. Cover the reported old line-642 null-context path while recording.
+- Preflight Control Room recording actions, establish lifecycle hooks before returning to the host,
+  clear failed/expired requests and display disabled/privacy/launcher errors in the recording card.
+- Wait for the consent Activity to resume before launching HD services, keep it visible until
+  foreground promotion, start the encoder worker afterward and stop services without a background
+  start. Report launch/promotion/encoder errors distinctly from denied permission. The consuming
+  app's exact foreground exception still needs its trace; emulator success cannot identify it.
+- Move PC inspector pairing into shared SDK Control Room/overlay controls: editable port, hidden
+  token, sensitive clipboard marking, token rotation and Stop. Remove sample-only pairing UI.
+  Captured inbox/ack and cached observations remain available with Control Room foreground;
+  live tree reads/actions still require the host screen to be resumed.
+- Keep automatic PC recording collection enabled through busy UI and transient discovery/copy
+  failures, with bounded retries and deduplication. Revoke on device changes or authentication
+  failures, and guard in-flight enable/disable/connection races. Component Receive also survives
+  temporary failures. Run the transfer state-machine regressions in CI and add an opt-in real
+  Android/adb/Python transfer check for outage recovery, paused-host copies and revoked tokens.
+
+### Recording controls and capture memory — 2026-10-04
+- Fix overlay recording controls/clip popups using an application context for visual APIs. Use a
+  display/window context on API 30+ and SDK-owned native widget styles; preserve the host's StrictMode
+  policy. This removes reproduced incorrect-context violations that can terminate strict QA builds.
+- Dismiss clip menus/dialogs with the REC window and guard native control construction.
+- Allocate recording/fallback frames at bounded size before PixelCopy, rather than allocating the
+  full display and scaling afterward. Transform masks to output coordinates, round outward and reject
+  resized/stale captures. Allocation failures skip a frame instead of escaping onto the host UI thread.
+- Exercise actual preset/custom controls in HD as well as frame tests, with incorrect-context
+  termination enabled, stop while a menu is visible, and decode every exported HD master/clip.
+  The full device runner passes, including scaled partial-region masks; keep load-test tab discovery
+  scoped to its strip and refresh stale accessibility cache under continuous updates.
+  The reported consuming-app crash still needs its own trace to confirm the same cause.
+
 ### Product onboarding and documentation cleanup — 2026-10-02
 - Add one onboarding guide for SDK/web/desktop/backend evaluation, data hooks, recording/clips,
   pairing, persistence, component processors, privacy, troubleshooting and team integration advice.

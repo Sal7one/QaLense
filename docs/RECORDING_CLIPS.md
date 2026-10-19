@@ -34,7 +34,10 @@ phone has not been verified. Video uses a duration-aware bitrate (up to 4 Mbps) 
 file limit to fit existing readers. Long sessions trade encoding quality for duration. This does
 not promise constant visual quality, audio capture, or that every encoder honors its bitrate.
 
-Frame mode scales JPEGs to at most 720 px wide, quality 60. Sampling is approximately
+Recording frame allocations (including HD fallbacks) are bounded before capture: at most 720 px
+wide, 2 million pixels and 2,880 px tall. PixelCopy scales into that destination; privacy masks scale
+with it and round outward. JPEG quality is 60. Allocation failure or a window resize skips that frame.
+Sampling is approximately
 `max(500 ms, configured duration / 3600)`; a default hour samples about once per second.
 At most 3,600 frames / 192 MiB remain. Older media is evicted if either budget fills and loss is
 reported in existing partial-recording coverage. Video keeps 650 fallback frames, sampled about
@@ -82,7 +85,8 @@ Open replay passes the file to the existing reader in the embedded modern/classi
 Automatic copy is off by default. Enabling it takes the current phone library as its baseline and
 copies only subsequently finished archives, including clips. Existing archives require Copy.
 The preference is connection-scoped, memory-only, disabled on a device switch/disconnect, and
-paused on transfer errors. It does not delete phone archives or retry failed commands silently.
+kept enabled through temporary discovery/copy errors with bounded retry delays. Authentication
+revocation stops it and requires pairing again. It does not delete phone archives or retry host actions.
 Do not leave a capture computer connected to a customer's app without their capture agreement.
 
 ## Verification
@@ -101,9 +105,25 @@ adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -r -e videoOnly true \
 # Deny the OS dialog promptly; verifies reset/no archive and a following frame capture:
 adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -r -e videoDenyOnly true \
   com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+# Actual Control Room buttons with Startup/Application.install removed (QaLensRoot only):
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -r -e controlOnly true -e manualRootOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
+# Approve the OS consent; test the same Control Room HD button and decode master/UI clips:
+adb -s YOUR_DISPOSABLE_SERIAL shell am instrument -w -r -e controlVideoOnly true -e manualRootOnly true \
+  com.qalens.sample.test/com.qalens.sample.RecordingRetentionInstrumentation
 ```
 
-Require their `OK:` result; adb exit zero is insufficient. The frame-focused check clicks preset/custom
-native clip controls. The tests overflow log history, retain a recent failure, exclude post-mark logs, keep capture running, and inspect the actual archive media.
-Video verifies both master and clip have a readable H.264 track beginning at a sync frame. Physical
+Require their `OK:` result; adb exit zero is insufficient. Both frame and HD checks click preset/custom
+native clip controls and stop with a menu visible. API 31+ enables StrictMode incorrect-context
+termination; run with overlay permission both enabled and disabled. The tests overflow log history,
+retain a recent failure, exclude post-mark logs and keep capture running. Video verifies all master/UI/API
+clips have readable H.264 tracks beginning at a sync frame and decodes a real frame from each. Physical
 phones, complete-hour endurance, rotation/encoder vendor matrices and TalkBack remain unverified.
+
+The Control Room cases also check visible disabled/video-opt-in failures and mark clips with the
+global application reference cleared. `manualRootOnly` removes auto installation only in the
+disposable test process. HD consent handoff waits for lifecycle resume and foreground-service
+acknowledgement before closing the helper Activity; errors preserve the exception type rather
+than reporting every startup failure as consent denial. A reported foreground-service crash in
+another app still needs its first exception line to distinguish launch restrictions, permissions
+and Android's asynchronous promotion timeout.

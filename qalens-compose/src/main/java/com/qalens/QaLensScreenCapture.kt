@@ -20,7 +20,11 @@ import java.io.FileOutputStream
 
 internal object QaLensScreenCapture {
 
-    private const val OVERLAY_TAG = "qalens_overlay_compose_view"
+    private class HiddenOverlay(val visibility: Int, var captures: Int = 1)
+    private val hiddenOverlays = java.util.WeakHashMap<View, HiddenOverlay>()
+    fun visibilityBeforeCapture(view: View): Int = hiddenOverlays[view]?.visibility ?: view.visibility
+    fun isHiddenForCapture(view: View): Boolean = hiddenOverlays.containsKey(view)
+
     private const val PROVIDER_SUFFIX = ".qalens.fileprovider"
 
     private val deliveryWorker = java.util.concurrent.ThreadPoolExecutor(
@@ -40,20 +44,24 @@ internal object QaLensScreenCapture {
                 listOfNotNull(c.getOrNull(SemanticsProperties.EditableText)?.text) +
                 c.getOrNull(SemanticsProperties.ContentDescription).orEmpty()).joinToString(" ")
             if (c.contains(SemanticsProperties.Password) || c.getOrNull(QaHiddenFromReportsKey) == true || cfg.redact(text) != text)
-                node.boundsInWindow else null
+                QaLensActivityInstaller.mapToHostWindow(node.root as? View ?: error("Missing capture root"), node.boundsInWindow) else null
         }
     }.getOrNull()
 
-    private fun mask(bitmap: Bitmap, bounds: List<androidx.compose.ui.geometry.Rect>) {
+    private fun mask(bitmap: Bitmap, bounds: List<androidx.compose.ui.geometry.Rect>, sourceWidth: Int, sourceHeight: Int) {
         val canvas = Canvas(bitmap)
+        val sx = bitmap.width.toFloat() / sourceWidth
+        val sy = bitmap.height.toFloat() / sourceHeight
         val paint = Paint().apply { color = Color.BLACK }
-        bounds.forEach { canvas.drawRect(it.left, it.top, it.right, it.bottom, paint) }
+        // Round outward after scaling so the edge pixels cannot retain a slice of private text.
+        bounds.forEach { canvas.drawRect(kotlin.math.floor(it.left * sx), kotlin.math.floor(it.top * sy),
+            kotlin.math.ceil(it.right * sx), kotlin.math.ceil(it.bottom * sy), paint) }
     }
 
     /** Show/hide the QaLens overlay view (bubble + panel) on the given activity. */
     fun setOverlayVisible(activity: Activity, visible: Boolean) {
-        val overlay = activity.window.decorView.findViewWithTag<View>(OVERLAY_TAG)
-        overlay?.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+        val overlays = QaLensInspectionWindows.overlayViews(activity)
+        overlays.forEach { it.visibility = if (visible && it === overlays.lastOrNull() && !isHiddenForCapture(it)) View.VISIBLE else View.INVISIBLE }
     }
 
     /**
@@ -63,26 +71,47 @@ internal object QaLensScreenCapture {
      * The recorder passes false because it hides the overlay once for the whole session — toggling
      * per frame would make the bubble flicker. Returns null on failure (zero-size / FLAG_SECURE).
      */
-    fun captureFrame(activity: Activity, manageOverlay: Boolean = true, onResult: (Bitmap?) -> Unit) {
+    fun captureFrame(activity: Activity, manageOverlay: Boolean = true, recordingSize: Boolean = false, onResult: (Bitmap?) -> Unit) {
         if (!QaLens.config.value.enabled || activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0) {
             onResult(null); return
         }
         val epoch = QaLens.captureEpoch
         val before = maskBounds(activity) ?: run { onResult(null); return }
         val decor = activity.window.decorView
-        val overlay = if (manageOverlay) decor.findViewWithTag<View>(OVERLAY_TAG) else null
-        val previousVisibility = overlay?.visibility
-        overlay?.visibility = View.INVISIBLE
+        val sourceWidth = decor.width
+        val sourceHeight = decor.height
+        if (sourceWidth <= 0 || sourceHeight <= 0) { onResult(null); return }
+        // Own only a visibility change made by this capture. An already-hidden recorder overlay
+        // must not be restored to INVISIBLE after a concurrent phone Stop has made it visible.
+        val overlays = if (manageOverlay) QaLensInspectionWindows.overlayViews(activity).filter {
+            QaLensInspectionWindows.visibilityBeforeInspection(it) == View.VISIBLE || isHiddenForCapture(it)
+        } else emptyList()
+        overlays.forEach { view ->
+            val existing = hiddenOverlays[view]
+            if (existing != null) existing.captures++
+            else hiddenOverlays[view] = HiddenOverlay(QaLensInspectionWindows.visibilityBeforeInspection(view))
+            view.visibility = View.INVISIBLE
+        }
         val finish: (Bitmap?) -> Unit = { bmp ->
-            if (previousVisibility != null) overlay?.visibility = previousVisibility
+            overlays.forEach { view ->
+                val hidden = hiddenOverlays[view]
+                if (hidden != null && --hidden.captures == 0) {
+                    hiddenOverlays.remove(view)
+                    if (!QaLens.state.value.isRecording && QaLens.config.value.enabled && QaLens.state.value.overlayEnabled &&
+                        view.isAttachedToWindow && view.visibility == View.INVISIBLE &&
+                        QaLensInspectionWindows.overlayViews(activity).lastOrNull() === view) view.visibility = hidden.visibility
+                }
+            }
             val after = if (bmp != null) maskBounds(activity) else emptyList()
             if (bmp != null && (!QaLens.config.value.enabled || epoch != QaLens.captureEpoch ||
-                    activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0 || after == null)) {
+                    activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0 || after == null ||
+                    decor.width != sourceWidth || decor.height != sourceHeight)) {
                 bmp.recycle()
                 onResult(null)
             } else {
-                if (bmp != null) mask(bmp, before + after.orEmpty())
-                onResult(bmp)
+                if (bmp != null && runCatching { mask(bmp, before + after.orEmpty(), sourceWidth, sourceHeight) }.isFailure) {
+                    bmp.recycle(); onResult(null)
+                } else onResult(bmp)
             }
         }
 
@@ -91,27 +120,34 @@ internal object QaLensScreenCapture {
             if (!QaLens.config.value.enabled || epoch != QaLens.captureEpoch || decor.width <= 0 || decor.height <= 0) {
                 finish(null); return@Runnable
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val bmp = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
-                try {
+            if (decor.width != sourceWidth || decor.height != sourceHeight) { finish(null); return@Runnable }
+            val (width, height) = if (recordingSize) RecordingFrameSize.of(sourceWidth, sourceHeight)
+                else sourceWidth to sourceHeight
+            val bmp = try { Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888) }
+                catch (_: OutOfMemoryError) { finish(null); return@Runnable }
+                catch (_: RuntimeException) { finish(null); return@Runnable }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     PixelCopy.request(activity.window, bmp, { result ->
                         if (result == PixelCopy.SUCCESS) finish(bmp)
                         else { bmp.recycle(); finish(null) }
                     }, Handler(Looper.getMainLooper()))
-                } catch (e: Exception) {
-                    bmp.recycle()
-                    finish(null)
+                } else {
+                    val canvas = Canvas(bmp)
+                    canvas.scale(width.toFloat() / sourceWidth, height.toFloat() / sourceHeight)
+                    decor.draw(canvas)
+                    finish(bmp)
                 }
-            } else {
-                val bmp = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
-                decor.draw(Canvas(bmp))
-                finish(bmp)
+            } catch (_: RuntimeException) {
+                bmp.recycle(); finish(null)
+            } catch (_: OutOfMemoryError) {
+                bmp.recycle(); finish(null)
             }
         }
         // PixelCopy snapshots the last *composited* frame, so a same-pass visibility toggle would
         // still capture the overlay (e.g. the in-window REC chip). Post so the hidden overlay gets
         // one frame to leave the surface — same pattern captureAndShare has always used.
-        if (overlay != null) decor.post(doCapture) else doCapture.run()
+        if (overlays.isNotEmpty()) decor.post(doCapture) else doCapture.run()
     }
 
     fun captureAndShare(

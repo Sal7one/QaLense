@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Optional debug/QA replay module: local model analysis uses the host's existing TLS and
+         cleartext policy. This normal permission does not enable capture or model sending. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application>
         <!-- Debug-only QA tool. No LAUNCHER icon of its own anymore (the Control Room is the single
              QA entry point and opens recordings here). Own taskAffinity + singleTask so opening a

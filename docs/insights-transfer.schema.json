@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qalens:insights:transfer:1",
+  "title": "Explicit phone-to-PC investigation handoff",
+  "type": "object",
+  "required": ["schema", "bundle"],
+  "properties": {
+    "schema": {"const": "qalens-investigation-transfer/1"},
+    "bundle": {"$ref": "insights-evidence.schema.json"},
+    "report": {"$ref": "insights-report.schema.json"}
+  },
+  "$comment": "Runtime validators enforce a256KiB UTF8document limit and all evidence/report budgets. Sending is explicit and requires an approved active phone bridge. The bundle may contain one reviewed saved still; no full recording, provider configuration or APIkey is part of the handoff. An optional report is re-grounded against submitted IDs and its QA section is re-derived. PC reception stores a bounded memory preview; saving and model analysis each require a separate user action."
+}

@@ -35,10 +35,13 @@ class QaLensStartupInitializer : Initializer<Unit> {
 }
 
 internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks {
-    private const val OVERLAY_TAG = "qalens_overlay_compose_view"
+    internal const val OVERLAY_TAG = "qalens_overlay_compose_view"
     private const val NOTIFICATION_PERMISSION_REQUEST = 0x4153
 
     private var installed = false
+    private var callbacksRegistered = false
+    internal val isInstalled: Boolean get() = installed
+    private val rootActivities = java.util.WeakHashMap<Activity, Int>()
     private var notificationPermissionAsked = false
 
     // Live host-activity count → detect when the app is fully gone (vs. just rotating/backgrounded)
@@ -46,15 +49,16 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     private var liveActivities = 0
     private val resumed = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Activity, Boolean>())
     private val activities = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Activity, Boolean>())
-    private data class ExtraRoot(val owner: java.lang.ref.WeakReference<Activity>, var references: Int)
+    private data class ExtraRoot(val owner: java.lang.ref.WeakReference<Activity>, var references: Int, val order: Long)
     private val extraRoots = java.util.WeakHashMap<View, ExtraRoot>()
+    private var nextExtraRootOrder = 0L
 
     fun registerInspectionRoot(view: View) {
         val activity = view.context.findActivity() ?: return
         synchronized(extraRoots) {
             val existing = extraRoots[view]
             if (existing?.owner?.get() === activity) existing.references++
-            else extraRoots[view] = ExtraRoot(java.lang.ref.WeakReference(activity), 1)
+            else extraRoots[view] = ExtraRoot(java.lang.ref.WeakReference(activity), 1, ++nextExtraRootOrder)
         }
         QaLens.scheduleInspection()
     }
@@ -73,8 +77,11 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
 
     fun inspectionRoots(activity: Activity?): List<View> = if (activity == null) emptyList() else
         synchronized(extraRoots) {
-            extraRoots.filter { (view, entry) -> entry.owner.get() === activity && view.isAttachedToWindow }.keys.toList()
+            extraRoots.entries.filter { (view, entry) -> entry.owner.get() === activity && view.isAttachedToWindow }
+                .sortedBy { it.value.order }.map { it.key }
         }
+
+    fun inspectionWindowFor(id: String): View? = ComposeSemanticsReader.windowFor(id)
 
     /** Align qaTag layout hints from Dialog/Popup windows with the host decor coordinate space. */
     fun mapToHostWindow(view: View, bounds: Rect): Rect {
@@ -105,14 +112,20 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
         activity != null && view.context.findActivity() === activity
 
     private val layoutListeners = java.util.WeakHashMap<Activity, android.view.ViewTreeObserver.OnGlobalLayoutListener>()
+    private val focusListeners = java.util.WeakHashMap<Activity, android.view.ViewTreeObserver.OnWindowFocusChangeListener>()
     private fun observeLayout(activity: Activity) {
         if (layoutListeners.containsKey(activity)) return
         val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener { QaLens.scheduleInspection() }
         layoutListeners[activity] = listener
         activity.window.decorView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+        val focus = android.view.ViewTreeObserver.OnWindowFocusChangeListener { QaLens.scheduleInspection() }
+        focusListeners[activity] = focus
+        activity.window.decorView.viewTreeObserver.addOnWindowFocusChangeListener(focus)
     }
     private fun stopLayout(activity: Activity) {
-        layoutListeners.remove(activity)?.let { activity.window.decorView.viewTreeObserver.removeOnGlobalLayoutListener(it) }
+        val observer = activity.window.decorView.viewTreeObserver
+        layoutListeners.remove(activity)?.let { if (observer.isAlive) observer.removeOnGlobalLayoutListener(it) }
+        focusListeners.remove(activity)?.let { if (observer.isAlive) observer.removeOnWindowFocusChangeListener(it) }
     }
 
     fun suspendCapture() {
@@ -128,8 +141,40 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     fun install(application: Application) {
         if (installed) return
         installed = true
+        registerCallbacks(application)
+    }
+
+    private fun registerCallbacks(application: Application) {
+        if (callbacksRegistered) return
+        callbacksRegistered = true
         application.registerActivityLifecycleCallbacks(this)
     }
+
+    /** Explicit roots opt in only their Activity when AndroidX Startup is absent/disabled. */
+    fun registerRoot(activity: Activity) {
+        QaLens.rememberApplication(activity.application)
+        rootActivities[activity] = (rootActivities[activity] ?: 0) + 1
+        registerCallbacks(activity.application)
+        onActivityCreated(activity, null) // Root composition may occur after the real callback.
+    }
+
+    fun resumeRoot(activity: Activity) {
+        if (!isResumed(activity)) onActivityResumed(activity)
+    }
+
+    fun unregisterRoot(activity: Activity) {
+        val count = rootActivities[activity] ?: return
+        if (count > 1) { rootActivities[activity] = count - 1; return }
+        if (!installed) {
+            onActivityPaused(activity)
+            detachOverlay(activity)
+            onActivityDestroyed(activity)
+        }
+        rootActivities.remove(activity)
+    }
+
+    private fun isManaged(activity: Activity): Boolean =
+        !isInternal(activity) && (installed || rootActivities.containsKey(activity))
 
     /** QaLens-owned screens (Control Room, Player, consent trampoline) never get the overlay. */
     private fun isInternal(activity: Activity): Boolean = when (activity.javaClass.name) {
@@ -170,6 +215,7 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
 
     /** Remove the QaLens overlay view from the activity ("stop injecting"). */
     fun detachOverlay(activity: Activity) {
+        QaLensInspectionWindows.dismiss(activity)
         val decor = activity.window.decorView as? ViewGroup ?: return
         decor.findViewWithTag<View>(OVERLAY_TAG)?.let { decor.removeView(it) }
     }
@@ -185,12 +231,13 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
         ComposeSemanticsReader.rawNodes(activity.window.decorView, strict = true)
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
-        if (!isInternal(activity)) { liveActivities++; activities += activity }
+        if (isManaged(activity) && activities.add(activity)) liveActivities++
     }
     override fun onActivityStarted(activity: Activity) = Unit
 
     override fun onActivityResumed(activity: Activity) {
-        if (isInternal(activity)) return
+        if (!isManaged(activity)) return
+        onActivityCreated(activity, null) // Installation can happen while a host task already exists.
         resumed += activity
         QaLens.trackActivity(activity)
         // Master run-condition (`QaLens.configure { enabled = false }`): fully inert — no overlay,
@@ -217,7 +264,8 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
     }
 
     override fun onActivityPaused(activity: Activity) {
-        if (isInternal(activity)) return
+        if (!isManaged(activity)) return
+        QaLensInspectionWindows.dismiss(activity)
         resumed -= activity
         stopLayout(activity)
         QaLens.onActivityPaused(activity)
@@ -235,10 +283,11 @@ internal object QaLensActivityInstaller : Application.ActivityLifecycleCallbacks
      * the app is swiped away). Re-shown automatically on the next launch.
      */
     override fun onActivityDestroyed(activity: Activity) {
-        if (isInternal(activity)) return
+        if (!isManaged(activity) || !activities.remove(activity)) return
+        QaLensInspectionWindows.dismiss(activity)
+        stopLayout(activity)
         QaLensFrameMetrics.detach(activity)
         QaLensSystemChip.detachFrom(activity)
-        activities -= activity
         resumed -= activity
         synchronized(extraRoots) { extraRoots.entries.removeAll { it.value.owner.get() === activity } }
         liveActivities = (liveActivities - 1).coerceAtLeast(0)
@@ -352,6 +401,11 @@ private object ComposeSemanticsReader {
 
     fun semanticsId(node: SemanticsNode): String = "semantics:${node.root?.let(::rootId)}:${node.id}"
 
+    fun windowFor(id: String): View? {
+        val rootId = id.takeIf { it.startsWith("semantics:") }?.split(':', limit = 3)?.getOrNull(1)?.toLongOrNull() ?: return null
+        return synchronized(rootIds) { (rootIds.entries.firstOrNull { it.value == rootId }?.key as? View)?.rootView }
+    }
+
     private fun SemanticsNode.isHiddenFromReports(): Boolean {
         var current: SemanticsNode? = this
         while (current != null) {
@@ -385,7 +439,7 @@ private object ComposeSemanticsReader {
             }
         }
         collect(view)
-        QaLensActivityInstaller.inspectionRoots(QaLens.currentActivity).forEach(::collect)
+        QaLensInspectionWindows.roots(QaLens.currentActivity).forEach(::collect)
         return result
     }
 

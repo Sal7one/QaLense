@@ -7,4 +7,7 @@ build and device-test instructions. Historical CHANGELOG entries are not a curre
 
 Preserve host-app behavior, debug/no-op release isolation, explicit capture privacy and honest
 recording coverage. Do not commit secrets, local configuration, generated builds or real recordings.
-For host-app integration, use [integration.md](integration.md) and [OSS integrations](docs/OSS_INTEGRATIONS.md).
+For host-app integration, follow the [AI integration runbook](docs/AI_INTEGRATION.md),
+[integration recipes](integration.md) and [OSS integrations](docs/OSS_INTEGRATIONS.md).
+Inspect the host's actual variants and lifecycle/DI owners, use public APIs, verify every production
+dependency graph and merged manifest, and report build evidence separately from host runtime checks.

@@ -29,7 +29,6 @@ internal object QaLensSessionRecorder {
 
     private const val FPS = 2
     private const val MAX_FRAMES = 3_600          // Leaves room for structured entries within the shared ZIP budget.
-    private const val MAX_FRAME_WIDTH = 720
     private const val MAX_SAVED_SAL = 30
     private const val WATCHDOG_TIMEOUT_MS = 10_000L // A5: auto-cancel if no frame for 10s
     private const val WATCHDOG_TICK_MS = 2_000L       // A5: watchdog polls every 2s
@@ -57,6 +56,16 @@ internal object QaLensSessionRecorder {
     /** True while a recording uses the floating system-window chip (overlay stays fully hidden). */
     val usesSystemChip: Boolean get() = systemChipMode
     internal val captureStartedAt: Long get() = startMs
+    // Read on main. Desktop commands use the same recorder and consent lifecycle as phone controls.
+    internal fun desktopStatus(): Map<String, Any?> = mapOf(
+        "phase" to lifecycle.phase.name.lowercase(), "mode" to if (videoMode) "hd" else "frames",
+        "startedAtMillis" to startMs.takeIf { recording }, "markedClips" to clipCount,
+        "sessionName" to "session_$startMs.sal",
+        "canClip" to (lifecycle.phase == RecordingLifecycle.Phase.CAPTURING && clipCount < 20),
+        "allowVideo" to QaLens.config.value.allowUnmaskedVideo,
+        "inspection" to QaLens.state.value.isInspectMode,
+        "capabilities" to listOf("recording-control", "inspection-control", "masked-screenshot", "live-app-values", "read-only-sql")
+    )
     private val mediaLock = Any()
     @Volatile private var frameCounter = 0
     private val frameIndex = linkedMapOf<Long, String>()
@@ -263,10 +272,10 @@ internal object QaLensSessionRecorder {
         QaLens.config.value.enabled && QaLens.config.value.allowUnmaskedVideo &&
             lifecycle.phase == RecordingLifecycle.Phase.AWAITING_CONSENT && videoFile?.absolutePath == path
 
-    fun onVideoStarted(path: String) {
+    fun onVideoStarted(path: String, startedAtMillis: Long) {
         handler.post {
             if (!isAwaitingVideo(path) || videoFile?.absolutePath != path || !lifecycle.activate(lifecycle.sessionId)) return@post
-            videoStartMs = System.currentTimeMillis()
+            videoStartMs = startedAtMillis
             val activity = QaLens.currentActivity ?: activityRef?.get()
             if (activity != null) beginCapture(activity)
             else { startEvidence(); QaLens.setRecording(true); handler.post(tick) }  // no activity (backgrounded)
@@ -304,7 +313,7 @@ internal object QaLensSessionRecorder {
         }
     }
 
-    fun onVideoConsentDenied(path: String?) {
+    fun onVideoConsentDenied(path: String?, failureReason: String? = null) {
         handler.post {
             if (path == null || lifecycle.phase != RecordingLifecycle.Phase.AWAITING_CONSENT || videoFile?.absolutePath != path) return@post
             lifecycle.cancel()
@@ -316,7 +325,8 @@ internal object QaLensSessionRecorder {
             QaLensSystemChip.hide()
             restoreOverlay()
             QaLens.setRecording(false)
-            QaLens.log("Screen recording permission denied — recording cancelled.")
+            if (failureReason == null) QaLens.log("Screen recording permission denied — recording cancelled.")
+            else QaLens.pushError(ErrorKind.RECORDING, failureReason)
             sessionDir?.let { discarded -> writer.execute { discarded.deleteRecursively() } }
             sessionDir = null
         }
@@ -342,19 +352,17 @@ internal object QaLensSessionRecorder {
         capturing = true
         // Overlay is hidden for the whole session and the REC chip lives in a separate window
         // (PixelCopy can't see it) — so no per-frame toggling, no flashing.
-        QaLensScreenCapture.captureFrame(activity, manageOverlay = false) { bmp ->
+        QaLensScreenCapture.captureFrame(activity, manageOverlay = false, recordingSize = true) { bmp ->
             if (bmp == null) { capturing = false; return@captureFrame }
             // Serialize media writes with archive writes, but never compress or wait for disk on main.
             val capturedAt = System.currentTimeMillis()
             writer.execute {
-                var scaled: Bitmap? = null
                 try {
                     if (!lifecycle.acceptsFrame(id) || !QaLens.config.value.enabled) return@execute
-                    scaled = scale(bmp)
                     val ts = capturedAt
                     val name = "frames/%06d.jpg".format(frameCounter + 1)
                     val file = File(dir, name)
-                    FileOutputStream(file).use { check(scaled.compress(Bitmap.CompressFormat.JPEG, 60, it)) }
+                    FileOutputStream(file).use { check(bmp.compress(Bitmap.CompressFormat.JPEG, 60, it)) }
                     synchronized(mediaLock) {
                         if (lifecycle.acceptsFrame(id) && sessionDir == dir && QaLens.config.value.enabled) {
                             frameCounter++
@@ -373,18 +381,11 @@ internal object QaLensSessionRecorder {
                 } catch (failure: Exception) {
                     QaLens.log("Frame capture failed: ${failure.message}")
                 } finally {
-                    if (scaled !== bmp) scaled?.recycle()
                     bmp.recycle()
                     handler.post { if (id == lifecycle.sessionId) capturing = false }
                 }
             }
         }
-    }
-
-    private fun scale(bmp: Bitmap): Bitmap {
-        if (bmp.width <= MAX_FRAME_WIDTH) return bmp
-        val ratio = MAX_FRAME_WIDTH.toFloat() / bmp.width
-        return Bitmap.createScaledBitmap(bmp, MAX_FRAME_WIDTH, (bmp.height * ratio).toInt(), true)
     }
 
     private fun finalizeAndShare(video: File?) = finalize(video, share = shareWhenSaved)
@@ -624,6 +625,9 @@ internal object QaLensSessionRecorder {
         val state = QaLens.state.value
         val root = sessionDir ?: return
         val id = lifecycle.sessionId
+        // A manual QaLensRoot integration may never have called QaLens.install. Retain only the
+        // application context, not an Activity, across this deferred UI acknowledgement.
+        val feedbackContext = activityRef?.get()?.applicationContext ?: QaLens.appContext
         val ordinal = ++clipCount
         writer.execute {
             try {
@@ -649,7 +653,15 @@ internal object QaLensSessionRecorder {
                 clipEvidenceBytes += estimated; clipMediaBytes += media
                 synchronized(clips) { clips += Clip(window, safeLabel, dir, captured,
                     captured.applyTo(state), frames, omittedFrames) }
-                handler.post { android.widget.Toast.makeText(QaLens.appContext, QaLens.appContext?.getString(com.qalens.compose.R.string.qalens_clip_marked, seconds) ?: "Clip marked", android.widget.Toast.LENGTH_SHORT).show() }
+                handler.post {
+                    if (id == lifecycle.sessionId && sessionDir == root && QaLens.config.value.enabled) {
+                        feedbackContext?.let { context -> runCatching {
+                            android.widget.Toast.makeText(context,
+                                context.getString(com.qalens.compose.R.string.qalens_clip_marked, seconds),
+                                android.widget.Toast.LENGTH_SHORT).show()
+                        } }
+                    }
+                }
             } catch (failure: Exception) {
                 clipError("Could not mark clip: ${failure.message}")
             }
@@ -658,7 +670,10 @@ internal object QaLensSessionRecorder {
 
     private fun clipError(message: String) {
         QaLens.pushError(ErrorKind.RECORDING, message)
-        handler.post { QaLens.appContext?.let { android.widget.Toast.makeText(it, message, android.widget.Toast.LENGTH_LONG).show() } }
+        val context = activityRef?.get()?.applicationContext ?: QaLens.appContext
+        handler.post { context?.let { runCatching {
+            android.widget.Toast.makeText(it, message, android.widget.Toast.LENGTH_LONG).show()
+        } } }
     }
 
     private fun fileCrc32(file: File): String {

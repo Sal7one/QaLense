@@ -3,8 +3,9 @@
 How the QaLens floating overlay is coloured, sized and spaced, and the evidence behind
 those choices. The implementation source of truth is `QaLensTokens.kt`; this document records
 the design decisions and current adoption. Tokens cover the floating bubble, tester quick-actions
-sheet, and inspect/tag canvases. The visual inspector gained Actions/All/Tagged/Issues filters and
-a selected-node detail card after token adoption, but its full panel is not yet tokenized.
+sheet, evidence panel and inspect/tag canvases. The current task/menu contract is in the
+[mobile overlay guide](MOBILE_OVERLAY.md). The movable inspector retains Actions/All/Tagged/Issues
+filters and selected-node attributes/selectors.
 
 ## The problem this solves
 
@@ -121,15 +122,20 @@ Applied:
 - `QaLensOverlay.kt` — bubble, inspect canvas, tag canvas, panel scrim, tag chip and the
   tag-mode legend now read from tokens. The bubble keeps its original crisp white ring; a
   softened ring measured worse against the cream host and read as a smudge.
-- `QaLensMinimalPanel.kt` — the simplified tester sheet uses the same surfaces and status colors.
+- `QaLensMinimalPanel.kt` — capture/inspect actions and separate evidence/PC/setup destinations.
+- `QaLensInspectorPanel.kt` — five evidence views use the host-selected palette, opaque surfaces
+  and 48 dp transport/navigation buttons. Screen Health, duplicate tools/export panes, opacity/Lock
+  toolbar and hidden docking gestures are removed. Retained older filter/chip controls need further
+  accessibility sizing review; this is not a blanket all-controls certification.
+- `QaLensSelectorTools.kt` — collapsed optional filters; expanded options share the result list's
+  scroll viewport so large fonts and three-button navigation cannot leave results with zero height.
 
 Not yet migrated, in priority order:
 
-1. `QaLensInspectorPanel.kt` — the largest remaining surface to migrate and simplify.
-2. `QaLensControlActivity.kt` — developer setup and configuration.
-3. `QaLensSystemChip.kt` — the recording chip.
+1. `QaLensControlActivity.kt` — developer setup and configuration.
+2. `QaLensSystemChip.kt` — the recording chip.
 
-Until those land, the inspector, Control Room and recording chip still use their own colors and
+Until those land, Control Room and the recording chip still use their own colors and
 sizing. Do not claim the entire QaLens UI is host-adaptive.
 
 
