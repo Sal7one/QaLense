@@ -23,7 +23,7 @@ Default `com.qalens` coordinates do not imply Maven Central publication.
 
 ## Integrate useful local-model evidence
 
-The `lens-2.0` player/desktop can investigate existing recordings with a configured local chat
+The player/desktop can investigate existing recordings with a configured local chat
 server. No new host facade, sample-only service or model dependency is required. The optional replay
 module has normal INTERNET permission; it preserves the host's cleartext/TLS policy. Keep it out of
 production graphs with the other active QA modules. Do not relax host network security globally.
@@ -40,6 +40,33 @@ For host acceptance, record a known bug, pause near it, review the exact text an
 connect an installed local model and follow citations/next checks on phone and desktop. Report
 transport/capture evidence separately from reasoning quality. A model may explain HTTP 503 plus
 buffering while lacking decoder state, retry callbacks or backend evidence; preserve those gaps.
+
+## Optional Design Studio companion
+
+DSH Design Studio has an experimental companion that can follow a component selected in the
+separate QaLens workbench and prepare a reviewed investigation draft. It is **off by default**
+and is not required for QaLens, the Android SDK, the workbench, or ordinary Design Studio use.
+An operator must enable the companion in Design Studio settings and explicitly start or attach
+the workbench and approve phone pairing. Enabling the desktop setting does not install the SDK,
+authorize app instrumentation, or grant permission to send app data to a model.
+
+For setup, privacy, host variants, source attribution and rollback, see the [Design Studio
+integration guide](https://github.com/Sal7one/DSH-Design-Studio/blob/18113fdc4748a2d55a8215166c4dae0e417523b0/docs/QALENS_INTEGRATION.md)
+and its [optional agent skill](https://github.com/Sal7one/DSH-Design-Studio/blob/18113fdc4748a2d55a8215166c4dae0e417523b0/skills/qalens-integration/SKILL.md).
+Check that the installed plugin actually contains this experimental feature; a checkout and a
+published npm package may differ. Pairing a real host and source attribution must be tested with
+the versions the team actually installs.
+
+The auto-tag generator and source-link-enabled SDK are a [separate prototype](https://github.com/Sal7one/QaLensMoreInfo).
+This QaLens checkout does not expose its experimental runtime source references. Without a
+matching source-link-enabled SDK and debug map, a generated tag can at most suggest a source
+candidate; missing information is unavailable, not a verified location. Never assume a source
+map proves the installed APK matches the local build. The prototype is not required for normal
+inspection and must not be added to production variants.
+
+Design Studio's opt-in is a preference, not a security boundary for untrusted local content;
+its integration guide records the existing local API and Appium command limitations. Keep QA
+data and both local tools within the host's trusted environment and review what is sent to a model.
 
 ## A task brief to give an integrating agent
 

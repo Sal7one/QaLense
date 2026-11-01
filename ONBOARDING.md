@@ -17,16 +17,17 @@ analysis services; the included backend is a local development mock.
 | Replay files and manage a QA phone from one window | Python desktop below | Only for phone tools |
 | Add QaLens to your app | SDK setup below, then [integration](integration.md) | Yes |
 | Have an AI agent integrate into an existing app | [AI integration runbook](docs/AI_INTEGRATION.md), [consumer example](integration-tests/consumer/README.md) | For runtime acceptance |
+| Explore a selection in DSH Design Studio | [Optional companion setup](docs/AI_INTEGRATION.md#optional-design-studio-companion) | Yes for live capture |
 | Inspect components or run your processors | Desktop pairing and automation below | Yes for live capture |
 | Change the project | [HANDOVER.md](HANDOVER.md), [CONTRIBUTING.md](CONTRIBUTING.md), [next.md](next.md) | Depends on the change |
 
-Use commands from the repository root unless a step says otherwise. The current development work
-is on `lens-2.0`, based on the latest `dev`; pin an evaluated commit or an internal artifact version for repeatable team builds.
+Use commands from the repository root unless a step says otherwise. Pin an evaluated commit or an
+internal artifact version for repeatable team builds.
 No Maven Central publication is claimed. The default local coordinates are version `0.9.0`;
 that version alone does not identify which Git commit a team published internally.
 
 ```sh
-git clone --branch lens-2.0 https://github.com/Sal7one/QaLense.git
+git clone https://github.com/Sal7one/QaLense.git
 cd QaLense
 ```
 

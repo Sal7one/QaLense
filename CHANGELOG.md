@@ -2,6 +2,12 @@
 
 ## Unreleased — post-0.9.0
 
+### Optional Design Studio integration — 2026-11-01
+
+- Document the separate default-off DSH Design Studio companion, opt-in and privacy boundaries,
+  source-link prototype limitations and outstanding paired-phone acceptance. No SDK code changed.
+- Correct onboarding to use the current default branch rather than a historical feature branch.
+
 ### Lens 2.0 local-model investigation — 2026-10-11
 
 - Add local-model Insights to Android and modern web replay, reused by the Python desktop through

@@ -5,7 +5,7 @@ QA/debug build, inspect screen/network/log context, then export a bug report or 
 recording. Engineers can replay it on Android, in the browser, or inspect it with a Node CLI.
 Release builds use a separate no-op artifact.
 
-**Lens 2.0:** the `lens-2.0` branch adds reviewed local-model investigation on phone, modern web
+**Lens 2.0:** the current source includes reviewed local-model investigation on phone, modern web
 and the embedded Python desktop. Pause at a recorded bug, connect a local model, review the evidence
 and get a QA expected/actual report, cited observations, possible causes and next checks. Send the
 selected investigation from phone to PC for review/reanalysis. See [the workflow and limits](docs/LENS_2.md).
@@ -19,6 +19,10 @@ contracts, then [next.md](next.md) for the backlog.
 **Integrating with an AI agent? Use the [host integration runbook](docs/AI_INTEGRATION.md).** It
 covers discovery, safe variant mapping, real source hooks, phone/PC setup, troubleshooting,
 acceptance and a completion template.
+
+The experimental [DSH Design Studio companion](docs/AI_INTEGRATION.md#optional-design-studio-companion)
+can show a paired QaLens selection alongside a design investigation. It is optional and off by
+default in Design Studio; neither product installs the other automatically.
 
 ## What it does
 

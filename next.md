@@ -1,7 +1,13 @@
 # Current backlog
 
-Updated 2026-10-11. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
+Updated 2026-11-01. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
+
+## Optional Design Studio companion — 2026-11-01
+
+- [ ] Validate an approved phone and host against the actual Design Studio and QaLens versions:
+  approval, live selection, mismatch, disconnect, disabled-by-default behavior and honest source
+  claims. The separate source-link prototype and its experimental SDK require their own evaluation.
 
 ## Lens 2.0 local-model investigation — 2026-10-11
 

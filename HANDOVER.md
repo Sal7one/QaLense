@@ -1,6 +1,6 @@
 # QaLens engineering handover
 
-Updated 2026-10-11. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
+Updated 2026-11-01. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
 the user/integrator overview; [AI integration](docs/AI_INTEGRATION.md) is the host-agent work order;
 [next.md](next.md) is the only current backlog;
 [CONTRIBUTING.md](CONTRIBUTING.md) owns portable build/device commands. This handover records
@@ -16,7 +16,7 @@ Control Room, Compose inspection, observed network/log/data/crash evidence, scre
 and portable `.sal` recordings. Android and web players replay files; a Node CLI reports/compares.
 
 The Python desktop combines existing web replay with adb pairing, a component workbench, saved
-files, trusted processing pipelines and optional phone tools. On `lens-2.0`, Android and shared
+files, trusted processing pipelines and optional phone tools. Android and shared
 web/desktop replay add explicit local-model investigation for recorded-app bugs and current QaLens
 player problems. See [Lens 2.0](docs/LENS_2.md) for setup, evidence boundaries and agent contracts.
 The separate Python backend remains an unauthenticated loopback upload mock with deterministic
@@ -52,6 +52,14 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Optional DSH Design Studio companion — 2026-11-01
+
+Design Studio's experimental, default-off companion is documented in the
+[host-agent runbook](docs/AI_INTEGRATION.md#optional-design-studio-companion). It is a separate
+project and introduces no QaLens SDK dependency or behavior change. The checked-in SDK does not
+contain the separate source-link prototype's runtime source references. The companion's code was
+tested separately; an end-to-end paired-phone run against this SDK revision remains outstanding.
 
 ### Lens 2.0 local-model investigation — 2026-10-11
 
