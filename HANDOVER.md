@@ -1,6 +1,6 @@
 # QaLens engineering handover
 
-Updated 2026-11-01. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
+Updated 2026-11-10. Read this before changing the repository. [ONBOARDING.md](ONBOARDING.md) is
 the user/integrator overview; [AI integration](docs/AI_INTEGRATION.md) is the host-agent work order;
 [next.md](next.md) is the only current backlog;
 [CONTRIBUTING.md](CONTRIBUTING.md) owns portable build/device commands. This handover records
@@ -19,6 +19,10 @@ The Python desktop combines existing web replay with adb pairing, a component wo
 files, trusted processing pipelines and optional phone tools. Android and shared
 web/desktop replay add explicit local-model investigation for recorded-app bugs and current QaLens
 player problems. See [Lens 2.0](docs/LENS_2.md) for setup, evidence boundaries and agent contracts.
+The desktop [inspector MCP](docs/INSPECTOR_MCP.md) shares reviewed developer prompts and scoped
+live app evidence. A local stdio client can reference elements in Landing. Access revokes when
+the phone connection or SDK inspection policy changes. The [QaLens skill](skills/qalens/SKILL.md)
+explains live inspection, replay and host integration.
 The separate Python backend remains an unauthenticated loopback upload mock with deterministic
 verdicts. No hosted AI, multi-tenant company service, Maven Central publication or iOS capture is claimed.
 
@@ -45,6 +49,7 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 | Investigation handoff | Private `QaLensInvestigationReceiver`, `QaLensBridgeInvestigations`; replay `PcInvestigationSender`; desktop `investigations.py`, `investigation-inbox.js` |
 | Investigation contracts/fixtures | `docs/insights-evidence.schema.json`, `docs/insights-report.schema.json`, `docs/insights-transfer.schema.json`, `tools/insights-tests/` |
 | Desktop/automation | `tools/local-bridge/server.py`, `workbench.py`, `desktop.py`, `scrcpy_mirror.py`, `scrcpy-stream.js`, `diagnostics.js`, `process.py`, `recording-transfer.js` |
+| Live developer handoff | `tools/local-bridge/agent-workbench.js`, `agent_bridge.py`, `mcp_server.py`; `skills/qalens/SKILL.md` |
 | Upload test service | `backend/server.py`, `backend/tests/test_backend.py` |
 | Executed device fixtures | `sample-app/src/androidTest/.../RecordingRetentionInstrumentation.kt` and focused checks |
 
@@ -52,6 +57,20 @@ undiagnosed. Do not infer that emulator capture proves that consuming app works.
 assuming a named class or public signature is unchanged.
 
 ## Latest local verification
+
+### Desktop inspector MCP — 2026-11-10
+
+The standard-library desktop exposes eight local stdio MCP tools. The agent can read a scoped
+Compose tree and reviewed requests, and queue a desktop reference. Screenshots use the SDK-masked
+path. Optional diagnostics project recent logs and network metadata. The SDK health and snapshot
+contracts provide an inspection-policy revision so older captures cannot be read after a policy
+change. Run the current SDK for prompt review and MCP.
+
+The sample debug/test APKs passed `test_device_pairing.py` on an API 35 emulator with approval, live
+tree, reviewed prompt, reference, masked PNG, diagnostics, scrcpy and revocation. Desktop Python
+and JavaScript regressions cover policy changes and stale replies. The local adapter fixture
+verifies delivery to a trusted argv. Live browser acceptance and an external team's harness
+remain separate checks.
 
 ### Optional DSH Design Studio companion — 2026-11-01
 

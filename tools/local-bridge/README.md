@@ -9,6 +9,11 @@ screenshots from Landing. Search live network/logs, compare decoded app values a
 from Data tools. Python standard library only; no Appium server or extra Android
 library is required. Release builds still use `qalens-noop`.
 
+In **Landing**, select an element from the mirror or tree and click **Ask agent**. Review a bug,
+design or UI change request before copying it, sharing it with a local MCP client or delivering it
+through a configured harness adapter. **Agent access** is opt-in for the paired app.
+See [inspector MCP setup](../../docs/INSPECTOR_MCP.md) and the [QaLens skill](../../skills/qalens/SKILL.md).
+
 Lens 2.0 adds **Replay → Insights** through the existing modern web player. Open a saved `.sal`,
 pause at the bug, connect a local chat model and review the evidence before Analyze. The Python
 service handles OpenAI-compatible/Ollama requests with bounded async jobs and cancellation without

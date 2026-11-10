@@ -1,7 +1,16 @@
 # Current backlog
 
-Updated 2026-11-01. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
+Updated 2026-11-10. This is the only current backlog. [HANDOVER.md](HANDOVER.md) owns verified
 baselines and project context. Older changelog entries are historical, not uncompleted work.
+
+## Desktop inspector MCP
+
+- [x] Review and share a developer prompt for a selected Compose element. Add scoped stdio
+  inspection, desktop references, optional masked images/diagnostics and a trusted handoff adapter.
+- [x] Cover session and policy revocation, exact reviewed prompt delivery, optional evidence and
+  stale targets in desktop regressions. Exercise real phone approval, MCP and scrcpy on the sample.
+- [ ] Verify live browser layout and input on the workbench and try direct handoff with an external
+  team's actual harness. The adapter fixture verifies JSON delivery to a local process.
 
 ## Optional Design Studio companion — 2026-11-01
 

@@ -28,8 +28,9 @@ internal object QaLensBridgeDataTools {
     private var policyRevision = 0L
 
     @Synchronized fun policyId(expected: QaLensConfig = QaLens.config.value): Long {
-        if (expected != QaLens.config.value) throw QaLensBridgeFailure(409, "Privacy settings changed; refresh")
-        if (policy != QaLens.config.value) { policy = QaLens.config.value; policyRevision++ }
+        val current = QaLens.config.value
+        if (expected != current) throw QaLensBridgeFailure(409, "Privacy settings changed; refresh")
+        if (policy != current) { policy = current; policyRevision++ }
         return policyRevision
     }
 

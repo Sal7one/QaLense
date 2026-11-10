@@ -19,6 +19,7 @@ analysis services; the included backend is a local development mock.
 | Have an AI agent integrate into an existing app | [AI integration runbook](docs/AI_INTEGRATION.md), [consumer example](integration-tests/consumer/README.md) | For runtime acceptance |
 | Explore a selection in DSH Design Studio | [Optional companion setup](docs/AI_INTEGRATION.md#optional-design-studio-companion) | Yes for live capture |
 | Inspect components or run your processors | Desktop pairing and automation below | Yes for live capture |
+| Ask a coding agent to investigate or change a selected element | [Inspector MCP](docs/INSPECTOR_MCP.md), [QaLens skill](skills/qalens/SKILL.md) | Yes |
 | Change the project | [HANDOVER.md](HANDOVER.md), [CONTRIBUTING.md](CONTRIBUTING.md), [next.md](next.md) | Depends on the change |
 
 Use commands from the repository root unless a step says otherwise. Pin an evaluated commit or an

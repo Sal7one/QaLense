@@ -13,6 +13,7 @@ let lastPreviewRequest = 0, treeRefreshTimer = null;
 let captureChecked = false, captureIssue = '';
 let diagnostics = null;
 let investigationInbox = null;
+let agentWorkspace = null, agentReference = null;
 let mirrorStream = null, mirrorStartingAt = null;
 const legacyMirror = () => workbench?.mirrorBackend === 'legacy';
 const status = text => { $('status').textContent = text; };
@@ -68,6 +69,7 @@ async function refresh() {
   render(); details();
   renderRoles();
   if (selected && !liveSelecting) await choose(selected, 'refresh');
+  else componentButtons();
 }
 function filtered() {
   const needle = $('search').value.trim().toLowerCase(), action = $('action-filter').value, role = $('role-filter').value;
@@ -84,6 +86,14 @@ function renderRoles() {
 }
 function render() {
   $('tree').replaceChildren(); $('map').replaceChildren();
+  const referenced = agentReference && QaLensAgents.match(agentReference, snapshot);
+  if (agentWorkspace) {
+    $('agent-reference').hidden = !agentReference;
+    if (agentReference) {
+      const {node, note} = agentReference;
+      $('agent-reference-note').textContent = [node.tag || node.label || node.role || 'Element', note].filter(Boolean).join(' · ');
+    }
+  }
   $('search-count').textContent = snapshot ? `${filtered().length} matches / ${snapshot.nodes.length} visible elements${snapshot.omittedNodes ? ` · ${snapshot.omittedNodes} omitted` : ''}` : 'Connect and refresh to search.';
   if (!snapshot) { clearSelectors(); return; }
   const viewport = snapshot.screenViewport || snapshot.viewport;
@@ -94,13 +104,14 @@ function render() {
   for (const node of filtered()) {
     let depth = 0, ancestor = node.parentId; const seen = new Set();
     while (ancestor && !seen.has(ancestor) && depth < 12) { seen.add(ancestor); depth++; ancestor = parents.get(ancestor); }
-    const element = button(`${node.tag ? `[${node.tag}] ` : ''}${node.label} · ${node.actions.join(', ') || node.role || 'node'}`, () => choose(node), $('tree'), `node${selected?.id === node.id ? ' selected' : ''}`);
+    const element = button(`${node.tag ? `[${node.tag}] ` : ''}${node.label} · ${node.actions.join(', ') || node.role || 'node'}`, () => choose(node), $('tree'), `node${selected?.id === node.id ? ' selected' : ''}${referenced === node ? ' agent-highlight' : ''}`);
     element.style.paddingInlineStart = `${10 + depth * 12}px`;
   }
   // Inspection exposes the whole visible tree even while the side tree is filtered.
   for (const node of snapshot.nodes) {
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect'), b = node.bounds;
-    rect.setAttribute('x', b.left + (snapshot.viewport.originX || 0)); rect.setAttribute('y', b.top + (snapshot.viewport.originY || 0)); rect.setAttribute('width', b.right-b.left); rect.setAttribute('height', b.bottom-b.top); rect.setAttribute('class', selected?.id === node.id ? 'selected' : '');
+    rect.setAttribute('x', b.left + (snapshot.viewport.originX || 0)); rect.setAttribute('y', b.top + (snapshot.viewport.originY || 0)); rect.setAttribute('width', b.right-b.left); rect.setAttribute('height', b.bottom-b.top);
+    rect.setAttribute('class', `${selected?.id === node.id ? 'selected' : ''}${referenced === node ? ' agent-highlight' : ''}`);
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = node.tag || node.label;
     rect.append(title); rect.onclick = event => {
       // Live preview resolves the smallest current element once in the parent click handler.
@@ -854,6 +865,7 @@ function connectionButtons() {
   $('auto-recordings').disabled = !ready;
   for (const item of document.querySelectorAll('#landing [data-adb]')) item.disabled = !ready || busy || mirrorInputBusy || mirrorInspect || mirrorMode !== 'control';
   captureUi();
+  agentWorkspace?.sync();
 }
 
 $('auto-connect').onchange = () => perform(async () => {
@@ -1005,3 +1017,19 @@ mirrorUi(); captureUi();
 if (typeof QaLensDiagnostics !== 'undefined') diagnostics = QaLensDiagnostics.install({document, api,
   connection: () => ({id: workbench?.connectionId, connected: !!workbench?.connected && (!workbench.phase || workbench.phase === 'connected')}),
   workBusy: () => busy || mirrorInputBusy, navigate: tab});
+if (typeof QaLensAgents !== 'undefined') {
+  agentWorkspace = QaLensAgents.install({document, api, context: () => ({
+    connectionId: workbench?.connectionId, ready: workbench?.connected && workbench.phase === 'connected', busy, snapshot, selected,
+  }), focusChanged: reference => { agentReference = reference; render(); },
+  showElement: reference => perform(async () => {
+    const fresh = await api('snapshot');
+    const node = QaLensAgents.match(reference, fresh);
+    if (!node || reference !== agentReference || fresh.connectionId !== workbench?.connectionId) {
+      throw Error('The referenced element moved or expired. Ask the agent to refresh the tree.');
+    }
+    snapshot = fresh;
+    renderRoles();
+    await choose(node, 'agent');
+  })});
+  setInterval(() => { if (session) void agentWorkspace.poll(); }, 1500);
+}

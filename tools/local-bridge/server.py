@@ -29,25 +29,37 @@ import mimetypes
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 from device_http import urlopen
+from agent_bridge import AgentBridge, AgentError, Handoff
 
 MAX_BODY = 16_384
 MAX_RESPONSE = 4 * 1024 * 1024
+AGENT_METHODS = {
+    "/api/agent/status": "GET",
+    "/api/agent/access": "POST",
+    "/api/agent/draft": "POST",
+    "/api/agent/send": "POST",
+    "/api/agent/tool": "POST",
+}
 
 
 class BridgeServer(ThreadingHTTPServer):
     daemon_threads = True
-    def __init__(self, address, device_port, token, workbench=None):
+    def __init__(self, address, device_port, token, workbench=None, agent_handoff=None):
         # TCPServer calls server_close itself if bind fails, before construction completes.
         self.insights = None
+        self.agents = None
         super().__init__(address, Handler)
         self.device_port = device_port
         self.token = token
         self.workbench = workbench
         self.insights = insights.Service() if workbench else None
+        self.agents = AgentBridge(self, agent_handoff) if workbench else None
         if workbench and token:
             workbench.phase = "connected"; workbench.approved = True
 
     def server_close(self):
+        if self.agents:
+            self.agents.clear()
         if self.insights:
             self.insights.close()
         super().server_close()
@@ -103,6 +115,7 @@ class Handler(BaseHTTPRequestHandler):
         assets["/diagnostics.js"] = ("diagnostics.js", "text/javascript; charset=utf-8")
         assets["/scrcpy-stream.js"] = ("scrcpy-stream.js", "text/javascript; charset=utf-8")
         assets["/investigation-inbox.js"] = ("investigation-inbox.js", "text/javascript; charset=utf-8")
+        assets["/agent-workbench.js"] = ("agent-workbench.js", "text/javascript; charset=utf-8")
         if self.command == "GET" and self.path in assets:
             name, mime = assets[self.path]
             return self.reply(200, Path(__file__).with_name(name).read_bytes(), mime)
@@ -116,12 +129,20 @@ class Handler(BaseHTTPRequestHandler):
         binary = parsed.path == "/api/recordings/file"
         insight_route = bench and parsed.path in INSIGHT_ROUTES
         investigation_route = bench and parsed.path in INVESTIGATION_ROUTES
-        if not route and not (bench and (self.path in WORKBENCH_ROUTES or binary or insight_route or investigation_route)):
+        agent_method = AGENT_METHODS.get(self.path) if self.server.agents else None
+        agent_tool = agent_method and self.path == "/api/agent/tool"
+        if not route and not (bench and (self.path in WORKBENCH_ROUTES or binary or insight_route or investigation_route or agent_method)):
             return self.reply(404, {"ok": False, "error": "Unknown endpoint"})
         desktop = bench and hmac.compare_digest(self.headers.get("X-Qalens-Session", "").encode(), bench.session.encode())
         device = self.server.token and hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {self.server.token}".encode())
-        if not (desktop or device):
+        if agent_tool and self.headers.get("Origin") is not None:
+            return self.reply(403, {"ok": False, "error": "Use a local MCP client to call agent tools"})
+        if not (desktop or device or agent_tool):
             return self.reply(401, {"ok": False, "error": "Reload the desktop page to renew its session. Scripts require a valid pairing token."})
+        if agent_method and not (desktop or agent_tool):
+            return self.reply(401, {"ok": False, "error": "Open the desktop page to manage agent access"})
+        if agent_method and self.command != agent_method:
+            return self.reply(405, {"ok": False, "error": "Use the documented agent endpoint method"})
         if insight_route and not desktop:
             return self.reply(401, {"ok": False, "error": "Open the desktop page to analyze evidence with a local model"})
         if insight_route and (self.command, parsed.path) not in INSIGHT_METHODS:
@@ -201,6 +222,8 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TimeoutError, RecursionError):
                 return self.reply(400, {"ok": False, "error": "Invalid command JSON"})
         try:
+            if agent_method:
+                return self.agent_request(json.loads(body) if body else {})
             if investigation_route:
                 return self.investigations_request(parsed, json.loads(body) if body else {})
             if insight_route:
@@ -245,12 +268,29 @@ class Handler(BaseHTTPRequestHandler):
                                "documents": list(bench.pending.values()), "omittedPreviews": bench.preview_dropped,
                                "connectionId": bench.connection_id}
                 return self.reply(code, payload)
+        except AgentError as error:
+            return self.reply(error.status, {"ok": False, "error": str(error)})
         except ValueError as error:
             return self.reply(400, {"ok": False, "error": str(error)[:256]})
         except (KeyError, TypeError, RecursionError):
             return self.reply(400, {"ok": False, "error": "Invalid component, profile or request; check required fields and limits"})
         except (OSError, TimeoutError):
             return self.reply(500, {"ok": False, "error": "Local storage unavailable; nothing was confirmed saved"})
+
+    def agent_request(self, body):
+        agents = self.server.agents
+        connection = self.headers.get("X-Qalens-Connection", "")
+        if self.path == "/api/agent/tool":
+            result = agents.call(self.headers.get("Authorization", ""), body, self.proxy, self.proxy_screenshot)
+            if isinstance(result, bytes):
+                return self.reply(200, result, "image/png")
+            return self.reply(200, {"ok": True, "result": result})
+        if self.path == "/api/agent/status":
+            return self.reply(200, agents.status())
+        if self.path == "/api/agent/access":
+            return self.reply(200, agents.access(body, connection, self.proxy))
+        action = agents.prepare if self.path == "/api/agent/draft" else agents.send
+        return self.reply(200, action(body, connection, self.proxy))
 
     def proxy(self, route, body, method, phone=None, strict=False, response_limit=MAX_RESPONSE):
         device_port, token = phone if phone else (self.server.device_port, self.server.token)
@@ -353,9 +393,10 @@ class Handler(BaseHTTPRequestHandler):
         yield first
         yield from packets
 
-    def proxy_screenshot(self, body):
-        request = Request(f"http://127.0.0.1:{self.server.device_port}/v1/screenshot", data=body,
-                          headers={"Authorization": f"Bearer {self.server.token}", "Content-Type": "application/json"}, method="POST")
+    def proxy_screenshot(self, body, phone=None, response_limit=16 * 1024 * 1024):
+        port, token = phone or (self.server.device_port, self.server.token)
+        request = Request(f"http://127.0.0.1:{port}/v1/screenshot", data=body,
+                          headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, method="POST")
         try:
             try: response = urlopen(request, timeout=5)
             except HTTPError as error: response = error
@@ -363,8 +404,8 @@ class Handler(BaseHTTPRequestHandler):
                 if response.code != 200:
                     payload = json.loads(response.read(MAX_RESPONSE + 1))
                     return response.code, payload, "application/json; charset=utf-8"
-                pixels = response.read(16 * 1024 * 1024 + 1)
-                if len(pixels) > 16 * 1024 * 1024: raise ValueError("Screenshot exceeds 16 MiB")
+                pixels = response.read(response_limit + 1)
+                if len(pixels) > response_limit: raise ValueError("Screenshot exceeds the response limit")
                 declared = response.headers.get("Content-Length")
                 if declared is not None and int(declared) != len(pixels): raise ValueError("Screenshot transfer interrupted")
                 png_size(pixels)
@@ -491,6 +532,7 @@ def main(argv=None):
     parser.add_argument("--gui", action="store_true", help="Start unpaired; choose a device and profile in the browser")
     parser.add_argument("--data-dir", default="~/.qalens/bridge", help="Explicitly saved components, profiles and pipeline results")
     parser.add_argument("--pipeline-config", help="Trusted local JSON pipeline configuration (never editable through HTTP)")
+    parser.add_argument("--agent-handoff", help="Trusted local JSON config for optional direct developer-prompt delivery")
     args = parser.parse_args(argv)
     if not ((args.port == 0 or 1024 <= args.port <= 65535) and 1024 <= args.device_port <= 65535):
         parser.error("PC port must be 0 or 1024–65535; device port must be 1024–65535")
@@ -501,6 +543,10 @@ def main(argv=None):
         signal.signal(signal.SIGHUP, stop_on_signal)
     try:
         try:
+            handoff = Handoff.load(args.agent_handoff) if args.agent_handoff else None
+        except (OSError, ValueError, RecursionError):
+            parser.exit(1, "QaLens could not load --agent-handoff. Use a readable JSON file with a name and a trusted argv array.\n")
+        try:
             bench = Workbench(args.data_dir, args.adb, args.pipeline_config)
         except StorageUnavailable as error:
             parser.exit(1, storage_error(error, argv))
@@ -508,7 +554,7 @@ def main(argv=None):
             parser.exit(1, f"QaLens could not start: workspace setup failed: {error}\nCheck --pipeline-config if supplied.\n")
         # Bind before prompting for credentials or creating any device forward.
         try:
-            server = BridgeServer(("127.0.0.1", args.port), None, None, bench)
+            server = BridgeServer(("127.0.0.1", args.port), None, None, bench, handoff)
         except OSError as error:
             if error.errno == errno.EADDRINUSE:
                 shell = " (PowerShell)" if os.name == "nt" else ""

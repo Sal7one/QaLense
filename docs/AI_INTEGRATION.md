@@ -41,6 +41,13 @@ connect an installed local model and follow citations/next checks on phone and d
 transport/capture evidence separately from reasoning quality. A model may explain HTTP 503 plus
 buffering while lacking decoder state, retry callbacks or backend evidence; preserve those gaps.
 
+## Work on the live app with an agent
+
+Use [inspector MCP](INSPECTOR_MCP.md) to review a prompt for a selected Compose element and share
+it with a local coding agent. The agent can inspect the approved app and highlight matching live
+elements in the desktop. Use the [QaLens skill](../skills/qalens/SKILL.md) for this workflow and
+for routing between live inspection, replay and SDK integration.
+
 ## Optional Design Studio companion
 
 DSH Design Studio has an experimental companion that can follow a component selected in the

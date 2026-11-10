@@ -53,11 +53,13 @@ jobs:
           python3 tools/local-bridge/test_scrcpy.py
           python3 tools/local-bridge/test_insights.py
           python3 tools/local-bridge/test_investigations.py
+          python3 tools/local-bridge/test_agent_mcp.py
           node --check tools/local-bridge/app.js
           node --check tools/local-bridge/mirror-controls.js
           node --check tools/local-bridge/diagnostics.js
           node --check tools/local-bridge/scrcpy-stream.js
           node --check tools/local-bridge/investigation-inbox.js
+          node --check tools/local-bridge/agent-workbench.js
           node tools/local-bridge/test_recording_transfer.js
           node tools/local-bridge/test_polling.js
           node tools/local-bridge/test_selectors.js
@@ -65,6 +67,7 @@ jobs:
           node tools/local-bridge/test_diagnostics.js
           node tools/local-bridge/test_scrcpy_stream.js
           node tools/local-bridge/test_investigation_inbox.js
+          node tools/local-bridge/test_agent_workbench.js
       - name: Cross-surface local-model HTTP contracts
         run: python3 tools/insights-tests/test_e2e.py
       - name: Backend regression tests

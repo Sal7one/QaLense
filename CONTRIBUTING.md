@@ -35,12 +35,14 @@ python3 tools/local-bridge/test_controls.py
 python3 tools/local-bridge/test_scrcpy.py
 python3 tools/local-bridge/test_insights.py
 python3 tools/local-bridge/test_investigations.py
+python3 tools/local-bridge/test_agent_mcp.py
 python3 tools/insights-tests/test_e2e.py
 node --check tools/local-bridge/app.js
 node --check tools/local-bridge/mirror-controls.js
 node --check tools/local-bridge/diagnostics.js
 node --check tools/local-bridge/scrcpy-stream.js
 node --check tools/local-bridge/investigation-inbox.js
+node --check tools/local-bridge/agent-workbench.js
 node tools/local-bridge/test_recording_transfer.js
 node tools/local-bridge/test_polling.js
 node tools/local-bridge/test_selectors.js
@@ -48,6 +50,7 @@ node tools/local-bridge/test_mirror.js
 node tools/local-bridge/test_diagnostics.js
 node tools/local-bridge/test_scrcpy_stream.js
 node tools/local-bridge/test_investigation_inbox.js
+node tools/local-bridge/test_agent_workbench.js
 ```
 
 The consumer fixture resolves normal `com.qalens:*` coordinates through `includeBuild`; it catches
@@ -412,7 +415,8 @@ python3 tools/local-bridge/test_device_pairing.py emulator-SERIAL --device-port 
 The latter creates its own temporary server/storage/forward and uses actual SDK phone approval on
 8767, exact-request status/port and authenticated lightweight health. It removes its forward during
 approval to require truthful `connecting` and recovery without reapproval, then checks attributes/
-save/dedup, default scrcpy H.264, forward repair, paused-host Send/recording copies and revoked access.
+save/dedup, stdio MCP tree/reviewed prompt/highlight/masked PNG/diagnostics, default scrcpy H.264,
+forward repair, paused-host Send/recording copies and revoked access.
 The focused `pcPairingOnly` runner additionally holds main busy to verify independent health,
 recording-control timeout and sender/privacy gates. These do not test browser rendering; verify
 Landing separately in the GUI.

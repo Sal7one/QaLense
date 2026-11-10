@@ -20,6 +20,10 @@ contracts, then [next.md](next.md) for the backlog.
 covers discovery, safe variant mapping, real source hooks, phone/PC setup, troubleshooting,
 acceptance and a completion template.
 
+For live UI work, the desktop [inspector MCP](docs/INSPECTOR_MCP.md) lets developers share a
+reviewed request from a selected element. Their agent can inspect the tree and point to elements in
+the workbench. The [QaLens skill](skills/qalens/SKILL.md) covers live inspection, replay and host setup.
+
 The experimental [DSH Design Studio companion](docs/AI_INTEGRATION.md#optional-design-studio-companion)
 can show a paired QaLens selection alongside a design investigation. It is optional and off by
 default in Design Studio; neither product installs the other automatically.

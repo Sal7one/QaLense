@@ -260,6 +260,9 @@ class Workbench:
             self.connection_notice = "Disconnected. Choose your app and Connect."
             self.desktop.stop_preview()
             self.investigations.clear()
+            agents = getattr(server, "agents", None)
+            if agents:
+                agents.clear()
             self.connection_id = secrets.token_hex(16)
 
     def apps(self, serial):
@@ -353,6 +356,9 @@ class Workbench:
                             value.get("package") != self.connection["package"] or value.get("port") != self.connection["devicePort"]):
                             raise ValueError("Unexpected bridge identity")
                         self.health_supported = True
+                        agents = getattr(server, "agents", None)
+                        if agents:
+                            agents.observe_policy(value)
                     return
             except HTTPError as error:
                 if route != "/v1/health" or error.code != 404: raise

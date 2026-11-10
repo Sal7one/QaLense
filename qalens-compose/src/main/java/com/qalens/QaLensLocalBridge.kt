@@ -150,8 +150,11 @@ internal object QaLensLocalBridge {
                 request.method == "GET" && request.path == "/v1/health" -> {
                     // Approval/transport must not depend on host resume, main-thread work or disk.
                     requireSession(generation)
+                    val config = QaLens.config.value
                     mapOf("ok" to true, "schema" to "qalens.bridge.health", "version" to 1,
-                        "package" to QaLens.appContext?.packageName, "port" to pairing.value?.port)
+                        "package" to QaLens.appContext?.packageName, "port" to pairing.value?.port,
+                        "semanticsEnabled" to config.enableSemanticsReflection,
+                        "policyId" to QaLensBridgeDataTools.policyId(config))
                 }
                 request.method == "GET" && request.path == "/v1/recordings" -> {
                     if (generation != epoch || !QaLens.config.value.enabled) throw QaLensBridgeFailure(503, "Bridge stopped")
@@ -356,6 +359,7 @@ internal object QaLensLocalBridge {
     }
 
     private suspend fun snapshot(generation: Long): Map<String, Any?> {
+        val config = QaLens.config.value
         val result = onHost<Map<String, Any?>>(generation) { activity ->
             val (nodes, raw) = live(activity)
             val included = nodes.take(1_000).map { it.id }.toSet()
@@ -386,7 +390,8 @@ internal object QaLensLocalBridge {
                         "actions" to semantic?.let(::actions).orEmpty())
                 })
         }
-        return sanitize(result)
+        return sanitize(result, config).also { requireSession(generation) } +
+            ("policyId" to QaLensBridgeDataTools.policyId(config))
     }
 
     private fun actions(node: SemanticsNode): List<String> = buildList {

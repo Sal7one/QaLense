@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Opt-in real API36 sample fixture: phone approval, screen PNG, attributes and owned forward repair.
+"""Opt-in sample fixture: phone approval, inspector MCP, attributes and owned forward repair.
 Requires installed sample/test APKs; only run on a disposable emulator. Not part of test discovery.
 """
 import argparse
+from contextlib import ExitStack
 import json
 from pathlib import Path
 import secrets
@@ -17,6 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from workbench import Workbench
 from server import BridgeServer
+from test_agent_mcp import MCP
 
 
 def main():
@@ -38,7 +40,7 @@ def main():
             except (subprocess.CalledProcessError, URLError): pass
             time.sleep(.2)
         raise AssertionError(message)
-    with tempfile.TemporaryDirectory(prefix="qalens-pairing-") as directory:
+    with tempfile.TemporaryDirectory(prefix="qalens-pairing-") as directory, ExitStack() as clients:
         bench = Workbench(directory, adb)
         server = BridgeServer(("127.0.0.1", 0), None, None, bench)
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -80,6 +82,22 @@ def main():
             assert bench.health_supported is True
             snapshot = api("snapshot")
             node = next(n for n in snapshot["nodes"] if n["tag"] == "home.total.balance")
+            access = api("agent/access", {"enabled": True, "screenshots": True, "diagnostics": True})
+            config = access["config"]["mcpServers"]["qalens"]
+            agent = clients.enter_context(MCP(config["command"], config["args"]))
+            tree = agent.result("qalens_tree", query="home.total.balance")
+            assert tree["package"] == app["package"]
+            assert node["id"] in {match["id"] for match in tree["nodes"]}
+            selected = agent.result("qalens_element", snapshotId=tree["snapshotId"], nodeId=node["id"])
+            assert selected["element"]["tag"] == node["tag"]
+            draft = api("agent/draft", {"nodeId": node["id"], "task": "design", "intent": "Check balance layout.",
+                "target": {"screen": snapshot.get("screen"), "route": snapshot.get("route"), "element": node}})["request"]
+            assert api("agent/send", {"id": draft["id"]})["delivery"] == "mcp"
+            assert agent.result("qalens_get_request", requestId=draft["id"])["prompt"] == draft["prompt"]
+            agent.result("qalens_highlight", snapshotId=tree["snapshotId"], nodeId=node["id"], note="Balance layout")
+            assert api("agent/status")["focus"]["node"]["id"] == node["id"]
+            assert agent.tool("qalens_screenshot")["content"][0]["mimeType"] == "image/png"
+            assert agent.result("qalens_diagnostics", kind="logs")["kind"] == "logs"
             document = api("component", {"id":node["id"]})["document"]
             assert document["content"]["component"]["attributes"]
             assert api("save", {"hash":document["hash"]})["ok"]
@@ -117,7 +135,8 @@ def main():
             signal("done")
             output, _ = fixture.communicate(timeout=15)
             assert "OK:" in output, output
-            print(f"PASS: real phone approval on port {args.device_port}, missing-forward approval handoff/recovery, authenticated lightweight health, tree/attributes/save, scrcpy stream, forward repair, paused-host Send/recording copies and auth revocation")
+            assert agent.tool("qalens_tree")["isError"]
+            print(f"PASS: real phone approval on port {args.device_port}, missing-forward approval handoff/recovery, authenticated lightweight health, MCP tree/prompt/reference/screenshot/diagnostics/revocation, tree/attributes/save, scrcpy stream, forward repair, paused-host Send/recording copies and auth revocation")
         finally:
             server.shutdown(); server.server_close(); bench.close(server)
             if fixture and fixture.poll() is None:

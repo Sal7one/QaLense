@@ -2,6 +2,15 @@
 
 ## Unreleased — post-0.9.0
 
+### Desktop inspector MCP — 2026-11-10
+
+- Add **Ask agent** to the selected-element panel with prompt review, clipboard and MCP sharing.
+  A trusted local adapter can accept the same request from an explicit **Send** action.
+- Add opt-in stdio tools for the approved app's Compose tree, reviewed requests and references in
+  Landing. Masked screenshots and recent redacted diagnostics have separate controls.
+- Bind access to the approved phone and current SDK inspection policy. Add emulator and local
+  regression coverage, client setup and a reusable QaLens skill.
+
 ### Optional Design Studio integration — 2026-11-01
 
 - Document the separate default-off DSH Design Studio companion, opt-in and privacy boundaries,
